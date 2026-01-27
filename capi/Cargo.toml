@@ -1,0 +1,14 @@
+[package]
+name = "wef"
+version = "0.1.0"
+edition = "2021"
+description = "Web embedded framework"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+
+[build-dependencies]
+bindgen = { version = "0.71", features = ["runtime"] }

@@ -1,0 +1,11 @@
+[package]
+name = "hello_runtime"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wef = { path = "../../capi" }
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
