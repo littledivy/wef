@@ -1,0 +1,82 @@
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
+
+#ifndef WEF_RUNTIME_LOADER_H_
+#define WEF_RUNTIME_LOADER_H_
+
+#include <string>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <map>
+
+#include "include/cef_browser.h"
+#include "include/cef_values.h"
+#include <wef.h>
+
+struct wef_value {
+  CefRefPtr<CefValue> value;
+  bool is_callback;
+  uint64_t callback_id;
+
+  wef_value() : is_callback(false), callback_id(0) {}
+  explicit wef_value(CefRefPtr<CefValue> v) : value(v), is_callback(false), callback_id(0) {}
+  static wef_value* CreateCallback(uint64_t id) {
+    wef_value* v = new wef_value();
+    v->is_callback = true;
+    v->callback_id = id;
+    return v;
+  }
+};
+
+class RuntimeLoader {
+ public:
+  static RuntimeLoader* GetInstance();
+
+  bool Load(const std::string& path);
+
+  bool Start();
+
+  void Shutdown();
+
+  void SetBrowser(CefRefPtr<CefBrowser> browser);
+
+  CefRefPtr<CefBrowser> GetBrowser();
+
+  void OnJsCall(uint64_t call_id, const std::string& method_path,
+                CefRefPtr<CefListValue> args);
+
+  wef_js_call_fn GetJsCallHandler() const { return js_call_handler_; }
+  void* GetJsCallUserData() const { return js_call_user_data_; }
+
+  void SetJsCallHandler(wef_js_call_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(handler_mutex_);
+    js_call_handler_ = handler;
+    js_call_user_data_ = user_data;
+  }
+
+ private:
+  RuntimeLoader();
+  ~RuntimeLoader();
+
+  void RuntimeThread();
+  void InitializeBackendApi();
+
+  void* library_handle_ = nullptr;
+  wef_runtime_init_fn init_fn_ = nullptr;
+  wef_runtime_start_fn start_fn_ = nullptr;
+  wef_runtime_shutdown_fn shutdown_fn_ = nullptr;
+
+  std::thread runtime_thread_;
+  std::atomic<bool> running_{false};
+
+  CefRefPtr<CefBrowser> browser_;
+  wef_backend_api_t backend_api_;
+
+  wef_js_call_fn js_call_handler_ = nullptr;
+  void* js_call_user_data_ = nullptr;
+  std::mutex handler_mutex_;
+
+  static RuntimeLoader* instance_;
+};
+
+#endif

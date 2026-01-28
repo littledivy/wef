@@ -1,16 +1,4 @@
-// Copyright 2023-2026 Divy Srivastava <dj.srivastava23@gmail.com>
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
@@ -25,19 +13,19 @@ mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub const DD_API_VERSION: u32 = 1;
-pub type DdValue = ffi::dd_value_t;
-pub type DdBackendApi = ffi::dd_backend_api_t;
+pub const WEF_API_VERSION: u32 = 1;
+pub type WefValue = ffi::wef_value_t;
+pub type WefBackendApi = ffi::wef_backend_api_t;
 
-unsafe impl Send for DdBackendApi {}
-unsafe impl Sync for DdBackendApi {}
+unsafe impl Send for WefBackendApi {}
+unsafe impl Sync for WefBackendApi {}
 
-static BACKEND_API: OnceLock<&'static DdBackendApi> = OnceLock::new();
+static BACKEND_API: OnceLock<&'static WefBackendApi> = OnceLock::new();
 static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
 static BINDINGS: OnceLock<Mutex<HashMap<String, Box<dyn Fn(JsCall) + Send + Sync>>>> =
     OnceLock::new();
 
-fn api() -> &'static DdBackendApi {
+fn api() -> &'static WefBackendApi {
     BACKEND_API.get().expect("Backend API not initialized")
 }
 
@@ -45,15 +33,15 @@ fn bindings() -> &'static Mutex<HashMap<String, Box<dyn Fn(JsCall) + Send + Sync
     BINDINGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-pub fn init_api(api: *const DdBackendApi) -> c_int {
+pub fn init_api(api: *const WefBackendApi) -> c_int {
     if api.is_null() {
         return -1;
     }
-    let api_ref: &'static DdBackendApi = unsafe { &*api };
-    if api_ref.version != DD_API_VERSION {
+    let api_ref: &'static WefBackendApi = unsafe { &*api };
+    if api_ref.version != WEF_API_VERSION {
         eprintln!(
             "API version mismatch: expected {}, got {}",
-            DD_API_VERSION, api_ref.version
+            WEF_API_VERSION, api_ref.version
         );
         return -2;
     }
@@ -83,7 +71,7 @@ pub enum Value {
 }
 
 impl Value {
-    pub unsafe fn from_raw(ptr: *mut DdValue) -> Option<Self> {
+    pub unsafe fn from_raw(ptr: *mut WefValue) -> Option<Self> {
         if ptr.is_null() {
             return None;
         }
@@ -173,7 +161,7 @@ impl Value {
         Some(Value::Null)
     }
 
-    pub fn to_raw(&self) -> *mut DdValue {
+    pub fn to_raw(&self) -> *mut WefValue {
         let api = api();
         let bd = api.backend_data;
 
@@ -311,7 +299,7 @@ unsafe extern "C" fn js_call_handler(
     _user_data: *mut c_void,
     call_id: u64,
     method_path: *const c_char,
-    args: *mut DdValue,
+    args: *mut WefValue,
 ) {
     let method = if method_path.is_null() {
         String::new()
@@ -463,19 +451,19 @@ where
 macro_rules! main {
     ($main_fn:expr) => {
         #[no_mangle]
-        pub extern "C" fn dd_runtime_init(api: *const $crate::DdBackendApi) -> std::ffi::c_int {
+        pub extern "C" fn wef_runtime_init(api: *const $crate::WefBackendApi) -> std::ffi::c_int {
             $crate::init_api(api)
         }
 
         #[no_mangle]
-        pub extern "C" fn dd_runtime_start() -> std::ffi::c_int {
+        pub extern "C" fn wef_runtime_start() -> std::ffi::c_int {
             let main_fn: fn() = $main_fn;
             main_fn();
             0
         }
 
         #[no_mangle]
-        pub extern "C" fn dd_runtime_shutdown() {
+        pub extern "C" fn wef_runtime_shutdown() {
             $crate::shutdown();
         }
     };

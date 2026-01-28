@@ -1,5 +1,5 @@
 {
-  description = "deno_desktop";
+  description = "wef";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -83,115 +83,112 @@
 
       in {
         packages = {
-          # Runtimes
           hello = helloRuntime;
           ddcore = ddcoreRuntime;
 
-          # Backends
           cef = cefApp;
           webview = webviewApp;
           servo = servoApp;
 
-          # Bundles
           cef-hello = pkgs.stdenv.mkDerivation {
-            pname = "deno-cef-hello";
+            pname = "wef-cef-hello";
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin $out/lib $out/Applications
-              cp -R ${cefApp}/Applications/cefsimple.app $out/Applications/
+              cp -R ${cefApp}/Applications/wef.app $out/Applications/
               cp ${helloRuntime}/lib/libhello_runtime.dylib $out/lib/
-              cat > $out/bin/deno-cef-hello <<'EOF'
+              cat > $out/bin/wef-cef-hello <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$SCRIPT_DIR/Applications/cefsimple.app/Contents/MacOS/cefsimple" --runtime "$SCRIPT_DIR/lib/libhello_runtime.dylib" "$@"
+exec "$SCRIPT_DIR/Applications/wef.app/Contents/MacOS/wef" --runtime "$SCRIPT_DIR/lib/libhello_runtime.dylib" "$@"
 EOF
-              chmod +x $out/bin/deno-cef-hello
+              chmod +x $out/bin/wef-cef-hello
             '';
           };
 
           servo-hello = pkgs.stdenv.mkDerivation {
-            pname = "deno-servo-hello";
+            pname = "wef-servo-hello";
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin $out/lib
-              cp ${servoApp}/bin/deno_servo $out/bin/
+              cp ${servoApp}/bin/wef_servo $out/bin/
               cp ${helloRuntime}/lib/libhello_runtime.dylib $out/lib/
-              cat > $out/bin/deno-servo-hello <<'EOF'
+              cat > $out/bin/wef-servo-hello <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DD_RUNTIME_PATH="$SCRIPT_DIR/lib/libhello_runtime.dylib" exec "$SCRIPT_DIR/bin/deno_servo" "$@"
+WEF_RUNTIME_PATH="$SCRIPT_DIR/lib/libhello_runtime.dylib" exec "$SCRIPT_DIR/bin/wef_servo" "$@"
 EOF
-              chmod +x $out/bin/deno-servo-hello
+              chmod +x $out/bin/wef-servo-hello
             '';
           };
 
           servo-ddcore = pkgs.stdenv.mkDerivation {
-            pname = "deno-servo-ddcore";
+            pname = "wef-servo-ddcore";
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin $out/lib
-              cp ${servoApp}/bin/deno_servo $out/bin/
+              cp ${servoApp}/bin/wef_servo $out/bin/
               cp ${ddcoreRuntime}/lib/libddcore_runtime.dylib $out/lib/
-              cat > $out/bin/deno-servo-ddcore <<'EOF'
+              cat > $out/bin/wef-servo-ddcore <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-DD_RUNTIME_PATH="$SCRIPT_DIR/lib/libddcore_runtime.dylib" exec "$SCRIPT_DIR/bin/deno_servo" "$@"
+WEF_RUNTIME_PATH="$SCRIPT_DIR/lib/libddcore_runtime.dylib" exec "$SCRIPT_DIR/bin/wef_servo" "$@"
 EOF
-              chmod +x $out/bin/deno-servo-ddcore
+              chmod +x $out/bin/wef-servo-ddcore
             '';
           };
 
           cef-ddcore = pkgs.stdenv.mkDerivation {
-            pname = "deno-cef-ddcore";
+            pname = "wef-cef-ddcore";
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin $out/lib $out/Applications
-              cp -R ${cefApp}/Applications/cefsimple.app $out/Applications/
+              cp -R ${cefApp}/Applications/wef.app $out/Applications/
               cp ${ddcoreRuntime}/lib/libddcore_runtime.dylib $out/lib/
-              cat > $out/bin/deno-cef-ddcore <<'EOF'
+              cat > $out/bin/wef-cef-ddcore <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$SCRIPT_DIR/Applications/cefsimple.app/Contents/MacOS/cefsimple" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "$@"
+exec "$SCRIPT_DIR/Applications/wef.app/Contents/MacOS/wef" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "$@"
 EOF
-              chmod +x $out/bin/deno-cef-ddcore
+              chmod +x $out/bin/wef-cef-ddcore
             '';
           };
 
           webview-hello = pkgs.stdenv.mkDerivation {
-            pname = "deno-webview-hello";
+            pname = "wef-webview-hello";
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin $out/lib $out/Applications
-              cp -R ${webviewApp}/Applications/deno_webview.app $out/Applications/
+              cp -R ${webviewApp}/Applications/wef_webview.app $out/Applications/
               cp ${helloRuntime}/lib/libhello_runtime.dylib $out/lib/
-              cat > $out/bin/deno-webview-hello <<'EOF'
+              cat > $out/bin/wef-webview-hello <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$SCRIPT_DIR/Applications/deno_webview.app/Contents/MacOS/deno_webview" --runtime "$SCRIPT_DIR/lib/libhello_runtime.dylib" "$@"
+exec "$SCRIPT_DIR/Applications/wef_webview.app/Contents/MacOS/wef_webview" --runtime "$SCRIPT_DIR/lib/libhello_runtime.dylib" "$@"
 EOF
-              chmod +x $out/bin/deno-webview-hello
+              chmod +x $out/bin/wef-webview-hello
             '';
           };
 
           webview-ddcore = pkgs.stdenv.mkDerivation {
-            pname = "deno-webview-ddcore";
+            pname = "wef-webview-ddcore";
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
               mkdir -p $out/bin $out/lib $out/Applications
-              cp -R ${webviewApp}/Applications/deno_webview.app $out/Applications/
+              cp -R ${webviewApp}/Applications/wef_webview.app $out/Applications/
               cp ${ddcoreRuntime}/lib/libddcore_runtime.dylib $out/lib/
-              cat > $out/bin/deno-webview-ddcore <<'EOF'
+              cat > $out/bin/wef-webview-ddcore <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$SCRIPT_DIR/Applications/deno_webview.app/Contents/MacOS/deno_webview" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "$@"
+exec "$SCRIPT_DIR/Applications/wef_webview.app/Contents/MacOS/wef_webview" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "$@"
 EOF
-              chmod +x $out/bin/deno-webview-ddcore
+              chmod +x $out/bin/wef-webview-ddcore
             '';
           };
 
@@ -210,7 +207,7 @@ EOF
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
           shellHook = ''
-            echo "deno_desktop dev shell"
+            echo "wef dev shell"
             echo "nix build .#servo-hello"
           '';
         };

@@ -1,16 +1,4 @@
-// Copyright 2023-2026 Divy Srivastava <dj.srivastava23@gmail.com>
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-// http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
 use std::env;
 use std::path::PathBuf;
@@ -22,8 +10,8 @@ fn main() {
     let bindings = bindgen::Builder::default()
         .header(header)
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .allowlist_type("dd_.*")
-        .allowlist_var("DD_.*")
+        .allowlist_type("wef_.*")
+        .allowlist_var("WEF_.*")
         .generate()
         .expect("Unable to generate bindings");
 
