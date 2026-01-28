@@ -1,0 +1,118 @@
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
+
+#import <Cocoa/Cocoa.h>
+
+#include "runtime_loader.h"
+
+#include <iostream>
+#include <string>
+
+@interface AppDelegate : NSObject <NSApplicationDelegate>
+@property (nonatomic, assign) WefBackend* backend;
+@property (nonatomic, copy) NSString* runtimePath;
+@end
+
+@implementation AppDelegate
+
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+  self.backend = CreateWefBackend(800, 600, "WEF Webview");
+
+  RuntimeLoader* loader = RuntimeLoader::GetInstance();
+  loader->SetBackend(self.backend);
+
+  std::string runtimePath;
+  if (self.runtimePath) {
+    runtimePath = [self.runtimePath UTF8String];
+  } else {
+    NSBundle* bundle = [NSBundle mainBundle];
+    NSString* bundlePath = [bundle bundlePath];
+
+    NSArray* searchPaths = @[
+      [bundlePath stringByAppendingPathComponent:@"Contents/Frameworks/libruntime.dylib"],
+      [bundlePath stringByAppendingPathComponent:@"Contents/MacOS/libruntime.dylib"],
+      @"./libruntime.dylib",
+      @"./target/debug/libhello.dylib",
+      @"./target/release/libhello.dylib"
+    ];
+
+    for (NSString* path in searchPaths) {
+      if ([[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        runtimePath = [path UTF8String];
+        break;
+      }
+    }
+
+    const char* envPath = getenv("WEF_RUNTIME_PATH");
+    if (envPath) {
+      runtimePath = envPath;
+    }
+  }
+
+  if (runtimePath.empty()) {
+    std::cerr << "No runtime library found. Set WEF_RUNTIME_PATH or place libruntime.dylib in the app bundle." << std::endl;
+    [NSApp terminate:nil];
+    return;
+  }
+
+  if (!loader->Load(runtimePath)) {
+    std::cerr << "Failed to load runtime from: " << runtimePath << std::endl;
+    [NSApp terminate:nil];
+    return;
+  }
+
+  if (!loader->Start()) {
+    std::cerr << "Failed to start runtime" << std::endl;
+    [NSApp terminate:nil];
+    return;
+  }
+
+  self.backend->PostUiTask([](void* data) {
+  }, nullptr);
+}
+
+- (void)applicationWillTerminate:(NSNotification *)notification {
+  RuntimeLoader::GetInstance()->Shutdown();
+  delete self.backend;
+  self.backend = nullptr;
+}
+
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+  return YES;
+}
+
+@end
+
+int main(int argc, char* argv[]) {
+  @autoreleasepool {
+    [NSApplication sharedApplication];
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+
+    AppDelegate* delegate = [[AppDelegate alloc] init];
+
+    for (int i = 1; i < argc; ++i) {
+      if (strcmp(argv[i], "--runtime") == 0 && i + 1 < argc) {
+        delegate.runtimePath = [NSString stringWithUTF8String:argv[++i]];
+      }
+    }
+
+    [NSApp setDelegate:delegate];
+
+    NSMenu* menubar = [[NSMenu alloc] init];
+    NSMenuItem* appMenuItem = [[NSMenuItem alloc] init];
+    [menubar addItem:appMenuItem];
+    [NSApp setMainMenu:menubar];
+
+    NSMenu* appMenu = [[NSMenu alloc] init];
+    NSMenuItem* quitItem = [[NSMenuItem alloc]
+        initWithTitle:@"Quit"
+               action:@selector(terminate:)
+        keyEquivalent:@"q"];
+    [appMenu addItem:quitItem];
+    [appMenuItem setSubmenu:appMenu];
+
+    [NSApp activateIgnoringOtherApps:YES];
+    [NSApp run];
+  }
+
+  return 0;
+}

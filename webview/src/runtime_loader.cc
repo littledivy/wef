@@ -1,0 +1,519 @@
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
+
+#include "runtime_loader.h"
+
+#ifndef _WIN32
+#include <dlfcn.h>
+#else
+#include <windows.h>
+#endif
+
+#include <iostream>
+#include <cstring>
+
+RuntimeLoader* RuntimeLoader::instance_ = nullptr;
+
+static void Backend_Navigate(void* data, const char* url) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend && url) {
+    backend->Navigate(url);
+  }
+}
+
+static void Backend_SetTitle(void* data, const char* title) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend && title) {
+    backend->SetTitle(title);
+  }
+}
+
+static void Backend_ExecuteJs(void* data, const char* script) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend && script) {
+    backend->ExecuteJs(script);
+  }
+}
+
+static void Backend_Quit(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->Quit();
+  }
+}
+
+static void Backend_SetWindowSize(void* data, int width, int height) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->SetWindowSize(width, height);
+  }
+}
+
+static void Backend_PostUiTask(void* data, void (*task)(void*), void* task_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend && task) {
+    backend->PostUiTask(task, task_data);
+  }
+}
+
+static bool Backend_ValueIsNull(wef_value_t* val) {
+  if (!val || !val->value) return true;
+  return val->value->IsNull();
+}
+
+static bool Backend_ValueIsBool(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsBool();
+}
+
+static bool Backend_ValueIsInt(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsInt();
+}
+
+static bool Backend_ValueIsDouble(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsDouble();
+}
+
+static bool Backend_ValueIsString(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsString();
+}
+
+static bool Backend_ValueIsList(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsList();
+}
+
+static bool Backend_ValueIsDict(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsDict();
+}
+
+static bool Backend_ValueIsBinary(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->IsBinary();
+}
+
+static bool Backend_ValueIsCallback(wef_value_t* val) {
+  if (!val) return false;
+  return val->is_callback;
+}
+
+static bool Backend_ValueGetBool(wef_value_t* val) {
+  if (!val || !val->value) return false;
+  return val->value->GetBool();
+}
+
+static int Backend_ValueGetInt(wef_value_t* val) {
+  if (!val || !val->value) return 0;
+  return val->value->GetInt();
+}
+
+static double Backend_ValueGetDouble(wef_value_t* val) {
+  if (!val || !val->value) return 0.0;
+  return val->value->GetDouble();
+}
+
+static char* Backend_ValueGetString(wef_value_t* val, size_t* len_out) {
+  if (!val || !val->value || !val->value->IsString()) {
+    if (len_out) *len_out = 0;
+    return nullptr;
+  }
+  const std::string& str = val->value->GetString();
+  if (len_out) *len_out = str.size();
+  char* result = static_cast<char*>(malloc(str.size() + 1));
+  if (result) {
+    memcpy(result, str.c_str(), str.size() + 1);
+  }
+  return result;
+}
+
+static void Backend_ValueFreeString(char* str) {
+  free(str);
+}
+
+static size_t Backend_ValueListSize(wef_value_t* val) {
+  if (!val || !val->value || !val->value->IsList()) return 0;
+  return val->value->GetList().size();
+}
+
+static wef_value_t* Backend_ValueListGet(wef_value_t* val, size_t index) {
+  if (!val || !val->value || !val->value->IsList()) return nullptr;
+  const auto& list = val->value->GetList();
+  if (index >= list.size()) return nullptr;
+  return new wef_value(list[index]);
+}
+
+static wef_value_t* Backend_ValueDictGet(wef_value_t* dict, const char* key) {
+  if (!dict || !dict->value || !dict->value->IsDict() || !key)
+    return nullptr;
+  const auto& d = dict->value->GetDict();
+  auto it = d.find(key);
+  if (it == d.end()) return nullptr;
+  return new wef_value(it->second);
+}
+
+static bool Backend_ValueDictHas(wef_value_t* dict, const char* key) {
+  if (!dict || !dict->value || !dict->value->IsDict() || !key)
+    return false;
+  const auto& d = dict->value->GetDict();
+  return d.find(key) != d.end();
+}
+
+static size_t Backend_ValueDictSize(wef_value_t* dict) {
+  if (!dict || !dict->value || !dict->value->IsDict())
+    return 0;
+  return dict->value->GetDict().size();
+}
+
+static char** Backend_ValueDictKeys(wef_value_t* dict, size_t* count_out) {
+  if (!dict || !dict->value || !dict->value->IsDict()) {
+    if (count_out) *count_out = 0;
+    return nullptr;
+  }
+  const auto& d = dict->value->GetDict();
+  if (count_out) *count_out = d.size();
+  if (d.empty()) return nullptr;
+
+  char** result = static_cast<char**>(malloc(sizeof(char*) * d.size()));
+  size_t i = 0;
+  for (const auto& pair : d) {
+    result[i] = static_cast<char*>(malloc(pair.first.size() + 1));
+    memcpy(result[i], pair.first.c_str(), pair.first.size() + 1);
+    ++i;
+  }
+  return result;
+}
+
+static void Backend_ValueFreeKeys(char** keys, size_t count) {
+  if (!keys) return;
+  for (size_t i = 0; i < count; ++i) {
+    free(keys[i]);
+  }
+  free(keys);
+}
+
+static const void* Backend_ValueGetBinary(wef_value_t* val, size_t* len_out) {
+  if (!val || !val->value || !val->value->IsBinary()) {
+    if (len_out) *len_out = 0;
+    return nullptr;
+  }
+  const auto& binary = val->value->GetBinary();
+  if (len_out) *len_out = binary.data.size();
+  return binary.data.data();
+}
+
+static uint64_t Backend_ValueGetCallbackId(wef_value_t* val) {
+  if (!val || !val->is_callback) return 0;
+  return val->callback_id;
+}
+
+static wef_value_t* Backend_ValueNull(void*) {
+  return new wef_value(wef::Value::Null());
+}
+
+static wef_value_t* Backend_ValueBool(void*, bool v) {
+  return new wef_value(wef::Value::Bool(v));
+}
+
+static wef_value_t* Backend_ValueInt(void*, int v) {
+  return new wef_value(wef::Value::Int(v));
+}
+
+static wef_value_t* Backend_ValueDouble(void*, double v) {
+  return new wef_value(wef::Value::Double(v));
+}
+
+static wef_value_t* Backend_ValueString(void*, const char* v) {
+  return new wef_value(wef::Value::String(v ? v : ""));
+}
+
+static wef_value_t* Backend_ValueList(void*) {
+  return new wef_value(wef::Value::List());
+}
+
+static wef_value_t* Backend_ValueDict(void*) {
+  return new wef_value(wef::Value::Dict());
+}
+
+static wef_value_t* Backend_ValueBinary(void*, const void* data, size_t len) {
+  return new wef_value(wef::Value::Binary(data, len));
+}
+
+static bool Backend_ValueListAppend(wef_value_t* list, wef_value_t* val) {
+  if (!list || !list->value || !list->value->IsList())
+    return false;
+  if (!val || !val->value) return false;
+  list->value->GetList().push_back(val->value);
+  return true;
+}
+
+static bool Backend_ValueListSet(wef_value_t* list, size_t index, wef_value_t* val) {
+  if (!list || !list->value || !list->value->IsList())
+    return false;
+  if (!val || !val->value) return false;
+  auto& l = list->value->GetList();
+  if (index >= l.size()) {
+    l.resize(index + 1);
+  }
+  l[index] = val->value;
+  return true;
+}
+
+static bool Backend_ValueDictSet(wef_value_t* dict, const char* key, wef_value_t* val) {
+  if (!dict || !dict->value || !dict->value->IsDict())
+    return false;
+  if (!key || !val || !val->value) return false;
+  dict->value->GetDict()[key] = val->value;
+  return true;
+}
+
+static void Backend_ValueFree(wef_value_t* val) {
+  delete val;
+}
+
+static void Backend_SetJsCallHandler(void* data, wef_js_call_fn handler, void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetJsCallHandler(handler, user_data);
+}
+
+static void Backend_JsCallRespond(void* data, uint64_t call_id,
+                                   wef_value_t* result, const char* error) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  wef::ValuePtr resultPtr = (result && result->value) ? result->value : wef::Value::Null();
+  loader->JsCallRespond(call_id, resultPtr, error);
+}
+
+static void Backend_InvokeJsCallback(void* data, uint64_t callback_id, wef_value_t* args) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    wef::ValuePtr argsPtr = (args && args->value) ? args->value : wef::Value::List();
+    backend->InvokeJsCallback(callback_id, argsPtr);
+  }
+}
+
+static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->ReleaseJsCallback(callback_id);
+  }
+}
+
+void RuntimeLoader::InitializeBackendApi() {
+  backend_api_.version = WEF_API_VERSION;
+  backend_api_.backend_data = this;
+
+  backend_api_.navigate = Backend_Navigate;
+  backend_api_.set_title = Backend_SetTitle;
+  backend_api_.execute_js = Backend_ExecuteJs;
+  backend_api_.quit = Backend_Quit;
+  backend_api_.set_window_size = Backend_SetWindowSize;
+  backend_api_.post_ui_task = Backend_PostUiTask;
+
+  backend_api_.value_is_null = Backend_ValueIsNull;
+  backend_api_.value_is_bool = Backend_ValueIsBool;
+  backend_api_.value_is_int = Backend_ValueIsInt;
+  backend_api_.value_is_double = Backend_ValueIsDouble;
+  backend_api_.value_is_string = Backend_ValueIsString;
+  backend_api_.value_is_list = Backend_ValueIsList;
+  backend_api_.value_is_dict = Backend_ValueIsDict;
+  backend_api_.value_is_binary = Backend_ValueIsBinary;
+  backend_api_.value_is_callback = Backend_ValueIsCallback;
+
+  backend_api_.value_get_bool = Backend_ValueGetBool;
+  backend_api_.value_get_int = Backend_ValueGetInt;
+  backend_api_.value_get_double = Backend_ValueGetDouble;
+  backend_api_.value_get_string = Backend_ValueGetString;
+  backend_api_.value_free_string = Backend_ValueFreeString;
+  backend_api_.value_list_size = Backend_ValueListSize;
+  backend_api_.value_list_get = Backend_ValueListGet;
+  backend_api_.value_dict_get = Backend_ValueDictGet;
+  backend_api_.value_dict_has = Backend_ValueDictHas;
+  backend_api_.value_dict_size = Backend_ValueDictSize;
+  backend_api_.value_dict_keys = Backend_ValueDictKeys;
+  backend_api_.value_free_keys = Backend_ValueFreeKeys;
+  backend_api_.value_get_binary = Backend_ValueGetBinary;
+  backend_api_.value_get_callback_id = Backend_ValueGetCallbackId;
+
+  backend_api_.value_null = Backend_ValueNull;
+  backend_api_.value_bool = Backend_ValueBool;
+  backend_api_.value_int = Backend_ValueInt;
+  backend_api_.value_double = Backend_ValueDouble;
+  backend_api_.value_string = Backend_ValueString;
+  backend_api_.value_list = Backend_ValueList;
+  backend_api_.value_dict = Backend_ValueDict;
+  backend_api_.value_binary = Backend_ValueBinary;
+
+  backend_api_.value_list_append = Backend_ValueListAppend;
+  backend_api_.value_list_set = Backend_ValueListSet;
+  backend_api_.value_dict_set = Backend_ValueDictSet;
+  backend_api_.value_free = Backend_ValueFree;
+
+  backend_api_.set_js_call_handler = Backend_SetJsCallHandler;
+  backend_api_.js_call_respond = Backend_JsCallRespond;
+
+  backend_api_.invoke_js_callback = Backend_InvokeJsCallback;
+  backend_api_.release_js_callback = Backend_ReleaseJsCallback;
+}
+
+RuntimeLoader::RuntimeLoader() {
+  instance_ = this;
+  InitializeBackendApi();
+}
+
+RuntimeLoader::~RuntimeLoader() {
+  Shutdown();
+  if (library_handle_) {
+#ifndef _WIN32
+    dlclose(library_handle_);
+#else
+    FreeLibrary(static_cast<HMODULE>(library_handle_));
+#endif
+  }
+  instance_ = nullptr;
+}
+
+RuntimeLoader* RuntimeLoader::GetInstance() {
+  if (!instance_) {
+    instance_ = new RuntimeLoader();
+  }
+  return instance_;
+}
+
+bool RuntimeLoader::Load(const std::string& path) {
+#ifndef _WIN32
+  library_handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
+  if (!library_handle_) {
+    std::cerr << "Failed to load runtime: " << dlerror() << std::endl;
+    return false;
+  }
+
+  init_fn_ = reinterpret_cast<wef_runtime_init_fn>(
+      dlsym(library_handle_, WEF_RUNTIME_INIT_SYMBOL));
+  if (!init_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_INIT_SYMBOL << ": " << dlerror() << std::endl;
+    return false;
+  }
+
+  start_fn_ = reinterpret_cast<wef_runtime_start_fn>(
+      dlsym(library_handle_, WEF_RUNTIME_START_SYMBOL));
+  if (!start_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_START_SYMBOL << ": " << dlerror() << std::endl;
+    return false;
+  }
+
+  shutdown_fn_ = reinterpret_cast<wef_runtime_shutdown_fn>(
+      dlsym(library_handle_, WEF_RUNTIME_SHUTDOWN_SYMBOL));
+  if (!shutdown_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_SHUTDOWN_SYMBOL << ": " << dlerror() << std::endl;
+    return false;
+  }
+#else
+  library_handle_ = LoadLibraryA(path.c_str());
+  if (!library_handle_) {
+    std::cerr << "Failed to load runtime: " << GetLastError() << std::endl;
+    return false;
+  }
+
+  init_fn_ = reinterpret_cast<wef_runtime_init_fn>(
+      GetProcAddress(static_cast<HMODULE>(library_handle_), WEF_RUNTIME_INIT_SYMBOL));
+  if (!init_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_INIT_SYMBOL << std::endl;
+    return false;
+  }
+
+  start_fn_ = reinterpret_cast<wef_runtime_start_fn>(
+      GetProcAddress(static_cast<HMODULE>(library_handle_), WEF_RUNTIME_START_SYMBOL));
+  if (!start_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_START_SYMBOL << std::endl;
+    return false;
+  }
+
+  shutdown_fn_ = reinterpret_cast<wef_runtime_shutdown_fn>(
+      GetProcAddress(static_cast<HMODULE>(library_handle_), WEF_RUNTIME_SHUTDOWN_SYMBOL));
+  if (!shutdown_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_SHUTDOWN_SYMBOL << std::endl;
+    return false;
+  }
+#endif
+
+  std::cout << "Runtime loaded successfully from: " << path << std::endl;
+  return true;
+}
+
+bool RuntimeLoader::Start() {
+  if (running_) {
+    return true;
+  }
+
+  if (!init_fn_ || !start_fn_) {
+    std::cerr << "Runtime not loaded" << std::endl;
+    return false;
+  }
+
+  int result = init_fn_(&backend_api_);
+  if (result != 0) {
+    std::cerr << "Runtime init failed with code: " << result << std::endl;
+    return false;
+  }
+
+  running_ = true;
+  runtime_thread_ = std::thread(&RuntimeLoader::RuntimeThread, this);
+
+  std::cout << "Runtime started" << std::endl;
+  return true;
+}
+
+void RuntimeLoader::RuntimeThread() {
+  int result = start_fn_();
+  if (result != 0) {
+    std::cerr << "Runtime start returned error: " << result << std::endl;
+  }
+  running_ = false;
+}
+
+void RuntimeLoader::Shutdown() {
+  if (shutdown_fn_) {
+    shutdown_fn_();
+  }
+
+  if (runtime_thread_.joinable()) {
+    runtime_thread_.join();
+  }
+}
+
+void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
+                              wef::ValuePtr args) {
+  wef_js_call_fn handler;
+  void* user_data;
+
+  {
+    std::lock_guard<std::mutex> lock(handler_mutex_);
+    handler = js_call_handler_;
+    user_data = js_call_user_data_;
+  }
+
+  if (!handler) {
+    JsCallRespond(call_id, nullptr, "No JS call handler registered");
+    return;
+  }
+
+  wef_value_t* argsWrapper = new wef_value(args);
+  handler(user_data, call_id, method_path.c_str(), argsWrapper);
+}
+
+void RuntimeLoader::JsCallRespond(uint64_t call_id, wef::ValuePtr result, const char* error) {
+  WefBackend* backend = GetBackend();
+  if (backend) {
+    backend->RespondToJsCall(call_id, result, error);
+  }
+}
