@@ -9,6 +9,7 @@ license = "MIT"
 crate-type = ["rlib"]
 
 [dependencies]
+tokio = { version = "1", features = ["sync"] }
 
 [build-dependencies]
 bindgen = { version = "0.71", features = ["runtime"] }

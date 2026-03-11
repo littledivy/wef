@@ -4,4 +4,5 @@ members = [
     "capi",
     "examples/hello",
     "examples/ddcore",
+    "examples/presentation",
 ]

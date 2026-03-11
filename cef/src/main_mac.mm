@@ -4,6 +4,7 @@
 
 #include <string>
 #include <cstring>
+#include <unistd.h>
 
 #include "include/cef_application_mac.h"
 #include "include/wrapper/cef_helpers.h"
@@ -76,6 +77,10 @@ int main(int argc, char* argv[]) {
 
     CefSettings settings;
     settings.no_sandbox = true;
+
+    std::string cache_path = std::string(NSTemporaryDirectory().UTF8String) +
+                             "wef_cef_" + std::to_string(getpid());
+    CefString(&settings.root_cache_path) = cache_path;
 
     CefRefPtr<WefApp> app(new WefApp);
 

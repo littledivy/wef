@@ -2,7 +2,6 @@
 
 #include "render_process_handler.h"
 
-#include <sstream>
 
 CefRefPtr<WefRenderProcessHandler> g_render_handler;
 
@@ -118,7 +117,7 @@ bool WefPathObject::Execute(const CefString& name,
 
 PromiseResolver::PromiseResolver(uint64_t call_id, CefRefPtr<CefV8Value> promise,
                                  CefRefPtr<CefV8Context> context)
-    : call_id_(call_id), promise_(promise), context_(context) {}
+    : promise_(promise), context_(context) {}
 
 void PromiseResolver::Resolve(CefRefPtr<CefV8Value> value) {
   if (!promise_ || !context_) return;
@@ -271,7 +270,6 @@ CefRefPtr<CefValue> WefRenderProcessHandler::V8ValueToCefValue(
     }
     value->SetDictionary(dict);
   } else if (v8val->IsArrayBuffer()) {
-    CefRefPtr<CefV8ArrayBufferReleaseCallback> release_callback = nullptr;
     void* data = v8val->GetArrayBufferData();
     size_t len = v8val->GetArrayBufferByteLength();
     if (data && len > 0) {

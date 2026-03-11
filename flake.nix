@@ -68,13 +68,33 @@
           doCheck = false;
         };
 
+        presentationRuntime = pkgs.rustPlatform.buildRustPackage {
+          pname = "presentation_runtime";
+          version = "0.1.0";
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+          buildAndTestSubdir = "examples/presentation";
+          nativeBuildInputs = [ rustToolchain pkgs.llvmPackages.libclang ];
+          LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
+          buildPhase = ''
+            cargo build --release -p presentation_runtime
+          '';
+          installPhase = ''
+            mkdir -p $out/lib
+            cp target/release/libpresentation_runtime.dylib $out/lib/
+          '';
+          doCheck = false;
+        };
+
         # Import sub-flakes
+        wefInclude = ./capi/include;
+
         cefFlake = import ./cef/flake.nix;
-        cefOutputs = cefFlake.outputs { self = cefFlake; inherit nixpkgs flake-utils; };
+        cefOutputs = cefFlake.outputs { self = cefFlake; inherit nixpkgs flake-utils; inherit wefInclude; };
         cefApp = cefOutputs.packages.${system}.default;
 
         webviewFlake = import ./webview/flake.nix;
-        webviewOutputs = webviewFlake.outputs { self = webviewFlake; inherit nixpkgs flake-utils; };
+        webviewOutputs = webviewFlake.outputs { self = webviewFlake; inherit nixpkgs flake-utils; inherit wefInclude; };
         webviewApp = webviewOutputs.packages.${system}.default;
 
         servoFlake = import ./servo/flake.nix;
@@ -146,13 +166,23 @@ EOF
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
-              mkdir -p $out/bin $out/lib $out/Applications
+              mkdir -p $out/bin $out/lib $out/share/ddcore $out/Applications
               cp -R ${cefApp}/Applications/wef.app $out/Applications/
               cp ${ddcoreRuntime}/lib/libddcore_runtime.dylib $out/lib/
+              cp ${./examples/ddcore/index.html} $out/share/ddcore/index.html
               cat > $out/bin/wef-cef-ddcore <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$SCRIPT_DIR/Applications/wef.app/Contents/MacOS/wef" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "$@"
+ARGS=()
+for arg in "$@"; do
+  if [[ -f "$arg" ]]; then
+    ARGS+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+  else
+    ARGS+=("$arg")
+  fi
+done
+cd "$SCRIPT_DIR/share/ddcore"
+exec "$SCRIPT_DIR/Applications/wef.app/Contents/MacOS/wef" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "''${ARGS[@]}"
 EOF
               chmod +x $out/bin/wef-cef-ddcore
             '';
@@ -180,15 +210,59 @@ EOF
             version = "0.1.0";
             dontUnpack = true;
             installPhase = ''
-              mkdir -p $out/bin $out/lib $out/Applications
+              mkdir -p $out/bin $out/lib $out/share/ddcore $out/Applications
               cp -R ${webviewApp}/Applications/wef_webview.app $out/Applications/
               cp ${ddcoreRuntime}/lib/libddcore_runtime.dylib $out/lib/
+              cp ${./examples/ddcore/index.html} $out/share/ddcore/index.html
               cat > $out/bin/wef-webview-ddcore <<'EOF'
 #!/bin/bash
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-exec "$SCRIPT_DIR/Applications/wef_webview.app/Contents/MacOS/wef_webview" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "$@"
+ARGS=()
+for arg in "$@"; do
+  if [[ -f "$arg" ]]; then
+    ARGS+=("$(cd "$(dirname "$arg")" && pwd)/$(basename "$arg")")
+  else
+    ARGS+=("$arg")
+  fi
+done
+cd "$SCRIPT_DIR/share/ddcore"
+exec "$SCRIPT_DIR/Applications/wef_webview.app/Contents/MacOS/wef_webview" --runtime "$SCRIPT_DIR/lib/libddcore_runtime.dylib" "''${ARGS[@]}"
 EOF
               chmod +x $out/bin/wef-webview-ddcore
+            '';
+          };
+
+          cef-presentation = pkgs.stdenv.mkDerivation {
+            pname = "wef-cef-presentation";
+            version = "0.1.0";
+            dontUnpack = true;
+            installPhase = ''
+              mkdir -p $out/bin $out/lib $out/Applications
+              cp -R ${cefApp}/Applications/wef.app $out/Applications/
+              cp ${presentationRuntime}/lib/libpresentation_runtime.dylib $out/lib/
+              cat > $out/bin/wef-cef-presentation <<'EOF'
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$SCRIPT_DIR/Applications/wef.app/Contents/MacOS/wef" --runtime "$SCRIPT_DIR/lib/libpresentation_runtime.dylib" "$@"
+EOF
+              chmod +x $out/bin/wef-cef-presentation
+            '';
+          };
+
+          webview-presentation = pkgs.stdenv.mkDerivation {
+            pname = "wef-webview-presentation";
+            version = "0.1.0";
+            dontUnpack = true;
+            installPhase = ''
+              mkdir -p $out/bin $out/lib $out/Applications
+              cp -R ${webviewApp}/Applications/wef_webview.app $out/Applications/
+              cp ${presentationRuntime}/lib/libpresentation_runtime.dylib $out/lib/
+              cat > $out/bin/wef-webview-presentation <<'EOF'
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec "$SCRIPT_DIR/Applications/wef_webview.app/Contents/MacOS/wef_webview" --runtime "$SCRIPT_DIR/lib/libpresentation_runtime.dylib" "$@"
+EOF
+              chmod +x $out/bin/wef-webview-presentation
             '';
           };
 

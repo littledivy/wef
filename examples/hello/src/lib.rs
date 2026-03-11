@@ -1,5 +1,4 @@
-use wef::{should_shutdown, Value, Window};
-use std::time::Duration;
+use wef::{Value, Window};
 
 fn hello_main() {
     let rt = tokio::runtime::Runtime::new().unwrap();
@@ -25,7 +24,7 @@ fn hello_main() {
                 info.insert("rust".to_string(), Value::Bool(true));
                 call.resolve(Value::Dict(info));
             })
-            .load_url(r#"data:text/html,<!DOCTYPE html>
+            .load(r#"data:text/html,<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -65,10 +64,10 @@ fn hello_main() {
     <h1>WEF Bindings</h1>
     <p>Call Rust functions from JavaScript:</p>
     <div>
-        <button onclick="testGreet()">Deno.greet("Alice")</button>
-        <button onclick="testAdd()">Deno.add(10, 25)</button>
-        <button onclick="testInfo()">Deno.getInfo()</button>
-        <button onclick="testUnknown()">Deno.unknown()</button>
+        <button onclick="testGreet()">Wef.greet("Alice")</button>
+        <button onclick="testAdd()">Wef.add(10, 25)</button>
+        <button onclick="testInfo()">Wef.getInfo()</button>
+        <button onclick="testUnknown()">Wef.unknown()</button>
     </div>
     <pre id="output">Click a button to test...</pre>
     <script>
@@ -78,25 +77,25 @@ fn hello_main() {
         }
         async function testGreet() {
             try {
-                const result = await Deno.greet('Alice');
+                const result = await Wef.greet('Alice');
                 log('greet: ' + result);
             } catch(e) { log('Error: ' + e.message, true); }
         }
         async function testAdd() {
             try {
-                const result = await Deno.add(10, 25);
+                const result = await Wef.add(10, 25);
                 log('add: ' + result);
             } catch(e) { log('Error: ' + e.message, true); }
         }
         async function testInfo() {
             try {
-                const result = await Deno.getInfo();
+                const result = await Wef.getInfo();
                 log('getInfo: ' + JSON.stringify(result));
             } catch(e) { log('Error: ' + e.message, true); }
         }
         async function testUnknown() {
             try {
-                const result = await Deno.unknown();
+                const result = await Wef.unknown();
                 log('unknown: ' + result);
             } catch(e) { log('Error: ' + e.message, true); }
         }
@@ -105,9 +104,7 @@ fn hello_main() {
 </body>
 </html>"#);
 
-        while !should_shutdown() {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+        wef::run().await;
     });
 }
 
