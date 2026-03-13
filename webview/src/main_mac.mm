@@ -120,6 +120,21 @@ static int run_headless(const char* runtimePath) {
   return 0;
 }
 
+static bool is_cli_worker_command(int argc, char* argv[]) {
+  if (argc < 3 || strcmp(argv[1], "run") != 0) {
+    return false;
+  }
+
+  for (int i = 2; i < argc; ++i) {
+    if (argv[i][0] == '-') {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
+}
+
 static bool is_forked_worker() {
   return getenv("NODE_CHANNEL_FD") != nullptr
       || getenv("NEXT_PRIVATE_WORKER") != nullptr;
@@ -134,7 +149,7 @@ int main(int argc, char* argv[]) {
   }
 
   // Forked worker processes should not create a window.
-  if (is_forked_worker()) {
+  if (is_forked_worker() || is_cli_worker_command(argc, argv)) {
     return run_headless(runtimePathArg ? [runtimePathArg UTF8String] : nullptr);
   }
 
