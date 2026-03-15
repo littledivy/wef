@@ -1,0 +1,10 @@
+[package]
+name = "wef-backend-winit-common"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+winit.workspace = true
+raw-window-handle = "0.6"
+libloading = "0.8"

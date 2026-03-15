@@ -13,7 +13,13 @@ mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub const WEF_API_VERSION: u32 = 1;
+pub const WEF_API_VERSION: u32 = 2;
+
+pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
+pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
+pub const WEF_WINDOW_HANDLE_WIN32: i32 = 2;
+pub const WEF_WINDOW_HANDLE_X11: i32 = 3;
+pub const WEF_WINDOW_HANDLE_WAYLAND: i32 = 4;
 pub type WefValue = ffi::wef_value_t;
 pub type WefBackendApi = ffi::wef_backend_api_t;
 
@@ -428,6 +434,18 @@ impl Window {
         focus();
     }
 
+    pub fn get_window_handle(&self) -> *mut c_void {
+        get_window_handle()
+    }
+
+    pub fn get_display_handle(&self) -> *mut c_void {
+        get_display_handle()
+    }
+
+    pub fn get_window_handle_type(&self) -> i32 {
+        get_window_handle_type()
+    }
+
     pub fn bind<F>(self, name: &str, handler: F) -> Self
     where
         F: Fn(JsCall) + Send + Sync + 'static,
@@ -459,11 +477,51 @@ pub fn set_title(title: &str) {
     }
 }
 
-pub fn execute_js(script: &str) {
+pub fn execute_js<F>(script: &str, callback: Option<F>)
+where
+    F: FnOnce(Result<Value, Value>) + Send + 'static,
+{
     let api = api();
     if let Some(f) = api.execute_js {
         let c_script = CString::new(script).expect("Invalid script");
-        unsafe { f(api.backend_data, c_script.as_ptr()) };
+
+        match callback {
+            Some(cb_fn) => {
+                unsafe extern "C" fn trampoline(
+                    result: *mut WefValue,
+                    error: *mut WefValue,
+                    user_data: *mut c_void,
+                ) {
+                    let cb = Box::from_raw(
+                        user_data as *mut Box<dyn FnOnce(Result<Value, Value>) + Send>,
+                    );
+                    if !error.is_null() {
+                        if let Some(e) = Value::from_raw(error) {
+                            cb(Err(e));
+                            return;
+                        }
+                    }
+                    let val = Value::from_raw(result).unwrap_or(Value::Null);
+                    cb(Ok(val));
+                }
+
+                let cb: Box<Box<dyn FnOnce(Result<Value, Value>) + Send>> =
+                    Box::new(Box::new(cb_fn));
+                let user_data = Box::into_raw(cb) as *mut c_void;
+
+                unsafe {
+                    f(
+                        api.backend_data,
+                        c_script.as_ptr(),
+                        Some(trampoline),
+                        user_data,
+                    )
+                };
+            }
+            None => {
+                unsafe { f(api.backend_data, c_script.as_ptr(), None, std::ptr::null_mut()) };
+            }
+        }
     }
 }
 
@@ -581,6 +639,38 @@ where
 
     let mut bindings = bindings().lock().unwrap();
     bindings.insert(name.to_string(), Box::new(handler));
+}
+
+/// Returns the raw platform-specific window handle (e.g. NSView*, HWND, X11 Window, wl_surface*).
+/// Returns null if the backend does not support this.
+pub fn get_window_handle() -> *mut c_void {
+    let api = api();
+    if let Some(f) = api.get_window_handle {
+        unsafe { f(api.backend_data) }
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+/// Returns the raw platform-specific display handle (e.g. X11 Display*, wl_display*).
+/// Returns null on platforms that don't need one (macOS, Windows).
+pub fn get_display_handle() -> *mut c_void {
+    let api = api();
+    if let Some(f) = api.get_display_handle {
+        unsafe { f(api.backend_data) }
+    } else {
+        std::ptr::null_mut()
+    }
+}
+
+/// Returns the window handle type as a `WEF_WINDOW_HANDLE_*` constant.
+pub fn get_window_handle_type() -> i32 {
+    let api = api();
+    if let Some(f) = api.get_window_handle_type {
+        unsafe { f(api.backend_data) }
+    } else {
+        WEF_WINDOW_HANDLE_UNKNOWN
+    }
 }
 
 pub fn unbind(name: &str) {

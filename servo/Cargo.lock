@@ -1472,21 +1472,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 
 [[package]]
-name = "deno-servo"
-version = "0.1.0"
-dependencies = [
- "embedder_traits",
- "euclid",
- "libloading",
- "libservo",
- "rustls",
- "tracing",
- "url",
- "webrender_api",
- "winit",
-]
-
-[[package]]
 name = "deny_public_fields"
 version = "0.0.1"
 source = "git+https://github.com/servo/servo.git?rev=68f6dba66910f3118be0129f3b4b7b5e2fc72c65#68f6dba66910f3118be0129f3b4b7b5e2fc72c65"
@@ -8612,6 +8597,30 @@ name = "weezl"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
+
+[[package]]
+name = "wef-backend-winit-common"
+version = "0.1.0"
+dependencies = [
+ "libloading",
+ "raw-window-handle",
+ "winit",
+]
+
+[[package]]
+name = "wef-servo"
+version = "0.1.0"
+dependencies = [
+ "embedder_traits",
+ "euclid",
+ "libservo",
+ "rustls",
+ "tracing",
+ "url",
+ "webrender_api",
+ "wef-backend-winit-common",
+ "winit",
+]
 
 [[package]]
 name = "wgpu-core"

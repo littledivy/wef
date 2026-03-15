@@ -11,7 +11,14 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 1
+#define WEF_API_VERSION 2
+
+// Window handle types for get_window_handle_type
+#define WEF_WINDOW_HANDLE_UNKNOWN  0
+#define WEF_WINDOW_HANDLE_APPKIT   1
+#define WEF_WINDOW_HANDLE_WIN32    2
+#define WEF_WINDOW_HANDLE_X11      3
+#define WEF_WINDOW_HANDLE_WAYLAND  4
 
 typedef struct wef_backend_api wef_backend_api_t;
 
@@ -33,13 +40,21 @@ typedef void (*wef_js_call_fn)(
     wef_value_t* args
 );
 
+// Callback for execute_js results. Pass NULL to execute_js for fire-and-forget.
+typedef void (*wef_js_result_fn)(
+    wef_value_t* result,
+    wef_value_t* error,
+    void* user_data
+);
+
 struct wef_backend_api {
     uint32_t version;
     void* backend_data;
 
     void (*navigate)(void* backend_data, const char* url);
     void (*set_title)(void* backend_data, const char* title);
-    void (*execute_js)(void* backend_data, const char* script);
+    void (*execute_js)(void* backend_data, const char* script,
+                       wef_js_result_fn callback, void* callback_data);
     void (*quit)(void* backend_data);
     void (*set_window_size)(void* backend_data, int width, int height);
     void (*get_window_size)(void* backend_data, int* width, int* height);
@@ -122,6 +137,16 @@ struct wef_backend_api {
         void* backend_data,
         uint64_t callback_id
     );
+
+    // Raw window/display handles for GPU surface creation.
+    // Returns platform-specific handle:
+    //   AppKit: NSView*, Win32: HWND, X11: Window (cast to void*), Wayland: wl_surface*
+    void* (*get_window_handle)(void* backend_data);
+    // Returns platform-specific display handle:
+    //   AppKit: NULL, Win32: NULL (or HINSTANCE), X11: Display*, Wayland: wl_display*
+    void* (*get_display_handle)(void* backend_data);
+    // Returns WEF_WINDOW_HANDLE_* constant identifying the platform
+    int (*get_window_handle_type)(void* backend_data);
 
 };
 
