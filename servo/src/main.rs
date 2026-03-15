@@ -44,6 +44,17 @@ struct WefBackendApi {
     execute_js: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
     quit: Option<unsafe extern "C" fn(*mut c_void)>,
     set_window_size: Option<unsafe extern "C" fn(*mut c_void, c_int, c_int)>,
+    get_window_size: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int)>,
+    set_window_position: Option<unsafe extern "C" fn(*mut c_void, c_int, c_int)>,
+    get_window_position: Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int)>,
+    set_resizable: Option<unsafe extern "C" fn(*mut c_void, bool)>,
+    is_resizable: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
+    set_always_on_top: Option<unsafe extern "C" fn(*mut c_void, bool)>,
+    is_always_on_top: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
+    is_visible: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
+    show: Option<unsafe extern "C" fn(*mut c_void)>,
+    hide: Option<unsafe extern "C" fn(*mut c_void)>,
+    focus: Option<unsafe extern "C" fn(*mut c_void)>,
     post_ui_task:
         Option<unsafe extern "C" fn(*mut c_void, Option<unsafe extern "C" fn(*mut c_void)>, *mut c_void)>,
     value_is_null: Option<unsafe extern "C" fn(*mut WefValue) -> bool>,
@@ -82,7 +93,7 @@ struct WefBackendApi {
     value_dict_set: Option<unsafe extern "C" fn(*mut WefValue, *const c_char, *mut WefValue) -> bool>,
     value_free: Option<unsafe extern "C" fn(*mut WefValue)>,
     set_js_call_handler: Option<unsafe extern "C" fn(*mut c_void, WefJsCallFn, *mut c_void)>,
-    js_call_respond: Option<unsafe extern "C" fn(*mut c_void, u64, *mut WefValue, *const c_char)>,
+    js_call_respond: Option<unsafe extern "C" fn(*mut c_void, u64, *mut WefValue, *mut WefValue)>,
     invoke_js_callback: Option<unsafe extern "C" fn(*mut c_void, u64, *mut WefValue)>,
     release_js_callback: Option<unsafe extern "C" fn(*mut c_void, u64)>,
 }
@@ -155,6 +166,42 @@ unsafe extern "C" fn backend_quit(_data: *mut c_void) {
 unsafe extern "C" fn backend_set_window_size(_data: *mut c_void, _width: c_int, _height: c_int) {
 }
 
+unsafe extern "C" fn backend_get_window_size(_data: *mut c_void, _width: *mut c_int, _height: *mut c_int) {
+}
+
+unsafe extern "C" fn backend_set_window_position(_data: *mut c_void, _x: c_int, _y: c_int) {
+}
+
+unsafe extern "C" fn backend_get_window_position(_data: *mut c_void, _x: *mut c_int, _y: *mut c_int) {
+}
+
+unsafe extern "C" fn backend_set_resizable(_data: *mut c_void, _resizable: bool) {
+}
+
+unsafe extern "C" fn backend_is_resizable(_data: *mut c_void) -> bool {
+    true
+}
+
+unsafe extern "C" fn backend_set_always_on_top(_data: *mut c_void, _always_on_top: bool) {
+}
+
+unsafe extern "C" fn backend_is_always_on_top(_data: *mut c_void) -> bool {
+    false
+}
+
+unsafe extern "C" fn backend_is_visible(_data: *mut c_void) -> bool {
+    true
+}
+
+unsafe extern "C" fn backend_show(_data: *mut c_void) {
+}
+
+unsafe extern "C" fn backend_hide(_data: *mut c_void) {
+}
+
+unsafe extern "C" fn backend_focus(_data: *mut c_void) {
+}
+
 unsafe extern "C" fn backend_post_ui_task(
     _data: *mut c_void,
     task: Option<unsafe extern "C" fn(*mut c_void)>,
@@ -215,7 +262,7 @@ unsafe extern "C" fn value_list_set(_list: *mut WefValue, _idx: usize, _val: *mu
 unsafe extern "C" fn value_dict_set(_dict: *mut WefValue, _key: *const c_char, _val: *mut WefValue) -> bool { false }
 unsafe extern "C" fn value_free(_val: *mut WefValue) {}
 unsafe extern "C" fn set_js_call_handler(_data: *mut c_void, _handler: WefJsCallFn, _user_data: *mut c_void) {}
-unsafe extern "C" fn js_call_respond(_data: *mut c_void, _call_id: u64, _result: *mut WefValue, _error: *const c_char) {}
+unsafe extern "C" fn js_call_respond(_data: *mut c_void, _call_id: u64, _result: *mut WefValue, _error: *mut WefValue) {}
 unsafe extern "C" fn invoke_js_callback(_data: *mut c_void, _cb_id: u64, _args: *mut WefValue) {}
 unsafe extern "C" fn release_js_callback(_data: *mut c_void, _cb_id: u64) {}
 
@@ -228,6 +275,17 @@ fn create_backend_api() -> WefBackendApi {
         execute_js: Some(backend_execute_js),
         quit: Some(backend_quit),
         set_window_size: Some(backend_set_window_size),
+        get_window_size: Some(backend_get_window_size),
+        set_window_position: Some(backend_set_window_position),
+        get_window_position: Some(backend_get_window_position),
+        set_resizable: Some(backend_set_resizable),
+        is_resizable: Some(backend_is_resizable),
+        set_always_on_top: Some(backend_set_always_on_top),
+        is_always_on_top: Some(backend_is_always_on_top),
+        is_visible: Some(backend_is_visible),
+        show: Some(backend_show),
+        hide: Some(backend_hide),
+        focus: Some(backend_focus),
         post_ui_task: Some(backend_post_ui_task),
         value_is_null: Some(value_is_null),
         value_is_bool: Some(value_is_bool),

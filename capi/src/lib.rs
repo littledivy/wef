@@ -275,20 +275,20 @@ impl JsCall {
         let api = api();
         if let Some(respond) = api.js_call_respond {
             let raw = value.to_raw();
-            unsafe { respond(api.backend_data, self.call_id, raw, std::ptr::null()) };
+            unsafe { respond(api.backend_data, self.call_id, raw, std::ptr::null_mut()) };
         }
     }
 
-    pub fn reject(self, error: &str) {
+    pub fn reject(self, error: Value) {
         let api = api();
         if let Some(respond) = api.js_call_respond {
-            let c_err = CString::new(error).unwrap();
+            let raw = error.to_raw();
             unsafe {
                 respond(
                     api.backend_data,
                     self.call_id,
                     std::ptr::null_mut(),
-                    c_err.as_ptr(),
+                    raw,
                 )
             };
         }
@@ -327,7 +327,7 @@ unsafe extern "C" fn js_call_handler(
         handler(call);
     } else {
         drop(bindings);
-        call.reject(&format!("No binding for '{}'", method));
+        call.reject(Value::String(format!("No binding for '{}'", method)));
     }
 }
 
@@ -379,6 +379,53 @@ impl Window {
             unsafe { f(api.backend_data, width, height) };
         }
         self
+    }
+
+    pub fn get_size(&self) -> (i32, i32) {
+        get_window_size()
+    }
+
+    pub fn position(self, x: i32, y: i32) -> Self {
+        set_window_position(x, y);
+        self
+    }
+
+    pub fn get_position(&self) -> (i32, i32) {
+        get_window_position()
+    }
+
+    pub fn resizable(self, resizable: bool) -> Self {
+        set_resizable(resizable);
+        self
+    }
+
+    pub fn get_resizable(&self) -> bool {
+        is_resizable()
+    }
+
+    pub fn always_on_top(self, always_on_top: bool) -> Self {
+        set_always_on_top(always_on_top);
+        self
+    }
+
+    pub fn get_always_on_top(&self) -> bool {
+        is_always_on_top()
+    }
+
+    pub fn get_visible(&self) -> bool {
+        is_visible()
+    }
+
+    pub fn show(&self) {
+        show();
+    }
+
+    pub fn hide(&self) {
+        hide();
+    }
+
+    pub fn focus(&self) {
+        focus();
     }
 
     pub fn bind<F>(self, name: &str, handler: F) -> Self
@@ -434,6 +481,95 @@ pub fn set_window_size(width: i32, height: i32) {
     }
 }
 
+pub fn get_window_size() -> (i32, i32) {
+    let api = api();
+    let mut width: c_int = 0;
+    let mut height: c_int = 0;
+    if let Some(f) = api.get_window_size {
+        unsafe { f(api.backend_data, &mut width, &mut height) };
+    }
+    (width, height)
+}
+
+pub fn set_window_position(x: i32, y: i32) {
+    let api = api();
+    if let Some(f) = api.set_window_position {
+        unsafe { f(api.backend_data, x, y) };
+    }
+}
+
+pub fn get_window_position() -> (i32, i32) {
+    let api = api();
+    let mut x: c_int = 0;
+    let mut y: c_int = 0;
+    if let Some(f) = api.get_window_position {
+        unsafe { f(api.backend_data, &mut x, &mut y) };
+    }
+    (x, y)
+}
+
+pub fn set_resizable(resizable: bool) {
+    let api = api();
+    if let Some(f) = api.set_resizable {
+        unsafe { f(api.backend_data, resizable) };
+    }
+}
+
+pub fn is_resizable() -> bool {
+    let api = api();
+    if let Some(f) = api.is_resizable {
+        unsafe { f(api.backend_data) }
+    } else {
+        true
+    }
+}
+
+pub fn set_always_on_top(always_on_top: bool) {
+    let api = api();
+    if let Some(f) = api.set_always_on_top {
+        unsafe { f(api.backend_data, always_on_top) };
+    }
+}
+
+pub fn is_always_on_top() -> bool {
+    let api = api();
+    if let Some(f) = api.is_always_on_top {
+        unsafe { f(api.backend_data) }
+    } else {
+        false
+    }
+}
+
+pub fn is_visible() -> bool {
+    let api = api();
+    if let Some(f) = api.is_visible {
+        unsafe { f(api.backend_data) }
+    } else {
+        true
+    }
+}
+
+pub fn show() {
+    let api = api();
+    if let Some(f) = api.show {
+        unsafe { f(api.backend_data) };
+    }
+}
+
+pub fn hide() {
+    let api = api();
+    if let Some(f) = api.hide {
+        unsafe { f(api.backend_data) };
+    }
+}
+
+pub fn focus() {
+    let api = api();
+    if let Some(f) = api.focus {
+        unsafe { f(api.backend_data) };
+    }
+}
+
 pub fn bind<F>(name: &str, handler: F)
 where
     F: Fn(JsCall) + Send + Sync + 'static,
@@ -445,6 +581,16 @@ where
 
     let mut bindings = bindings().lock().unwrap();
     bindings.insert(name.to_string(), Box::new(handler));
+}
+
+pub fn unbind(name: &str) {
+    static HANDLER_REGISTERED: AtomicBool = AtomicBool::new(false);
+    if !HANDLER_REGISTERED.swap(true, Ordering::SeqCst) {
+        register_js_handler();
+    }
+
+    let mut bindings = bindings().lock().unwrap();
+    bindings.remove(&name.to_string());
 }
 
 #[macro_export]

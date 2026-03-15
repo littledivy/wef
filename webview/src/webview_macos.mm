@@ -300,11 +300,22 @@ class WKWebViewBackend : public WefBackend {
   void ExecuteJs(const std::string& script) override;
   void Quit() override;
   void SetWindowSize(int width, int height) override;
+  void GetWindowSize(int* width, int* height) override;
+  void SetWindowPosition(int x, int y) override;
+  void GetWindowPosition(int* x, int* y) override;
+  void SetResizable(bool resizable) override;
+  bool IsResizable() override;
+  void SetAlwaysOnTop(bool always_on_top) override;
+  bool IsAlwaysOnTop() override;
+  bool IsVisible() override;
+  void Show() override;
+  void Hide() override;
+  void Focus() override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
   void InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) override;
   void ReleaseJsCallback(uint64_t callback_id) override;
-  void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, const char* error) override;
+  void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
 
   void Run() override;
 
@@ -599,6 +610,91 @@ void WKWebViewBackend::SetWindowSize(int width, int height) {
   });
 }
 
+void WKWebViewBackend::GetWindowSize(int* width, int* height) {
+  NSRect frame = [window_ frame];
+  if (width) *width = static_cast<int>(frame.size.width);
+  if (height) *height = static_cast<int>(frame.size.height);
+}
+
+void WKWebViewBackend::SetWindowPosition(int x, int y) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+      NSRect frame = [window_ frame];
+      NSRect screenFrame = [[window_ screen] frame];
+      // Convert from top-left origin to macOS bottom-left origin
+      CGFloat flippedY = screenFrame.size.height - y - frame.size.height;
+      [window_ setFrameOrigin:NSMakePoint(x, flippedY)];
+    }
+  });
+}
+
+void WKWebViewBackend::GetWindowPosition(int* x, int* y) {
+  NSRect frame = [window_ frame];
+  NSRect screenFrame = [[window_ screen] frame];
+  if (x) *x = static_cast<int>(frame.origin.x);
+  // Convert from macOS bottom-left origin to top-left origin
+  if (y) *y = static_cast<int>(screenFrame.size.height - frame.origin.y - frame.size.height);
+}
+
+void WKWebViewBackend::SetResizable(bool resizable) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+      NSWindowStyleMask mask = [window_ styleMask];
+      if (resizable) {
+        mask |= NSWindowStyleMaskResizable;
+      } else {
+        mask &= ~NSWindowStyleMaskResizable;
+      }
+      [window_ setStyleMask:mask];
+    }
+  });
+}
+
+bool WKWebViewBackend::IsResizable() {
+  return ([window_ styleMask] & NSWindowStyleMaskResizable) != 0;
+}
+
+void WKWebViewBackend::SetAlwaysOnTop(bool always_on_top) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+      [window_ setLevel:always_on_top ? NSFloatingWindowLevel : NSNormalWindowLevel];
+    }
+  });
+}
+
+bool WKWebViewBackend::IsAlwaysOnTop() {
+  return [window_ level] >= NSFloatingWindowLevel;
+}
+
+bool WKWebViewBackend::IsVisible() {
+  return [window_ isVisible];
+}
+
+void WKWebViewBackend::Show() {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+      [window_ makeKeyAndOrderFront:nil];
+    }
+  });
+}
+
+void WKWebViewBackend::Hide() {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+      [window_ orderOut:nil];
+    }
+  });
+}
+
+void WKWebViewBackend::Focus() {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    @autoreleasepool {
+      [NSApp activateIgnoringOtherApps:YES];
+      [window_ makeKeyAndOrderFront:nil];
+    }
+  });
+}
+
 void WKWebViewBackend::PostUiTask(void (*task)(void*), void* data) {
   dispatch_async(dispatch_get_main_queue(), ^{
     task(data);
@@ -629,22 +725,22 @@ void WKWebViewBackend::ReleaseJsCallback(uint64_t callback_id) {
   });
 }
 
-void WKWebViewBackend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, const char* error) {
+void WKWebViewBackend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
-  std::string errorStr = error ? error : "";
+  std::string errorJson = error ? json::Serialize(error) : "null";
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
       NSString* script;
-      if (errorStr.empty()) {
+      if (error) {
+        script = [NSString stringWithFormat:
+            @"window.__wefRespond(%llu, null, %s);",
+            call_id,
+            errorJson.c_str()];
+      } else {
         script = [NSString stringWithFormat:
             @"window.__wefRespond(%llu, %s, null);",
             call_id,
             resultJson.c_str()];
-      } else {
-        script = [NSString stringWithFormat:
-            @"window.__wefRespond(%llu, null, \"%s\");",
-            call_id,
-            json::Escape(errorStr).c_str()];
       }
       [webview_ evaluateJavaScript:script completionHandler:nil];
     }

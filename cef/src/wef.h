@@ -31,6 +31,17 @@ typedef struct wef_backend_api {
     void (*execute_js)(void* backend_data, const char* script);
     void (*quit)(void* backend_data);
     void (*set_window_size)(void* backend_data, int width, int height);
+    void (*get_window_size)(void* backend_data, int* width, int* height);
+    void (*set_window_position)(void* backend_data, int x, int y);
+    void (*get_window_position)(void* backend_data, int* x, int* y);
+    void (*set_resizable)(void* backend_data, bool resizable);
+    bool (*is_resizable)(void* backend_data);
+    void (*set_always_on_top)(void* backend_data, bool always_on_top);
+    bool (*is_always_on_top)(void* backend_data);
+    bool (*is_visible)(void* backend_data);
+    void (*show)(void* backend_data);
+    void (*hide)(void* backend_data);
+    void (*focus)(void* backend_data);
     void (*post_ui_task)(void* backend_data, void (*task)(void* data), void* data);
 
     bool (*value_is_null)(wef_value_t* val);
@@ -73,7 +84,7 @@ typedef struct wef_backend_api {
     void (*value_free)(wef_value_t* val);
 
     void (*set_js_call_handler)(void* backend_data, wef_js_call_fn handler, void* user_data);
-    void (*js_call_respond)(void* backend_data, uint64_t call_id, wef_value_t* result, const char* error);
+    void (*js_call_respond)(void* backend_data, uint64_t call_id, wef_value_t* result, wef_value_t* error);
 
     void (*invoke_js_callback)(void* backend_data, uint64_t callback_id, wef_value_t* args);
     void (*release_js_callback)(void* backend_data, uint64_t callback_id);

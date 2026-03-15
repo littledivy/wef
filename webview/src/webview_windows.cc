@@ -331,11 +331,22 @@ class WebView2Backend : public WebviewBackend {
   void ExecuteJs(const std::string& script) override;
   void Quit() override;
   void SetWindowSize(int width, int height) override;
+  void GetWindowSize(int* width, int* height) override;
+  void SetWindowPosition(int x, int y) override;
+  void GetWindowPosition(int* x, int* y) override;
+  void SetResizable(bool resizable) override;
+  bool IsResizable() override;
+  void SetAlwaysOnTop(bool always_on_top) override;
+  bool IsAlwaysOnTop() override;
+  bool IsVisible() override;
+  void Show() override;
+  void Hide() override;
+  void Focus() override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
   void InvokeJsCallback(uint64_t callback_id, webview::ValuePtr args) override;
   void ReleaseJsCallback(uint64_t callback_id) override;
-  void RespondToJsCall(uint64_t call_id, webview::ValuePtr result, const char* error) override;
+  void RespondToJsCall(uint64_t call_id, webview::ValuePtr result, webview::ValuePtr error) override;
 
   void Run() override;
 
@@ -675,6 +686,117 @@ void WebView2Backend::SetWindowSize(int width, int height) {
       }));
 }
 
+void WebView2Backend::GetWindowSize(int* width, int* height) {
+  RECT rect;
+  if (GetWindowRect(hwnd_, &rect)) {
+    if (width) *width = rect.right - rect.left;
+    if (height) *height = rect.bottom - rect.top;
+  }
+}
+
+void WebView2Backend::SetWindowPosition(int x, int y) {
+  PostMessage(hwnd_, WM_UI_TASK, 0,
+      reinterpret_cast<LPARAM>(new UiTaskData{
+          [](void* data) {
+            auto* tuple = static_cast<std::tuple<HWND, int, int>*>(data);
+            SetWindowPos(std::get<0>(*tuple), nullptr,
+                         std::get<1>(*tuple), std::get<2>(*tuple),
+                         0, 0, SWP_NOSIZE | SWP_NOZORDER);
+            delete tuple;
+          },
+          new std::tuple<HWND, int, int>(hwnd_, x, y)
+      }));
+}
+
+void WebView2Backend::GetWindowPosition(int* x, int* y) {
+  RECT rect;
+  if (GetWindowRect(hwnd_, &rect)) {
+    if (x) *x = rect.left;
+    if (y) *y = rect.top;
+  }
+}
+
+void WebView2Backend::SetResizable(bool resizable) {
+  PostMessage(hwnd_, WM_UI_TASK, 0,
+      reinterpret_cast<LPARAM>(new UiTaskData{
+          [](void* data) {
+            auto* tuple = static_cast<std::tuple<HWND, bool>*>(data);
+            HWND h = std::get<0>(*tuple);
+            bool r = std::get<1>(*tuple);
+            LONG style = GetWindowLong(h, GWL_STYLE);
+            if (r) {
+              style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
+            } else {
+              style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
+            }
+            SetWindowLong(h, GWL_STYLE, style);
+            delete tuple;
+          },
+          new std::tuple<HWND, bool>(hwnd_, resizable)
+      }));
+}
+
+bool WebView2Backend::IsResizable() {
+  LONG style = GetWindowLong(hwnd_, GWL_STYLE);
+  return (style & WS_THICKFRAME) != 0;
+}
+
+void WebView2Backend::SetAlwaysOnTop(bool always_on_top) {
+  PostMessage(hwnd_, WM_UI_TASK, 0,
+      reinterpret_cast<LPARAM>(new UiTaskData{
+          [](void* data) {
+            auto* tuple = static_cast<std::tuple<HWND, bool>*>(data);
+            SetWindowPos(std::get<0>(*tuple),
+                         std::get<1>(*tuple) ? HWND_TOPMOST : HWND_NOTOPMOST,
+                         0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+            delete tuple;
+          },
+          new std::tuple<HWND, bool>(hwnd_, always_on_top)
+      }));
+}
+
+bool WebView2Backend::IsAlwaysOnTop() {
+  LONG ex_style = GetWindowLong(hwnd_, GWL_EXSTYLE);
+  return (ex_style & WS_EX_TOPMOST) != 0;
+}
+
+bool WebView2Backend::IsVisible() {
+  return IsWindowVisible(hwnd_) != FALSE;
+}
+
+void WebView2Backend::Show() {
+  PostMessage(hwnd_, WM_UI_TASK, 0,
+      reinterpret_cast<LPARAM>(new UiTaskData{
+          [](void* data) {
+            ShowWindow(static_cast<HWND>(data), SW_SHOW);
+          },
+          hwnd_
+      }));
+}
+
+void WebView2Backend::Hide() {
+  PostMessage(hwnd_, WM_UI_TASK, 0,
+      reinterpret_cast<LPARAM>(new UiTaskData{
+          [](void* data) {
+            ShowWindow(static_cast<HWND>(data), SW_HIDE);
+          },
+          hwnd_
+      }));
+}
+
+void WebView2Backend::Focus() {
+  PostMessage(hwnd_, WM_UI_TASK, 0,
+      reinterpret_cast<LPARAM>(new UiTaskData{
+          [](void* data) {
+            HWND h = static_cast<HWND>(data);
+            ShowWindow(h, SW_SHOW);
+            SetForegroundWindow(h);
+            SetFocus(h);
+          },
+          hwnd_
+      }));
+}
+
 void WebView2Backend::PostUiTask(void (*task)(void*), void* data) {
   PostMessage(hwnd_, WM_UI_TASK, 0,
       reinterpret_cast<LPARAM>(new UiTaskData{task, data}));
@@ -693,12 +815,13 @@ void WebView2Backend::ReleaseJsCallback(uint64_t callback_id) {
   ExecuteJs(script);
 }
 
-void WebView2Backend::RespondToJsCall(uint64_t call_id, webview::ValuePtr result, const char* error) {
+void WebView2Backend::RespondToJsCall(uint64_t call_id, webview::ValuePtr result, webview::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
   std::string script;
-  if (error && strlen(error) > 0) {
-    script = "window.__wefRespond(" + std::to_string(call_id) + ", null, \"" +
-             json::Escape(error) + "\");";
+  if (error) {
+    std::string errorJson = json::Serialize(error);
+    script = "window.__wefRespond(" + std::to_string(call_id) + ", null, " +
+             errorJson + ");";
   } else {
     script = "window.__wefRespond(" + std::to_string(call_id) + ", " +
              resultJson + ", null);";

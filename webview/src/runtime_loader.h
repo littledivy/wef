@@ -49,7 +49,7 @@ class RuntimeLoader {
   void OnJsCall(uint64_t call_id, const std::string& method_path,
                 wef::ValuePtr args);
 
-  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, const char* error);
+  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error);
 
   wef_js_call_fn GetJsCallHandler() const { return js_call_handler_; }
   void* GetJsCallUserData() const { return js_call_user_data_; }
@@ -96,12 +96,23 @@ class WefBackend {
   virtual void ExecuteJs(const std::string& script) = 0;
   virtual void Quit() = 0;
   virtual void SetWindowSize(int width, int height) = 0;
+  virtual void GetWindowSize(int* width, int* height) = 0;
+  virtual void SetWindowPosition(int x, int y) = 0;
+  virtual void GetWindowPosition(int* x, int* y) = 0;
+  virtual void SetResizable(bool resizable) = 0;
+  virtual bool IsResizable() = 0;
+  virtual void SetAlwaysOnTop(bool always_on_top) = 0;
+  virtual bool IsAlwaysOnTop() = 0;
+  virtual bool IsVisible() = 0;
+  virtual void Show() = 0;
+  virtual void Hide() = 0;
+  virtual void Focus() = 0;
   virtual void PostUiTask(void (*task)(void*), void* data) = 0;
 
   virtual void InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) = 0;
   virtual void ReleaseJsCallback(uint64_t callback_id) = 0;
 
-  virtual void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, const char* error) = 0;
+  virtual void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) = 0;
 
   virtual void Run() = 0;
 };

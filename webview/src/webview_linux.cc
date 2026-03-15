@@ -306,11 +306,22 @@ class WebKitGTKBackend : public WebviewBackend {
   void ExecuteJs(const std::string& script) override;
   void Quit() override;
   void SetWindowSize(int width, int height) override;
+  void GetWindowSize(int* width, int* height) override;
+  void SetWindowPosition(int x, int y) override;
+  void GetWindowPosition(int* x, int* y) override;
+  void SetResizable(bool resizable) override;
+  bool IsResizable() override;
+  void SetAlwaysOnTop(bool always_on_top) override;
+  bool IsAlwaysOnTop() override;
+  bool IsVisible() override;
+  void Show() override;
+  void Hide() override;
+  void Focus() override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
   void InvokeJsCallback(uint64_t callback_id, webview::ValuePtr args) override;
   void ReleaseJsCallback(uint64_t callback_id) override;
-  void RespondToJsCall(uint64_t call_id, webview::ValuePtr result, const char* error) override;
+  void RespondToJsCall(uint64_t call_id, webview::ValuePtr result, webview::ValuePtr error) override;
 
   void Run() override;
 
@@ -527,6 +538,98 @@ void WebKitGTKBackend::SetWindowSize(int width, int height) {
   }, sizeData);
 }
 
+void WebKitGTKBackend::GetWindowSize(int* width, int* height) {
+  int w = 0, h = 0;
+  gtk_window_get_size(GTK_WINDOW(window_), &w, &h);
+  if (width) *width = w;
+  if (height) *height = h;
+}
+
+void WebKitGTKBackend::SetWindowPosition(int x, int y) {
+  struct PosData { WebKitGTKBackend* backend; int x; int y; };
+  auto* posData = new PosData{this, x, y};
+  g_idle_add([](gpointer data) -> gboolean {
+    auto* pd = static_cast<PosData*>(data);
+    gtk_window_move(GTK_WINDOW(pd->backend->window_), pd->x, pd->y);
+    delete pd;
+    return G_SOURCE_REMOVE;
+  }, posData);
+}
+
+void WebKitGTKBackend::GetWindowPosition(int* x, int* y) {
+  int wx = 0, wy = 0;
+  gtk_window_get_position(GTK_WINDOW(window_), &wx, &wy);
+  if (x) *x = wx;
+  if (y) *y = wy;
+}
+
+void WebKitGTKBackend::SetResizable(bool resizable) {
+  struct ResData { WebKitGTKBackend* backend; bool resizable; };
+  auto* resData = new ResData{this, resizable};
+  g_idle_add([](gpointer data) -> gboolean {
+    auto* rd = static_cast<ResData*>(data);
+    gtk_window_set_resizable(GTK_WINDOW(rd->backend->window_), rd->resizable);
+    delete rd;
+    return G_SOURCE_REMOVE;
+  }, resData);
+}
+
+bool WebKitGTKBackend::IsResizable() {
+  return gtk_window_get_resizable(GTK_WINDOW(window_)) != FALSE;
+}
+
+void WebKitGTKBackend::SetAlwaysOnTop(bool always_on_top) {
+  struct TopData { WebKitGTKBackend* backend; bool on_top; };
+  auto* topData = new TopData{this, always_on_top};
+  g_idle_add([](gpointer data) -> gboolean {
+    auto* td = static_cast<TopData*>(data);
+    gtk_window_set_keep_above(GTK_WINDOW(td->backend->window_), td->on_top);
+    delete td;
+    return G_SOURCE_REMOVE;
+  }, topData);
+}
+
+bool WebKitGTKBackend::IsAlwaysOnTop() {
+  // GTK does not provide a direct getter for keep-above state;
+  // GDK window state must be checked.
+  GdkWindow* gdk_window = gtk_widget_get_window(window_);
+  if (gdk_window) {
+    GdkWindowState state = gdk_window_get_state(gdk_window);
+    return (state & GDK_WINDOW_STATE_ABOVE) != 0;
+  }
+  return false;
+}
+
+bool WebKitGTKBackend::IsVisible() {
+  return gtk_widget_get_visible(window_) != FALSE;
+}
+
+void WebKitGTKBackend::Show() {
+  g_idle_add([](gpointer data) -> gboolean {
+    gtk_widget_show(static_cast<GtkWidget*>(data));
+    return G_SOURCE_REMOVE;
+  }, window_);
+}
+
+void WebKitGTKBackend::Hide() {
+  g_idle_add([](gpointer data) -> gboolean {
+    gtk_widget_hide(static_cast<GtkWidget*>(data));
+    return G_SOURCE_REMOVE;
+  }, window_);
+}
+
+void WebKitGTKBackend::Focus() {
+  struct FocusData { GtkWidget* window; };
+  auto* fd = new FocusData{window_};
+  g_idle_add([](gpointer data) -> gboolean {
+    auto* fd = static_cast<FocusData*>(data);
+    gtk_widget_show(fd->window);
+    gtk_window_present(GTK_WINDOW(fd->window));
+    delete fd;
+    return G_SOURCE_REMOVE;
+  }, fd);
+}
+
 void WebKitGTKBackend::PostUiTask(void (*task)(void*), void* data) {
   struct TaskData { void (*task)(void*); void* data; };
   auto* td = new TaskData{task, data};
@@ -567,20 +670,20 @@ void WebKitGTKBackend::ReleaseJsCallback(uint64_t callback_id) {
   }, cbData);
 }
 
-void WebKitGTKBackend::RespondToJsCall(uint64_t call_id, webview::ValuePtr result, const char* error) {
+void WebKitGTKBackend::RespondToJsCall(uint64_t call_id, webview::ValuePtr result, webview::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
-  std::string errorStr = error ? json::Escape(error) : "";
+  std::string errorJson = error ? json::Serialize(error) : "null";
   struct RespData { WebKitGTKBackend* backend; uint64_t id; std::string result; std::string error; };
-  auto* respData = new RespData{this, call_id, resultJson, errorStr};
+  auto* respData = new RespData{this, call_id, resultJson, errorJson};
   g_idle_add([](gpointer data) -> gboolean {
     auto* rd = static_cast<RespData*>(data);
     std::string script;
-    if (rd->error.empty()) {
+    if (rd->error == "null") {
       script = "window.__wefRespond(" + std::to_string(rd->id) + ", " +
                rd->result + ", null);";
     } else {
-      script = "window.__wefRespond(" + std::to_string(rd->id) + ", null, \"" +
-               rd->error + "\");";
+      script = "window.__wefRespond(" + std::to_string(rd->id) + ", null, " +
+               rd->error + ");";
     }
     webkit_web_view_run_javascript(rd->backend->webview_, script.c_str(),
                                     nullptr, nullptr, nullptr);

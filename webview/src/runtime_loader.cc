@@ -53,6 +53,97 @@ static void Backend_SetWindowSize(void* data, int width, int height) {
   }
 }
 
+static void Backend_GetWindowSize(void* data, int* width, int* height) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->GetWindowSize(width, height);
+  }
+}
+
+static void Backend_SetWindowPosition(void* data, int x, int y) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->SetWindowPosition(x, y);
+  }
+}
+
+static void Backend_GetWindowPosition(void* data, int* x, int* y) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->GetWindowPosition(x, y);
+  }
+}
+
+static void Backend_SetResizable(void* data, bool resizable) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->SetResizable(resizable);
+  }
+}
+
+static bool Backend_IsResizable(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    return backend->IsResizable();
+  }
+  return false;
+}
+
+static void Backend_SetAlwaysOnTop(void* data, bool always_on_top) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->SetAlwaysOnTop(always_on_top);
+  }
+}
+
+static bool Backend_IsAlwaysOnTop(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    return backend->IsAlwaysOnTop();
+  }
+  return false;
+}
+
+static bool Backend_IsVisible(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    return backend->IsVisible();
+  }
+  return false;
+}
+
+static void Backend_Show(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->Show();
+  }
+}
+
+static void Backend_Hide(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->Hide();
+  }
+}
+
+static void Backend_Focus(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->Focus();
+  }
+}
+
 static void Backend_PostUiTask(void* data, void (*task)(void*), void* task_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
@@ -285,10 +376,11 @@ static void Backend_SetJsCallHandler(void* data, wef_js_call_fn handler, void* u
 }
 
 static void Backend_JsCallRespond(void* data, uint64_t call_id,
-                                   wef_value_t* result, const char* error) {
+                                   wef_value_t* result, wef_value_t* error) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   wef::ValuePtr resultPtr = (result && result->value) ? result->value : wef::Value::Null();
-  loader->JsCallRespond(call_id, resultPtr, error);
+  wef::ValuePtr errorPtr = (error && error->value) ? error->value : nullptr;
+  loader->JsCallRespond(call_id, resultPtr, errorPtr);
 }
 
 static void Backend_InvokeJsCallback(void* data, uint64_t callback_id, wef_value_t* args) {
@@ -317,6 +409,17 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.execute_js = Backend_ExecuteJs;
   backend_api_.quit = Backend_Quit;
   backend_api_.set_window_size = Backend_SetWindowSize;
+  backend_api_.get_window_size = Backend_GetWindowSize;
+  backend_api_.set_window_position = Backend_SetWindowPosition;
+  backend_api_.get_window_position = Backend_GetWindowPosition;
+  backend_api_.set_resizable = Backend_SetResizable;
+  backend_api_.is_resizable = Backend_IsResizable;
+  backend_api_.set_always_on_top = Backend_SetAlwaysOnTop;
+  backend_api_.is_always_on_top = Backend_IsAlwaysOnTop;
+  backend_api_.is_visible = Backend_IsVisible;
+  backend_api_.show = Backend_Show;
+  backend_api_.hide = Backend_Hide;
+  backend_api_.focus = Backend_Focus;
   backend_api_.post_ui_task = Backend_PostUiTask;
 
   backend_api_.value_is_null = Backend_ValueIsNull;
@@ -503,7 +606,8 @@ void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
   }
 
   if (!handler) {
-    JsCallRespond(call_id, nullptr, "No JS call handler registered");
+    wef::ValuePtr errStr = wef::Value::String("No JS call handler registered");
+    JsCallRespond(call_id, nullptr, errStr);
     return;
   }
 
@@ -511,7 +615,7 @@ void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
   handler(user_data, call_id, method_path.c_str(), argsWrapper);
 }
 
-void RuntimeLoader::JsCallRespond(uint64_t call_id, wef::ValuePtr result, const char* error) {
+void RuntimeLoader::JsCallRespond(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) {
   WefBackend* backend = GetBackend();
   if (backend) {
     backend->RespondToJsCall(call_id, result, error);

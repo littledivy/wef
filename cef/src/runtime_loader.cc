@@ -85,6 +85,177 @@ static void Backend_SetWindowSize(void* data, int width, int height) {
   }
 }
 
+static void Backend_GetWindowSize(void* data, int* width, int* height) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    auto browser_view = CefBrowserView::GetForBrowser(browser);
+    if (browser_view) {
+      auto window = browser_view->GetWindow();
+      if (window) {
+        CefSize size = window->GetSize();
+        if (width) *width = size.width;
+        if (height) *height = size.height;
+        return;
+      }
+    }
+  }
+  if (width) *width = 0;
+  if (height) *height = 0;
+}
+
+static void Backend_SetWindowPosition(void* data, int x, int y) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, int px, int py) {
+          auto browser_view = CefBrowserView::GetForBrowser(b);
+          if (browser_view) {
+            auto window = browser_view->GetWindow();
+            if (window) {
+              window->SetPosition(CefPoint(px, py));
+            }
+          }
+        },
+        browser, x, y));
+  }
+}
+
+static void Backend_GetWindowPosition(void* data, int* x, int* y) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    auto browser_view = CefBrowserView::GetForBrowser(browser);
+    if (browser_view) {
+      auto window = browser_view->GetWindow();
+      if (window) {
+        CefPoint pos = window->GetPosition();
+        if (x) *x = pos.x;
+        if (y) *y = pos.y;
+        return;
+      }
+    }
+  }
+  if (x) *x = 0;
+  if (y) *y = 0;
+}
+
+static void Backend_SetResizable(void* data, bool resizable) {
+  // CEF Views framework does not expose a direct resizable toggle
+  (void)data;
+  (void)resizable;
+}
+
+static bool Backend_IsResizable(void* data) {
+  // CEF Views framework does not expose a direct resizable query
+  (void)data;
+  return true;
+}
+
+static void Backend_SetAlwaysOnTop(void* data, bool always_on_top) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, bool on_top) {
+          auto browser_view = CefBrowserView::GetForBrowser(b);
+          if (browser_view) {
+            auto window = browser_view->GetWindow();
+            if (window) {
+              window->SetAlwaysOnTop(on_top);
+            }
+          }
+        },
+        browser, always_on_top));
+  }
+}
+
+static bool Backend_IsAlwaysOnTop(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    auto browser_view = CefBrowserView::GetForBrowser(browser);
+    if (browser_view) {
+      auto window = browser_view->GetWindow();
+      if (window) {
+        return window->IsAlwaysOnTop();
+      }
+    }
+  }
+  return false;
+}
+
+static bool Backend_IsVisible(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    auto browser_view = CefBrowserView::GetForBrowser(browser);
+    if (browser_view) {
+      auto window = browser_view->GetWindow();
+      if (window) {
+        return window->IsVisible();
+      }
+    }
+  }
+  return false;
+}
+
+static void Backend_Show(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b) {
+          auto browser_view = CefBrowserView::GetForBrowser(b);
+          if (browser_view) {
+            auto window = browser_view->GetWindow();
+            if (window) {
+              window->Show();
+            }
+          }
+        },
+        browser));
+  }
+}
+
+static void Backend_Hide(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b) {
+          auto browser_view = CefBrowserView::GetForBrowser(b);
+          if (browser_view) {
+            auto window = browser_view->GetWindow();
+            if (window) {
+              window->Hide();
+            }
+          }
+        },
+        browser));
+  }
+}
+
+static void Backend_Focus(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b) {
+          auto browser_view = CefBrowserView::GetForBrowser(b);
+          if (browser_view) {
+            auto window = browser_view->GetWindow();
+            if (window) {
+              window->Show();
+              window->Activate();
+            }
+          }
+        },
+        browser));
+  }
+}
+
 static void Backend_PostUiTask(void* data, void (*task)(void*), void* task_data) {
   if (task) {
     CefPostTask(TID_UI, base::BindOnce(
@@ -331,7 +502,7 @@ static void Backend_SetJsCallHandler(void* data, wef_js_call_fn handler, void* u
 }
 
 static void Backend_JsCallRespond(void* data, uint64_t call_id,
-                                  wef_value_t* result, const char* error) {
+                                  wef_value_t* result, wef_value_t* error) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
   if (!browser) return;
@@ -348,7 +519,13 @@ static void Backend_JsCallRespond(void* data, uint64_t call_id,
     args->SetValue(1, null_val);
   }
 
-  args->SetString(2, error ? error : "");
+  if (error && error->value) {
+    args->SetValue(2, error->value);
+  } else {
+    CefRefPtr<CefValue> null_val = CefValue::Create();
+    null_val->SetNull();
+    args->SetValue(2, null_val);
+  }
 
   CefPostTask(TID_UI, base::BindOnce(
       [](CefRefPtr<CefBrowser> b, CefRefPtr<CefProcessMessage> m) {
@@ -404,6 +581,17 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.execute_js = Backend_ExecuteJs;
   backend_api_.quit = Backend_Quit;
   backend_api_.set_window_size = Backend_SetWindowSize;
+  backend_api_.get_window_size = Backend_GetWindowSize;
+  backend_api_.set_window_position = Backend_SetWindowPosition;
+  backend_api_.get_window_position = Backend_GetWindowPosition;
+  backend_api_.set_resizable = Backend_SetResizable;
+  backend_api_.is_resizable = Backend_IsResizable;
+  backend_api_.set_always_on_top = Backend_SetAlwaysOnTop;
+  backend_api_.is_always_on_top = Backend_IsAlwaysOnTop;
+  backend_api_.is_visible = Backend_IsVisible;
+  backend_api_.show = Backend_Show;
+  backend_api_.hide = Backend_Hide;
+  backend_api_.focus = Backend_Focus;
   backend_api_.post_ui_task = Backend_PostUiTask;
 
   backend_api_.value_is_null = Backend_ValueIsNull;
@@ -565,7 +753,10 @@ void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
   }
 
   if (!handler) {
-    Backend_JsCallRespond(this, call_id, nullptr, "No JS call handler registered");
+    CefRefPtr<CefValue> errVal = CefValue::Create();
+    errVal->SetString("No JS call handler registered");
+    wef_value_t errWrapper{errVal};
+    Backend_JsCallRespond(this, call_id, nullptr, &errWrapper);
     return;
   }
 
