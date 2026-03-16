@@ -12,4 +12,3 @@ path = "src/main.rs"
 
 [dependencies]
 wef-backend-winit-common = { path = "../backend-winit-common" }
-winit.workspace = true

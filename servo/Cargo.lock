@@ -8613,13 +8613,13 @@ version = "0.1.0"
 dependencies = [
  "embedder_traits",
  "euclid",
+ "keyboard-types",
  "libservo",
  "rustls",
  "tracing",
  "url",
  "webrender_api",
  "wef-backend-winit-common",
- "winit",
 ]
 
 [[package]]

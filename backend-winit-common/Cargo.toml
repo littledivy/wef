@@ -5,6 +5,6 @@ edition = "2021"
 license = "MIT"
 
 [dependencies]
-winit.workspace = true
+winit = "0.30"
 raw-window-handle = "0.6"
 libloading = "0.8"

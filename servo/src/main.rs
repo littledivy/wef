@@ -8,20 +8,22 @@ use std::sync::Mutex;
 
 use euclid::Scale;
 use servo::{
-    InputEvent, MouseButton as ServoMouseButton, MouseButtonAction, MouseButtonEvent,
-    MouseMoveEvent, RenderingContext, Servo, ServoBuilder, WebView, WebViewBuilder, WheelDelta,
-    WheelEvent, WheelMode, WindowRenderingContext,
+    InputEvent, KeyboardEvent as ServoKeyboardEvent, MouseButton as ServoMouseButton,
+    MouseButtonAction, MouseButtonEvent, MouseMoveEvent, RenderingContext, Servo, ServoBuilder,
+    WebView, WebViewBuilder, WheelDelta, WheelEvent, WheelMode, WindowRenderingContext,
 };
 use tracing::warn;
 use url::Url;
 use wef_backend_winit_common::{
     BackendAccess, CommonEvent, CommonState, WefBackendApi, WefJsResultFn,
-    define_common_backend_fns, fill_common_api,
+    define_common_backend_fns, fill_common_api, winit
 };
 use webrender_api::units::{DeviceIntPoint, DevicePoint};
+use keyboard_types::{Code, Key, KeyState, Location, Modifiers};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopProxy};
+use winit::keyboard::ModifiersState;
 use winit::raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::window::Window;
 
@@ -100,7 +102,7 @@ unsafe extern "C" fn backend_execute_js(
 // --- API construction ---
 
 fn create_backend_api() -> WefBackendApi {
-    let mut api = wef_backend_common::create_api_base();
+    let mut api = wef_backend_winit_common::create_api_base();
     fill_common_api!(api);
     api.navigate = Some(backend_navigate);
     api.execute_js = Some(backend_execute_js);
@@ -123,6 +125,7 @@ struct AppState {
     rendering_context: Rc<WindowRenderingContext>,
     webviews: RefCell<Vec<WebView>>,
     mouse_position: Cell<DeviceIntPoint>,
+    modifiers: Cell<ModifiersState>,
 }
 
 impl servo::WebViewDelegate for AppState {
@@ -181,6 +184,7 @@ impl ApplicationHandler<UserEvent> for App {
                 rendering_context,
                 webviews: Default::default(),
                 mouse_position: Cell::new(DeviceIntPoint::zero()),
+                modifiers: Cell::new(ModifiersState::default()),
             });
 
             if state.pending_navigate.lock().unwrap().is_some() {
@@ -398,6 +402,34 @@ impl ApplicationHandler<UserEvent> for App {
                     }
                 }
             }
+            WindowEvent::ModifiersChanged(new_modifiers) => {
+                if let Self::Running(state) = self {
+                    state.modifiers.set(new_modifiers.state());
+                }
+            }
+            WindowEvent::KeyboardInput {
+                event: ref key_event,
+                ..
+            } => {
+                if let Self::Running(state) = self {
+                    let mods = state.modifiers.get();
+
+                    // Forward to servo webview
+                    if let Some(webview) = state.webviews.borrow().last() {
+                        let servo_event = keyboard_event_from_winit(key_event, mods);
+                        webview.notify_input_event(InputEvent::Keyboard(servo_event));
+                    }
+
+                    // Dispatch to runtime callback
+                    if let Some(backend_state) = BackendState::get() {
+                        wef_backend_winit_common::dispatch_keyboard_event(
+                            &backend_state.common,
+                            key_event,
+                            mods,
+                        );
+                    }
+                }
+            }
             _ => (),
         }
     }
@@ -422,6 +454,185 @@ impl embedder_traits::EventLoopWaker for Waker {
             warn!(?error, "Failed to wake event loop");
         }
     }
+}
+
+fn keyboard_event_from_winit(
+    key_event: &winit::event::KeyEvent,
+    mods: ModifiersState,
+) -> ServoKeyboardEvent {
+    use winit::keyboard::{
+        Key as WinitKey, KeyCode, KeyLocation as WinitKeyLocation, NamedKey as WinitNamedKey,
+        PhysicalKey,
+    };
+
+    let key_state = match key_event.state {
+        ElementState::Pressed => KeyState::Down,
+        ElementState::Released => KeyState::Up,
+    };
+
+    #[allow(deprecated)]
+    let key = match key_event.logical_key {
+        WinitKey::Character(ref s) => Key::Character(s.to_string()),
+        WinitKey::Named(named) => match named {
+            WinitNamedKey::Alt => Key::Named(keyboard_types::NamedKey::Alt),
+            WinitNamedKey::AltGraph => Key::Named(keyboard_types::NamedKey::AltGraph),
+            WinitNamedKey::ArrowDown => Key::Named(keyboard_types::NamedKey::ArrowDown),
+            WinitNamedKey::ArrowLeft => Key::Named(keyboard_types::NamedKey::ArrowLeft),
+            WinitNamedKey::ArrowRight => Key::Named(keyboard_types::NamedKey::ArrowRight),
+            WinitNamedKey::ArrowUp => Key::Named(keyboard_types::NamedKey::ArrowUp),
+            WinitNamedKey::Backspace => Key::Named(keyboard_types::NamedKey::Backspace),
+            WinitNamedKey::CapsLock => Key::Named(keyboard_types::NamedKey::CapsLock),
+            WinitNamedKey::Control => Key::Named(keyboard_types::NamedKey::Control),
+            WinitNamedKey::Delete => Key::Named(keyboard_types::NamedKey::Delete),
+            WinitNamedKey::End => Key::Named(keyboard_types::NamedKey::End),
+            WinitNamedKey::Enter => Key::Named(keyboard_types::NamedKey::Enter),
+            WinitNamedKey::Escape => Key::Named(keyboard_types::NamedKey::Escape),
+            WinitNamedKey::F1 => Key::Named(keyboard_types::NamedKey::F1),
+            WinitNamedKey::F2 => Key::Named(keyboard_types::NamedKey::F2),
+            WinitNamedKey::F3 => Key::Named(keyboard_types::NamedKey::F3),
+            WinitNamedKey::F4 => Key::Named(keyboard_types::NamedKey::F4),
+            WinitNamedKey::F5 => Key::Named(keyboard_types::NamedKey::F5),
+            WinitNamedKey::F6 => Key::Named(keyboard_types::NamedKey::F6),
+            WinitNamedKey::F7 => Key::Named(keyboard_types::NamedKey::F7),
+            WinitNamedKey::F8 => Key::Named(keyboard_types::NamedKey::F8),
+            WinitNamedKey::F9 => Key::Named(keyboard_types::NamedKey::F9),
+            WinitNamedKey::F10 => Key::Named(keyboard_types::NamedKey::F10),
+            WinitNamedKey::F11 => Key::Named(keyboard_types::NamedKey::F11),
+            WinitNamedKey::F12 => Key::Named(keyboard_types::NamedKey::F12),
+            WinitNamedKey::Home => Key::Named(keyboard_types::NamedKey::Home),
+            WinitNamedKey::Insert => Key::Named(keyboard_types::NamedKey::Insert),
+            WinitNamedKey::Meta => Key::Named(keyboard_types::NamedKey::Meta),
+            WinitNamedKey::NumLock => Key::Named(keyboard_types::NamedKey::NumLock),
+            WinitNamedKey::PageDown => Key::Named(keyboard_types::NamedKey::PageDown),
+            WinitNamedKey::PageUp => Key::Named(keyboard_types::NamedKey::PageUp),
+            WinitNamedKey::Pause => Key::Named(keyboard_types::NamedKey::Pause),
+            WinitNamedKey::PrintScreen => Key::Named(keyboard_types::NamedKey::PrintScreen),
+            WinitNamedKey::ScrollLock => Key::Named(keyboard_types::NamedKey::ScrollLock),
+            WinitNamedKey::Shift => Key::Named(keyboard_types::NamedKey::Shift),
+            WinitNamedKey::Space => Key::Character(" ".to_string()),
+            WinitNamedKey::Super => Key::Named(keyboard_types::NamedKey::Super),
+            WinitNamedKey::Tab => Key::Named(keyboard_types::NamedKey::Tab),
+            WinitNamedKey::ContextMenu => Key::Named(keyboard_types::NamedKey::ContextMenu),
+            _ => Key::Named(keyboard_types::NamedKey::Unidentified),
+        },
+        WinitKey::Unidentified(_) | WinitKey::Dead(_) => {
+            Key::Named(keyboard_types::NamedKey::Unidentified)
+        }
+    };
+
+    #[allow(deprecated)]
+    let code = match key_event.physical_key {
+        PhysicalKey::Code(kc) => match kc {
+            KeyCode::KeyA => Code::KeyA,
+            KeyCode::KeyB => Code::KeyB,
+            KeyCode::KeyC => Code::KeyC,
+            KeyCode::KeyD => Code::KeyD,
+            KeyCode::KeyE => Code::KeyE,
+            KeyCode::KeyF => Code::KeyF,
+            KeyCode::KeyG => Code::KeyG,
+            KeyCode::KeyH => Code::KeyH,
+            KeyCode::KeyI => Code::KeyI,
+            KeyCode::KeyJ => Code::KeyJ,
+            KeyCode::KeyK => Code::KeyK,
+            KeyCode::KeyL => Code::KeyL,
+            KeyCode::KeyM => Code::KeyM,
+            KeyCode::KeyN => Code::KeyN,
+            KeyCode::KeyO => Code::KeyO,
+            KeyCode::KeyP => Code::KeyP,
+            KeyCode::KeyQ => Code::KeyQ,
+            KeyCode::KeyR => Code::KeyR,
+            KeyCode::KeyS => Code::KeyS,
+            KeyCode::KeyT => Code::KeyT,
+            KeyCode::KeyU => Code::KeyU,
+            KeyCode::KeyV => Code::KeyV,
+            KeyCode::KeyW => Code::KeyW,
+            KeyCode::KeyX => Code::KeyX,
+            KeyCode::KeyY => Code::KeyY,
+            KeyCode::KeyZ => Code::KeyZ,
+            KeyCode::Digit0 => Code::Digit0,
+            KeyCode::Digit1 => Code::Digit1,
+            KeyCode::Digit2 => Code::Digit2,
+            KeyCode::Digit3 => Code::Digit3,
+            KeyCode::Digit4 => Code::Digit4,
+            KeyCode::Digit5 => Code::Digit5,
+            KeyCode::Digit6 => Code::Digit6,
+            KeyCode::Digit7 => Code::Digit7,
+            KeyCode::Digit8 => Code::Digit8,
+            KeyCode::Digit9 => Code::Digit9,
+            KeyCode::Enter => Code::Enter,
+            KeyCode::Escape => Code::Escape,
+            KeyCode::Backspace => Code::Backspace,
+            KeyCode::Tab => Code::Tab,
+            KeyCode::Space => Code::Space,
+            KeyCode::Minus => Code::Minus,
+            KeyCode::Equal => Code::Equal,
+            KeyCode::BracketLeft => Code::BracketLeft,
+            KeyCode::BracketRight => Code::BracketRight,
+            KeyCode::Backslash => Code::Backslash,
+            KeyCode::Semicolon => Code::Semicolon,
+            KeyCode::Quote => Code::Quote,
+            KeyCode::Backquote => Code::Backquote,
+            KeyCode::Comma => Code::Comma,
+            KeyCode::Period => Code::Period,
+            KeyCode::Slash => Code::Slash,
+            KeyCode::CapsLock => Code::CapsLock,
+            KeyCode::F1 => Code::F1,
+            KeyCode::F2 => Code::F2,
+            KeyCode::F3 => Code::F3,
+            KeyCode::F4 => Code::F4,
+            KeyCode::F5 => Code::F5,
+            KeyCode::F6 => Code::F6,
+            KeyCode::F7 => Code::F7,
+            KeyCode::F8 => Code::F8,
+            KeyCode::F9 => Code::F9,
+            KeyCode::F10 => Code::F10,
+            KeyCode::F11 => Code::F11,
+            KeyCode::F12 => Code::F12,
+            KeyCode::Delete => Code::Delete,
+            KeyCode::Insert => Code::Insert,
+            KeyCode::Home => Code::Home,
+            KeyCode::End => Code::End,
+            KeyCode::PageUp => Code::PageUp,
+            KeyCode::PageDown => Code::PageDown,
+            KeyCode::ArrowUp => Code::ArrowUp,
+            KeyCode::ArrowDown => Code::ArrowDown,
+            KeyCode::ArrowLeft => Code::ArrowLeft,
+            KeyCode::ArrowRight => Code::ArrowRight,
+            KeyCode::ShiftLeft => Code::ShiftLeft,
+            KeyCode::ShiftRight => Code::ShiftRight,
+            KeyCode::ControlLeft => Code::ControlLeft,
+            KeyCode::ControlRight => Code::ControlRight,
+            KeyCode::AltLeft => Code::AltLeft,
+            KeyCode::AltRight => Code::AltRight,
+            KeyCode::SuperLeft => Code::MetaLeft,
+            KeyCode::SuperRight => Code::MetaRight,
+            _ => Code::Unidentified,
+        },
+        PhysicalKey::Unidentified(_) => Code::Unidentified,
+    };
+
+    let location = match key_event.location {
+        WinitKeyLocation::Left => Location::Left,
+        WinitKeyLocation::Right => Location::Right,
+        WinitKeyLocation::Numpad => Location::Numpad,
+        WinitKeyLocation::Standard => Location::Standard,
+    };
+
+    let mut modifiers = Modifiers::empty();
+    modifiers.set(Modifiers::SHIFT, mods.shift_key());
+    modifiers.set(Modifiers::CONTROL, mods.control_key());
+    modifiers.set(Modifiers::ALT, mods.alt_key());
+    modifiers.set(Modifiers::META, mods.super_key());
+
+    ServoKeyboardEvent::new_without_event(
+        key_state,
+        key,
+        code,
+        location,
+        modifiers,
+        key_event.repeat,
+        false,
+    )
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

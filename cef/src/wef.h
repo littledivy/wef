@@ -22,6 +22,26 @@ typedef void (*wef_js_call_fn)(
     wef_value_t* args
 );
 
+// Keyboard event state
+#define WEF_KEY_PRESSED  0
+#define WEF_KEY_RELEASED 1
+
+// Keyboard modifier flags (bitmask)
+#define WEF_MOD_SHIFT   (1 << 0)
+#define WEF_MOD_CONTROL (1 << 1)
+#define WEF_MOD_ALT     (1 << 2)
+#define WEF_MOD_META    (1 << 3)
+
+// Callback for keyboard events.
+typedef void (*wef_keyboard_event_fn)(
+    void* user_data,
+    int state,              // WEF_KEY_PRESSED or WEF_KEY_RELEASED
+    const char* key,        // logical key (W3C UI Events key value)
+    const char* code,       // physical key code (W3C UI Events code)
+    uint32_t modifiers,     // bitmask of WEF_MOD_* flags
+    bool repeat
+);
+
 typedef struct wef_backend_api {
     uint32_t version;
     void* backend_data;
@@ -88,6 +108,12 @@ typedef struct wef_backend_api {
 
     void (*invoke_js_callback)(void* backend_data, uint64_t callback_id, wef_value_t* args);
     void (*release_js_callback)(void* backend_data, uint64_t callback_id);
+
+    void (*set_keyboard_event_handler)(
+        void* backend_data,
+        wef_keyboard_event_fn handler,
+        void* user_data
+    );
 
 } wef_backend_api_t;
 

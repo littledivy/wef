@@ -54,6 +54,20 @@ class RuntimeLoader {
     js_call_user_data_ = user_data;
   }
 
+  void SetKeyboardEventHandler(wef_keyboard_event_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(keyboard_mutex_);
+    keyboard_handler_ = handler;
+    keyboard_user_data_ = user_data;
+  }
+
+  void DispatchKeyboardEvent(int state, const char* key, const char* code,
+                             uint32_t modifiers, bool repeat) {
+    std::lock_guard<std::mutex> lock(keyboard_mutex_);
+    if (keyboard_handler_) {
+      keyboard_handler_(keyboard_user_data_, state, key, code, modifiers, repeat);
+    }
+  }
+
  private:
   RuntimeLoader();
   ~RuntimeLoader();
@@ -75,6 +89,10 @@ class RuntimeLoader {
   wef_js_call_fn js_call_handler_ = nullptr;
   void* js_call_user_data_ = nullptr;
   std::mutex handler_mutex_;
+
+  wef_keyboard_event_fn keyboard_handler_ = nullptr;
+  void* keyboard_user_data_ = nullptr;
+  std::mutex keyboard_mutex_;
 
   static RuntimeLoader* instance_;
 };

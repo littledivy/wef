@@ -7,11 +7,13 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 use wef_backend_winit_common::{
     BackendAccess, CommonEvent, CommonState, WefBackendApi, WefJsResultFn,
     define_common_backend_fns, fill_common_api,
+    winit,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{EventLoop, EventLoopProxy};
+use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
 // --- Backend state ---
@@ -84,7 +86,10 @@ enum UserEvent {
 
 enum App {
     Initial,
-    Running { window: Window },
+    Running {
+        window: Window,
+        modifiers: ModifiersState,
+    },
 }
 
 impl App {
@@ -109,13 +114,16 @@ impl ApplicationHandler<UserEvent> for App {
             wef_backend_winit_common::apply_pending_post_create(&state.common, &window);
             wef_backend_winit_common::store_window_handles(&window);
 
-            *self = Self::Running { window };
+            *self = Self::Running {
+                window,
+                modifiers: ModifiersState::default(),
+            };
         }
     }
 
     fn user_event(&mut self, event_loop: &winit::event_loop::ActiveEventLoop, event: UserEvent) {
         let window = match self {
-            Self::Running { window } => window,
+            Self::Running { window, .. } => window,
             Self::Initial => return,
         };
 
@@ -136,6 +144,11 @@ impl ApplicationHandler<UserEvent> for App {
         _window_id: winit::window::WindowId,
         event: WindowEvent,
     ) {
+        let modifiers = match self {
+            Self::Running { modifiers, .. } => modifiers,
+            Self::Initial => return,
+        };
+
         match event {
             WindowEvent::CloseRequested => {
                 event_loop.exit();
@@ -149,6 +162,21 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::Moved(PhysicalPosition { x, y }) => {
                 if let Some(state) = BackendState::get() {
                     *state.common.pending_position.lock().unwrap() = Some((x, y));
+                }
+            }
+            WindowEvent::ModifiersChanged(new_modifiers) => {
+                *modifiers = new_modifiers.state();
+            }
+            WindowEvent::KeyboardInput {
+                event: ref key_event,
+                ..
+            } => {
+                if let Some(state) = BackendState::get() {
+                    wef_backend_winit_common::dispatch_keyboard_event(
+                        &state.common,
+                        key_event,
+                        *modifiers,
+                    );
                 }
             }
             _ => {}

@@ -5,6 +5,3 @@ members = [
     "examples/hello",
     "examples/ddcore",
 ]
-
-[workspace.dependencies]
-winit = "0.30"

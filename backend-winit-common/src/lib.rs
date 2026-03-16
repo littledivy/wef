@@ -1,5 +1,7 @@
 // Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
+pub use winit;
+
 use std::env;
 use std::ffi::{c_char, c_int, c_void};
 use std::path::PathBuf;
@@ -38,6 +40,14 @@ pub struct WefValue {
 
 pub type WefJsCallFn = unsafe extern "C" fn(*mut c_void, u64, *const c_char, *mut WefValue);
 pub type WefJsResultFn = unsafe extern "C" fn(*mut WefValue, *mut WefValue, *mut c_void);
+pub type WefKeyboardEventFn = unsafe extern "C" fn(
+    *mut c_void,   // user_data
+    c_int,         // state (0=pressed, 1=released)
+    *const c_char, // key
+    *const c_char, // code
+    u32,           // modifiers
+    bool,          // repeat
+);
 
 #[repr(C)]
 pub struct WefBackendApi {
@@ -119,6 +129,8 @@ pub struct WefBackendApi {
     pub get_window_handle: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
     pub get_display_handle: Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
     pub get_window_handle_type: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+    pub set_keyboard_event_handler:
+        Option<unsafe extern "C" fn(*mut c_void, Option<WefKeyboardEventFn>, *mut c_void)>,
 }
 
 unsafe impl Send for WefBackendApi {}
@@ -331,6 +343,7 @@ pub fn create_api_base() -> WefBackendApi {
         get_window_handle: None,
         get_display_handle: None,
         get_window_handle_type: None,
+        set_keyboard_event_handler: None,
     }
 }
 
@@ -413,6 +426,7 @@ pub struct CommonState {
     pub pending_resizable: Mutex<Option<bool>>,
     pub pending_always_on_top: Mutex<Option<bool>>,
     pub pending_visible: Mutex<Option<bool>>,
+    pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
 }
 
 impl CommonState {
@@ -424,6 +438,7 @@ impl CommonState {
             pending_resizable: Mutex::new(None),
             pending_always_on_top: Mutex::new(None),
             pending_visible: Mutex::new(None),
+            keyboard_handler: Mutex::new(None),
         }
     }
 }
@@ -656,6 +671,17 @@ macro_rules! define_common_backend_fns {
                 }
             }
         }
+
+        unsafe extern "C" fn backend_set_keyboard_event_handler(
+            _data: *mut ::std::ffi::c_void,
+            handler: Option<$crate::WefKeyboardEventFn>,
+            user_data: *mut ::std::ffi::c_void,
+        ) {
+            if let Some(state) = <$B as $crate::BackendAccess>::get() {
+                *state.common().keyboard_handler.lock().unwrap() =
+                    handler.map(|h| (h, user_data as usize));
+            }
+        }
     };
 }
 
@@ -684,6 +710,7 @@ macro_rules! fill_common_api {
         $api.get_window_handle = Some($crate::backend_get_window_handle);
         $api.get_display_handle = Some($crate::backend_get_display_handle);
         $api.get_window_handle_type = Some($crate::backend_get_window_handle_type);
+        $api.set_keyboard_event_handler = Some(backend_set_keyboard_event_handler);
     };
 }
 
@@ -783,6 +810,91 @@ pub fn apply_pending_attrs(
 pub fn apply_pending_post_create(common: &CommonState, window: &Window) {
     if let Some(true) = *common.pending_always_on_top.lock().unwrap() {
         window.set_window_level(WindowLevel::AlwaysOnTop);
+    }
+}
+
+// --- Keyboard modifier flags ---
+
+pub const WEF_MOD_SHIFT: u32 = 1 << 0;
+pub const WEF_MOD_CONTROL: u32 = 1 << 1;
+pub const WEF_MOD_ALT: u32 = 1 << 2;
+pub const WEF_MOD_META: u32 = 1 << 3;
+
+pub const WEF_KEY_PRESSED: c_int = 0;
+pub const WEF_KEY_RELEASED: c_int = 1;
+
+/// Convert winit modifier state to WEF modifier bitmask.
+pub fn modifiers_to_wef(mods: winit::keyboard::ModifiersState) -> u32 {
+    let mut flags = 0u32;
+    if mods.shift_key() {
+        flags |= WEF_MOD_SHIFT;
+    }
+    if mods.control_key() {
+        flags |= WEF_MOD_CONTROL;
+    }
+    if mods.alt_key() {
+        flags |= WEF_MOD_ALT;
+    }
+    if mods.super_key() {
+        flags |= WEF_MOD_META;
+    }
+    flags
+}
+
+/// Convert a winit logical key to its W3C UI Events `key` string representation.
+pub fn winit_key_to_string(key: &winit::keyboard::Key) -> String {
+    match key {
+        winit::keyboard::Key::Character(c) => c.to_string(),
+        winit::keyboard::Key::Named(named) => format!("{named:?}"),
+        winit::keyboard::Key::Unidentified(_) => "Unidentified".to_string(),
+        winit::keyboard::Key::Dead(c) => {
+            if let Some(ch) = c {
+                format!("Dead({ch})")
+            } else {
+                "Dead".to_string()
+            }
+        }
+    }
+}
+
+/// Convert a winit physical key to its W3C UI Events `code` string representation.
+pub fn winit_code_to_string(physical: &winit::keyboard::PhysicalKey) -> String {
+    match physical {
+        winit::keyboard::PhysicalKey::Code(code) => format!("{code:?}"),
+        winit::keyboard::PhysicalKey::Unidentified(_) => "Unidentified".to_string(),
+    }
+}
+
+/// Dispatch a keyboard event to the registered handler on the CommonState.
+/// Call this from backend `window_event` handlers when processing `WindowEvent::KeyboardInput`.
+pub fn dispatch_keyboard_event(
+    common: &CommonState,
+    key_event: &winit::event::KeyEvent,
+    modifiers: winit::keyboard::ModifiersState,
+) {
+    let handler = common.keyboard_handler.lock().unwrap();
+    if let Some((cb, user_data)) = *handler {
+        let state = match key_event.state {
+            winit::event::ElementState::Pressed => WEF_KEY_PRESSED,
+            winit::event::ElementState::Released => WEF_KEY_RELEASED,
+        };
+        let key_str = winit_key_to_string(&key_event.logical_key);
+        let code_str = winit_code_to_string(&key_event.physical_key);
+        let mods = modifiers_to_wef(modifiers);
+
+        let c_key = std::ffi::CString::new(key_str).unwrap_or_default();
+        let c_code = std::ffi::CString::new(code_str).unwrap_or_default();
+
+        unsafe {
+            cb(
+                user_data as *mut c_void,
+                state,
+                c_key.as_ptr(),
+                c_code.as_ptr(),
+                mods,
+                key_event.repeat,
+            );
+        }
     }
 }
 

@@ -13,7 +13,8 @@ extern std::string g_runtime_path;
 
 class WefHandler : public CefClient,
                    public CefLifeSpanHandler,
-                   public CefDisplayHandler {
+                   public CefDisplayHandler,
+                   public CefKeyboardHandler {
  public:
   WefHandler();
   ~WefHandler() override;
@@ -22,6 +23,7 @@ class WefHandler : public CefClient,
 
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
+  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
   bool DoClose(CefRefPtr<CefBrowser> browser) override;
@@ -29,6 +31,10 @@ class WefHandler : public CefClient,
 
   void OnTitleChange(CefRefPtr<CefBrowser> browser,
                      const CefString& title) override;
+
+  bool OnKeyEvent(CefRefPtr<CefBrowser> browser,
+                  const CefKeyEvent& event,
+                  CefEventHandle os_event) override;
 
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
                                 CefRefPtr<CefFrame> frame,

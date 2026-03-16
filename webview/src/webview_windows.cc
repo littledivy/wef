@@ -21,6 +21,132 @@
 
 using namespace Microsoft::WRL;
 
+namespace keyboard {
+
+std::string VirtualKeyToKey(WPARAM vk, LPARAM lParam) {
+  switch (vk) {
+    case VK_BACK: return "Backspace";
+    case VK_TAB: return "Tab";
+    case VK_RETURN: return "Enter";
+    case VK_SHIFT: return "Shift";
+    case VK_CONTROL: return "Control";
+    case VK_MENU: return "Alt";
+    case VK_PAUSE: return "Pause";
+    case VK_CAPITAL: return "CapsLock";
+    case VK_ESCAPE: return "Escape";
+    case VK_SPACE: return " ";
+    case VK_PRIOR: return "PageUp";
+    case VK_NEXT: return "PageDown";
+    case VK_END: return "End";
+    case VK_HOME: return "Home";
+    case VK_LEFT: return "ArrowLeft";
+    case VK_UP: return "ArrowUp";
+    case VK_RIGHT: return "ArrowRight";
+    case VK_DOWN: return "ArrowDown";
+    case VK_INSERT: return "Insert";
+    case VK_DELETE: return "Delete";
+    case VK_LWIN: case VK_RWIN: return "Meta";
+    case VK_F1: return "F1";
+    case VK_F2: return "F2";
+    case VK_F3: return "F3";
+    case VK_F4: return "F4";
+    case VK_F5: return "F5";
+    case VK_F6: return "F6";
+    case VK_F7: return "F7";
+    case VK_F8: return "F8";
+    case VK_F9: return "F9";
+    case VK_F10: return "F10";
+    case VK_F11: return "F11";
+    case VK_F12: return "F12";
+    case VK_NUMLOCK: return "NumLock";
+    case VK_SCROLL: return "ScrollLock";
+    default:
+      if (vk >= 'A' && vk <= 'Z') {
+        bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+        char c = static_cast<char>(vk);
+        if (!(shift ^ caps)) c += 32; // lowercase
+        return std::string(1, c);
+      }
+      if (vk >= '0' && vk <= '9') {
+        return std::string(1, static_cast<char>(vk));
+      }
+      return "Unidentified";
+  }
+}
+
+std::string VirtualKeyToCode(WPARAM vk, LPARAM lParam) {
+  bool isExtended = (lParam & (1 << 24)) != 0;
+  switch (vk) {
+    case VK_BACK: return "Backspace";
+    case VK_TAB: return "Tab";
+    case VK_RETURN: return isExtended ? "NumpadEnter" : "Enter";
+    case VK_SHIFT: return (MapVirtualKey((lParam >> 16) & 0xFF, MAPVK_VSC_TO_VK_EX) == VK_RSHIFT) ? "ShiftRight" : "ShiftLeft";
+    case VK_CONTROL: return isExtended ? "ControlRight" : "ControlLeft";
+    case VK_MENU: return isExtended ? "AltRight" : "AltLeft";
+    case VK_PAUSE: return "Pause";
+    case VK_CAPITAL: return "CapsLock";
+    case VK_ESCAPE: return "Escape";
+    case VK_SPACE: return "Space";
+    case VK_PRIOR: return "PageUp";
+    case VK_NEXT: return "PageDown";
+    case VK_END: return "End";
+    case VK_HOME: return "Home";
+    case VK_LEFT: return "ArrowLeft";
+    case VK_UP: return "ArrowUp";
+    case VK_RIGHT: return "ArrowRight";
+    case VK_DOWN: return "ArrowDown";
+    case VK_INSERT: return "Insert";
+    case VK_DELETE: return "Delete";
+    case VK_LWIN: return "MetaLeft";
+    case VK_RWIN: return "MetaRight";
+    case VK_F1: return "F1";
+    case VK_F2: return "F2";
+    case VK_F3: return "F3";
+    case VK_F4: return "F4";
+    case VK_F5: return "F5";
+    case VK_F6: return "F6";
+    case VK_F7: return "F7";
+    case VK_F8: return "F8";
+    case VK_F9: return "F9";
+    case VK_F10: return "F10";
+    case VK_F11: return "F11";
+    case VK_F12: return "F12";
+    case VK_NUMLOCK: return "NumLock";
+    case VK_SCROLL: return "ScrollLock";
+    case VK_OEM_1: return "Semicolon";
+    case VK_OEM_PLUS: return "Equal";
+    case VK_OEM_COMMA: return "Comma";
+    case VK_OEM_MINUS: return "Minus";
+    case VK_OEM_PERIOD: return "Period";
+    case VK_OEM_2: return "Slash";
+    case VK_OEM_3: return "Backquote";
+    case VK_OEM_4: return "BracketLeft";
+    case VK_OEM_5: return "Backslash";
+    case VK_OEM_6: return "BracketRight";
+    case VK_OEM_7: return "Quote";
+    default:
+      if (vk >= 'A' && vk <= 'Z') {
+        return "Key" + std::string(1, static_cast<char>(vk));
+      }
+      if (vk >= '0' && vk <= '9') {
+        return "Digit" + std::string(1, static_cast<char>(vk));
+      }
+      return "Unidentified";
+  }
+}
+
+uint32_t GetWefModifiers() {
+  uint32_t modifiers = 0;
+  if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= WEF_MOD_SHIFT;
+  if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= WEF_MOD_CONTROL;
+  if (GetKeyState(VK_MENU) & 0x8000) modifiers |= WEF_MOD_ALT;
+  if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) modifiers |= WEF_MOD_META;
+  return modifiers;
+}
+
+} // namespace keyboard
+
 // JSON serialization (same as other platforms)
 namespace json {
 
@@ -396,6 +522,25 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         backend->controller_->put_Bounds(bounds);
       }
       return 0;
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN: {
+      std::string key = keyboard::VirtualKeyToKey(wParam, lParam);
+      std::string code = keyboard::VirtualKeyToCode(wParam, lParam);
+      uint32_t modifiers = keyboard::GetWefModifiers();
+      bool repeat = (lParam & (1 << 30)) != 0;
+      RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
+          WEF_KEY_PRESSED, key.c_str(), code.c_str(), modifiers, repeat);
+      break;
+    }
+    case WM_KEYUP:
+    case WM_SYSKEYUP: {
+      std::string key = keyboard::VirtualKeyToKey(wParam, lParam);
+      std::string code = keyboard::VirtualKeyToCode(wParam, lParam);
+      uint32_t modifiers = keyboard::GetWefModifiers();
+      RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
+          WEF_KEY_RELEASED, key.c_str(), code.c_str(), modifiers, false);
+      break;
+    }
     case WM_DESTROY:
       PostQuitMessage(0);
       return 0;
