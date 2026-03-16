@@ -103,7 +103,7 @@ void WefHandler::OnTitleChange(CefRefPtr<CefBrowser> browser,
 
 namespace {
 
-std::string CefKeyCodeToString(int windows_key_code, uint32 character, bool is_char) {
+std::string CefKeyCodeToString(int windows_key_code, uint32_t character, bool is_char) {
   // If we have a character, use it for the "key" value
   if (character > 0 && character < 0x7F && isprint(static_cast<char>(character))) {
     return std::string(1, static_cast<char>(character));

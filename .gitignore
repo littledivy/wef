@@ -1,3 +1,6 @@
 target
 android
 result
+vendor/
+build/
+*/build/
