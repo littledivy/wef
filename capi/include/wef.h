@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 2
+#define WEF_API_VERSION 5
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -45,6 +45,11 @@ typedef void (*wef_js_result_fn)(
     wef_value_t* result,
     wef_value_t* error,
     void* user_data
+);
+
+typedef void (*wef_menu_click_fn)(
+    void* user_data,
+    const char* item_id
 );
 
 // Keyboard event state
@@ -203,6 +208,23 @@ struct wef_backend_api {
         void* user_data
     );
 
+    void (*poll_js_calls)(void* backend_data);
+
+    void (*set_js_call_notify)(
+        void* backend_data,
+        void (*notify_fn)(void* notify_data),
+        void* notify_data
+    );
+
+    // Application menu. menu_template is a wef_value_t list of menu items.
+    // Each item is a dict with: label, submenu (list), role, type, id, accelerator.
+    // When a custom item (with "id") is clicked, on_click is called with the id.
+    void (*set_application_menu)(
+        void* backend_data,
+        wef_value_t* menu_template,
+        wef_menu_click_fn on_click,
+        void* on_click_data
+    );
 };
 
 #ifdef __cplusplus

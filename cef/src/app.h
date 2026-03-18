@@ -57,6 +57,12 @@ class WefApp : public CefApp, public CefBrowserProcessHandler {
     return this;
   }
 
+  void OnBeforeCommandLineProcessing(
+      const CefString& process_type,
+      CefRefPtr<CefCommandLine> command_line) override {
+    command_line->AppendSwitch("use-mock-keychain");
+  }
+
   void OnContextInitialized() override;
 
  private:

@@ -6,6 +6,8 @@
 #include <iostream>
 #include <cstring>
 
+#import <Cocoa/Cocoa.h>
+
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/cef_task.h"
@@ -586,6 +588,303 @@ static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
       browser, msg));
 }
 
+// --- Application Menu ---
+
+// Store the menu click handler globally so NSMenu target-action can invoke it.
+static wef_menu_click_fn g_menu_click_fn = nullptr;
+static void* g_menu_click_data = nullptr;
+
+// Objective-C class that handles menu item clicks for custom items.
+#ifdef __OBJC__
+@interface WefMenuTarget : NSObject
++ (instancetype)shared;
+- (void)menuItemClicked:(id)sender;
+@end
+
+@implementation WefMenuTarget
+
++ (instancetype)shared {
+  static WefMenuTarget* instance = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    instance = [[WefMenuTarget alloc] init];
+  });
+  return instance;
+}
+
+- (void)menuItemClicked:(id)sender {
+  NSMenuItem* item = (NSMenuItem*)sender;
+  NSString* itemId = [item representedObject];
+  if (itemId && g_menu_click_fn) {
+    g_menu_click_fn(g_menu_click_data, [itemId UTF8String]);
+  }
+}
+
+@end
+#endif
+
+// Parse accelerator string like "cmd+shift+n" into key equivalent + modifier mask.
+static void ParseAccelerator(const std::string& accel, NSString** outKey,
+                             NSEventModifierFlags* outMask) {
+  *outKey = @"";
+  *outMask = 0;
+
+  std::string lower = accel;
+  for (auto& c : lower) c = tolower(c);
+
+  // Split by +
+  size_t pos = 0;
+  std::vector<std::string> parts;
+  std::string remaining = lower;
+  while ((pos = remaining.find('+')) != std::string::npos) {
+    parts.push_back(remaining.substr(0, pos));
+    remaining = remaining.substr(pos + 1);
+  }
+  if (!remaining.empty()) parts.push_back(remaining);
+
+  for (const auto& part : parts) {
+    if (part == "cmd" || part == "command" || part == "cmdorctrl" ||
+        part == "commandorcontrol") {
+      *outMask |= NSEventModifierFlagCommand;
+    } else if (part == "shift") {
+      *outMask |= NSEventModifierFlagShift;
+    } else if (part == "alt" || part == "option") {
+      *outMask |= NSEventModifierFlagOption;
+    } else if (part == "ctrl" || part == "control") {
+      *outMask |= NSEventModifierFlagControl;
+    } else {
+      // This is the key
+      *outKey = [NSString stringWithUTF8String:part.c_str()];
+    }
+  }
+}
+
+// Map a role string to an NSMenuItem with the standard action.
+static NSMenuItem* CreateRoleMenuItem(const std::string& role) {
+  NSString* title = @"";
+  SEL action = nil;
+  NSString* keyEquiv = @"";
+  NSEventModifierFlags mask = NSEventModifierFlagCommand;
+
+  if (role == "quit") {
+    title = @"Quit";
+    action = @selector(terminate:);
+    keyEquiv = @"q";
+  } else if (role == "copy") {
+    title = @"Copy";
+    action = @selector(copy:);
+    keyEquiv = @"c";
+  } else if (role == "paste") {
+    title = @"Paste";
+    action = @selector(paste:);
+    keyEquiv = @"v";
+  } else if (role == "cut") {
+    title = @"Cut";
+    action = @selector(cut:);
+    keyEquiv = @"x";
+  } else if (role == "selectall" || role == "selectAll") {
+    title = @"Select All";
+    action = @selector(selectAll:);
+    keyEquiv = @"a";
+  } else if (role == "undo") {
+    title = @"Undo";
+    action = @selector(undo:);
+    keyEquiv = @"z";
+  } else if (role == "redo") {
+    title = @"Redo";
+    action = @selector(redo:);
+    keyEquiv = @"Z";
+    mask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+  } else if (role == "minimize") {
+    title = @"Minimize";
+    action = @selector(performMiniaturize:);
+    keyEquiv = @"m";
+  } else if (role == "zoom") {
+    title = @"Zoom";
+    action = @selector(performZoom:);
+  } else if (role == "close") {
+    title = @"Close";
+    action = @selector(performClose:);
+    keyEquiv = @"w";
+  } else if (role == "about") {
+    title = @"About";
+    action = @selector(orderFrontStandardAboutPanel:);
+  } else if (role == "hide") {
+    title = @"Hide";
+    action = @selector(hide:);
+    keyEquiv = @"h";
+  } else if (role == "hideothers" || role == "hideOthers") {
+    title = @"Hide Others";
+    action = @selector(hideOtherApplications:);
+    keyEquiv = @"h";
+    mask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  } else if (role == "unhide") {
+    title = @"Show All";
+    action = @selector(unhideAllApplications:);
+  } else if (role == "front") {
+    title = @"Bring All to Front";
+    action = @selector(arrangeInFront:);
+  } else if (role == "togglefullscreen" || role == "toggleFullScreen") {
+    title = @"Toggle Full Screen";
+    action = @selector(toggleFullScreen:);
+    keyEquiv = @"f";
+    mask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
+  } else {
+    return nil;
+  }
+
+  NSMenuItem* item = [[NSMenuItem alloc]
+      initWithTitle:title
+             action:action
+      keyEquivalent:keyEquiv];
+  [item setKeyEquivalentModifierMask:mask];
+  return item;
+}
+
+// Recursively build an NSMenu from a wef_value_t list.
+static NSMenu* BuildMenuFromValue(wef_value_t* val,
+                                  const wef_backend_api_t* api) {
+  if (!val || !api->value_is_list(val)) return nil;
+
+  NSMenu* menu = [[NSMenu alloc] init];
+  [menu setAutoenablesItems:NO];
+
+  size_t count = api->value_list_size(val);
+  for (size_t i = 0; i < count; ++i) {
+    wef_value_t* itemVal = api->value_list_get(val, i);
+    if (!itemVal || !api->value_is_dict(itemVal)) continue;
+
+    // Check for separator
+    wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
+    if (typeVal && api->value_is_string(typeVal)) {
+      size_t len = 0;
+      char* typeStr = api->value_get_string(typeVal, &len);
+      if (typeStr && std::string(typeStr) == "separator") {
+        [menu addItem:[NSMenuItem separatorItem]];
+        api->value_free_string(typeStr);
+        continue;
+      }
+      if (typeStr) api->value_free_string(typeStr);
+    }
+
+    // Check for role
+    wef_value_t* roleVal = api->value_dict_get(itemVal, "role");
+    if (roleVal && api->value_is_string(roleVal)) {
+      size_t len = 0;
+      char* roleStr = api->value_get_string(roleVal, &len);
+      if (roleStr) {
+        NSMenuItem* roleItem = CreateRoleMenuItem(roleStr);
+        if (roleItem) {
+          [menu addItem:roleItem];
+        }
+        api->value_free_string(roleStr);
+        continue;
+      }
+    }
+
+    // Regular item or submenu
+    wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
+    if (!labelVal || !api->value_is_string(labelVal)) continue;
+
+    size_t labelLen = 0;
+    char* labelStr = api->value_get_string(labelVal, &labelLen);
+    if (!labelStr) continue;
+    NSString* label = [NSString stringWithUTF8String:labelStr];
+    api->value_free_string(labelStr);
+
+    // Check for submenu
+    wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
+    if (submenuVal && api->value_is_list(submenuVal)) {
+      NSMenuItem* submenuItem = [[NSMenuItem alloc] init];
+      [submenuItem setTitle:label];
+      NSMenu* submenu = BuildMenuFromValue(submenuVal, api);
+      [submenu setTitle:label];
+      [submenuItem setSubmenu:submenu];
+      [menu addItem:submenuItem];
+      continue;
+    }
+
+    // Regular clickable item
+    NSString* keyEquiv = @"";
+    NSEventModifierFlags modMask = NSEventModifierFlagCommand;
+
+    wef_value_t* accelVal = api->value_dict_get(itemVal, "accelerator");
+    if (accelVal && api->value_is_string(accelVal)) {
+      size_t accelLen = 0;
+      char* accelStr = api->value_get_string(accelVal, &accelLen);
+      if (accelStr) {
+        ParseAccelerator(accelStr, &keyEquiv, &modMask);
+        api->value_free_string(accelStr);
+      }
+    }
+
+    NSMenuItem* nsItem = [[NSMenuItem alloc]
+        initWithTitle:label
+               action:@selector(menuItemClicked:)
+        keyEquivalent:keyEquiv];
+    [nsItem setKeyEquivalentModifierMask:modMask];
+    [nsItem setTarget:[WefMenuTarget shared]];
+
+    // Store the item id
+    wef_value_t* idVal = api->value_dict_get(itemVal, "id");
+    if (idVal && api->value_is_string(idVal)) {
+      size_t idLen = 0;
+      char* idStr = api->value_get_string(idVal, &idLen);
+      if (idStr) {
+        [nsItem setRepresentedObject:[NSString stringWithUTF8String:idStr]];
+        api->value_free_string(idStr);
+      }
+    }
+
+    // Check enabled state
+    wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
+    if (enabledVal && api->value_is_bool(enabledVal)) {
+      [nsItem setEnabled:api->value_get_bool(enabledVal)];
+    } else {
+      [nsItem setEnabled:YES];
+    }
+
+    [menu addItem:nsItem];
+  }
+
+  return menu;
+}
+
+static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
+                                       wef_menu_click_fn on_click,
+                                       void* on_click_data) {
+  if (!menu_template) return;
+
+  // Store callback
+  g_menu_click_fn = on_click;
+  g_menu_click_data = on_click_data;
+
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  // Need a reference to the API for value accessors
+  const wef_backend_api_t* api = &loader->GetBackendApi();
+
+  // Build the menu on the UI thread
+  // We need to copy the template since it may be freed after this call returns.
+  // For simplicity, we'll build the menu structure here and post to UI thread.
+  // Since CefPostTask requires the work to happen on the UI thread for NSMenu,
+  // we do the parsing here (safe from any thread) and post the NSMenu creation.
+
+  // Parse on current thread, create NSMenu on UI thread
+  // Actually, NSMenu creation must happen on the main thread.
+  // Let's just post the whole thing to the UI thread.
+
+  // We need to capture the value. Since wef_value_t is backend-owned,
+  // we need to build the NSMenu directly. Use dispatch_async for macOS.
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menubar = BuildMenuFromValue(menu_template, api);
+    if (menubar) {
+      // The top-level menu is a list of submenus, each becoming a menubar item.
+      // BuildMenuFromValue already creates the structure correctly.
+      [NSApp setMainMenu:menubar];
+    }
+  });
+}
+
 void RuntimeLoader::InitializeBackendApi() {
   backend_api_.version = WEF_API_VERSION;
   backend_api_.backend_data = this;
@@ -655,6 +954,18 @@ void RuntimeLoader::InitializeBackendApi() {
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
+
+  backend_api_.poll_js_calls = [](void* data) {
+    RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+    loader->PollPendingJsCalls();
+  };
+
+  backend_api_.set_js_call_notify = [](void* data, void (*notify_fn)(void*), void* notify_data) {
+    RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+    loader->SetJsCallNotify(notify_fn, notify_data);
+  };
+
+  backend_api_.set_application_menu = Backend_SetApplicationMenu;
 }
 
 RuntimeLoader::RuntimeLoader() {
@@ -760,26 +1071,48 @@ CefRefPtr<CefBrowser> RuntimeLoader::GetBrowser() {
 
 void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
                              CefRefPtr<CefListValue> args) {
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    pending_js_calls_.push({call_id, method_path, args});
+  }
+
+  std::lock_guard<std::mutex> lock(notify_mutex_);
+  if (js_call_notify_fn_) {
+    js_call_notify_fn_(js_call_notify_data_);
+  }
+}
+
+void RuntimeLoader::PollPendingJsCalls() {
+  std::vector<PendingJsCall> calls;
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    while (!pending_js_calls_.empty()) {
+      calls.push_back(std::move(pending_js_calls_.front()));
+      pending_js_calls_.pop();
+    }
+  }
+
+  if (calls.empty()) return;
+
   wef_js_call_fn handler;
   void* user_data;
-
   {
     std::lock_guard<std::mutex> lock(handler_mutex_);
     handler = js_call_handler_;
     user_data = js_call_user_data_;
   }
 
-  if (!handler) {
-    CefRefPtr<CefValue> errVal = CefValue::Create();
-    errVal->SetString("No JS call handler registered");
-    wef_value_t errWrapper{errVal};
-    Backend_JsCallRespond(this, call_id, nullptr, &errWrapper);
-    return;
+  for (auto& call : calls) {
+    if (handler) {
+      CefRefPtr<CefValue> argsValue = CefValue::Create();
+      argsValue->SetList(call.args);
+      wef_value_t* argsWrapper = new wef_value(argsValue);
+      handler(user_data, call.call_id, call.method_path.c_str(), argsWrapper);
+    } else {
+      CefRefPtr<CefValue> errVal = CefValue::Create();
+      errVal->SetString("No JS call handler registered");
+      wef_value_t errWrapper(errVal);
+      Backend_JsCallRespond(this, call.call_id, nullptr, &errWrapper);
+    }
   }
-
-  CefRefPtr<CefValue> argsValue = CefValue::Create();
-  argsValue->SetList(args);
-  wef_value_t* argsWrapper = new wef_value(argsValue);
-
-  handler(user_data, call_id, method_path.c_str(), argsWrapper);
 }

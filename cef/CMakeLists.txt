@@ -9,7 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(WEF_SRCS_COMMON
   src/app.cc
   src/app.h
-  src/runtime_loader.cc
+  src/runtime_loader.mm
   src/runtime_loader.h
 )
 
@@ -36,6 +36,8 @@ set(WEF_RESOURCES_SRCS
 if(NOT DEFINED CEF_ROOT)
   message(FATAL_ERROR "CEF_ROOT must be defined")
 endif()
+
+set(WEF_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../capi/include" CACHE PATH "Path to wef.h header directory")
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CEF_ROOT}/cmake")
 
@@ -81,9 +83,13 @@ if(OS_MAC)
   add_executable(${CEF_TARGET} MACOSX_BUNDLE ${WEF_RESOURCES_SRCS} ${WEF_SRCS_COMMON} ${WEF_SRCS_MAC})
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
   target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
-  target_include_directories(${CEF_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+  target_include_directories(${CEF_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${WEF_INCLUDE_DIR}")
   set_target_properties(${CEF_TARGET} PROPERTIES
     MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/macos/Info.plist.in
+    MACOSX_BUNDLE_GUI_IDENTIFIER "io.wef.cef"
+    MACOSX_BUNDLE_BUNDLE_NAME "WEF CEF"
+    MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0"
   )
 
   COPY_MAC_FRAMEWORK("${CEF_TARGET}" "${CEF_BINARY_DIR}" "${CEF_APP}")
@@ -107,7 +113,7 @@ if(OS_MAC)
     add_executable(${_helper_target} MACOSX_BUNDLE ${WEF_HELPER_SRCS})
     SET_EXECUTABLE_TARGET_PROPERTIES(${_helper_target})
     target_link_libraries(${_helper_target} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
-    target_include_directories(${_helper_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_include_directories(${_helper_target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${WEF_INCLUDE_DIR}")
     set_target_properties(${_helper_target} PROPERTIES
       MACOSX_BUNDLE_INFO_PLIST ${_helper_info_plist}
       OUTPUT_NAME ${_helper_output_name}

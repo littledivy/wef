@@ -7,29 +7,10 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
-#include <functional>
-#include <map>
+#include <queue>
 
 #include "wef.h"
 #include "webview_value.h"
-
-#ifdef __APPLE__
-#ifdef __OBJC__
-@class WKWebView;
-@class NSWindow;
-#else
-typedef void* WKWebView;
-typedef void* NSWindow;
-#endif
-#elif defined(__linux__)
-typedef struct _WebKitWebView WebKitWebView;
-typedef struct _GtkWindow GtkWindow;
-#elif defined(_WIN32)
-struct ICoreWebView2;
-struct ICoreWebView2Controller;
-struct HWND__;
-typedef HWND__* HWND;
-#endif
 
 class WefBackend;
 
@@ -45,14 +26,14 @@ class RuntimeLoader {
 
   void SetBackend(WefBackend* backend) { backend_ = backend; }
   WefBackend* GetBackend() { return backend_; }
+  const wef_backend_api_t& GetBackendApi() const { return backend_api_; }
 
   void OnJsCall(uint64_t call_id, const std::string& method_path,
                 wef::ValuePtr args);
 
-  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error);
+  void PollPendingJsCalls();
 
-  wef_js_call_fn GetJsCallHandler() const { return js_call_handler_; }
-  void* GetJsCallUserData() const { return js_call_user_data_; }
+  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, const char* error);
 
   void SetJsCallHandler(wef_js_call_fn handler, void* user_data) {
     std::lock_guard<std::mutex> lock(handler_mutex_);
@@ -88,7 +69,11 @@ class RuntimeLoader {
     }
   }
 
-  const wef_backend_api_t* GetBackendApi() const { return &backend_api_; }
+  void SetJsCallNotify(void (*notify_fn)(void*), void* notify_data) {
+    std::lock_guard<std::mutex> lock(notify_mutex_);
+    js_call_notify_fn_ = notify_fn;
+    js_call_notify_data_ = notify_data;
+  }
 
  private:
   RuntimeLoader();
@@ -119,6 +104,18 @@ class RuntimeLoader {
   wef_mouse_click_fn mouse_click_handler_ = nullptr;
   void* mouse_click_user_data_ = nullptr;
   std::mutex mouse_mutex_;
+
+  void (*js_call_notify_fn_)(void*) = nullptr;
+  void* js_call_notify_data_ = nullptr;
+  std::mutex notify_mutex_;
+
+  struct PendingJsCall {
+    uint64_t call_id;
+    std::string method_path;
+    wef::ValuePtr args;
+  };
+  std::queue<PendingJsCall> pending_js_calls_;
+  std::mutex pending_mutex_;
 
   static RuntimeLoader* instance_;
 };
@@ -151,6 +148,11 @@ class WefBackend {
   virtual void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) = 0;
 
   virtual void Run() = 0;
+
+  virtual void SetApplicationMenu(wef_value_t* menu_template,
+                                  const wef_backend_api_t* api,
+                                  wef_menu_click_fn on_click,
+                                  void* on_click_data) = 0;
 };
 
 WefBackend* CreateWefBackend(int width, int height, const std::string& title);

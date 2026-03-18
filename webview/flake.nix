@@ -6,7 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, wefInclude ? null }:
     flake-utils.lib.eachSystem [ "x86_64-darwin" "aarch64-darwin" "x86_64-linux" "aarch64-linux" ] (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
@@ -44,8 +44,13 @@
 
             buildPhase = ''
               runHook preBuild
+              ${if wefInclude != null then ''
+                mkdir -p include
+                cp ${wefInclude}/wef.h include/
+              '' else ""}
               cmake -G Ninja \
                 -DCMAKE_BUILD_TYPE=Release \
+                ${if wefInclude != null then "-DWEF_INCLUDE_DIR=$PWD/include" else ""} \
                 -B build \
                 .
               ninja -C build
