@@ -29,11 +29,16 @@ static void Backend_SetTitle(void* data, const char* title) {
   }
 }
 
-static void Backend_ExecuteJs(void* data, const char* script) {
+static void Backend_ExecuteJs(void* data, const char* script,
+                              wef_js_result_fn callback, void* callback_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend && script) {
     backend->ExecuteJs(script);
+    // TODO: webview backends don't support result callbacks yet
+    if (callback) {
+      callback(nullptr, nullptr, callback_data);
+    }
   }
 }
 
@@ -379,7 +384,7 @@ static void Backend_JsCallRespond(void* data, uint64_t call_id,
                                    wef_value_t* result, wef_value_t* error) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   wef::ValuePtr resultPtr = (result && result->value) ? result->value : wef::Value::Null();
-  wef::ValuePtr errorPtr = (error && error->value) ? error->value : nullptr;
+  wef::ValuePtr errorPtr = (error && error->value) ? error->value : wef::Value::Null();
   loader->JsCallRespond(call_id, resultPtr, errorPtr);
 }
 
@@ -501,6 +506,10 @@ void RuntimeLoader::InitializeBackendApi() {
 
   backend_api_.invoke_js_callback = Backend_InvokeJsCallback;
   backend_api_.release_js_callback = Backend_ReleaseJsCallback;
+
+  backend_api_.get_window_handle = [](void*) -> void* { return nullptr; };
+  backend_api_.get_display_handle = [](void*) -> void* { return nullptr; };
+  backend_api_.get_window_handle_type = [](void*) -> int { return WEF_WINDOW_HANDLE_UNKNOWN; };
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
@@ -673,7 +682,7 @@ void RuntimeLoader::PollPendingJsCalls() {
       wef_value_t* argsWrapper = new wef_value(call.args);
       handler(user_data, call.call_id, call.method_path.c_str(), argsWrapper);
     } else {
-      JsCallRespond(call.call_id, nullptr, "No JS call handler registered");
+      JsCallRespond(call.call_id, nullptr, wef::Value::String("No JS call handler registered"));
     }
   }
 }

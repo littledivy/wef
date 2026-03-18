@@ -224,7 +224,7 @@ class WebKitGTKBackend : public WebviewBackend {
 
   void InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) override;
   void ReleaseJsCallback(uint64_t callback_id) override;
-  void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, const char* error) override;
+  void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
 
   void Run() override;
 
@@ -574,9 +574,9 @@ void WebKitGTKBackend::ReleaseJsCallback(uint64_t callback_id) {
   }, cbData);
 }
 
-void WebKitGTKBackend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, const char* error) {
+void WebKitGTKBackend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
-  std::string errorJson = error ? json::Serialize(error) : "null";
+  std::string errorJson = (error && !error->IsNull()) ? json::Serialize(error) : "null";
   struct RespData { WebKitGTKBackend* backend; uint64_t id; std::string result; std::string error; };
   auto* respData = new RespData{this, call_id, resultJson, errorJson};
   g_idle_add([](gpointer data) -> gboolean {

@@ -33,7 +33,7 @@ class RuntimeLoader {
 
   void PollPendingJsCalls();
 
-  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, const char* error);
+  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error);
 
   void SetJsCallHandler(wef_js_call_fn handler, void* user_data) {
     std::lock_guard<std::mutex> lock(handler_mutex_);
