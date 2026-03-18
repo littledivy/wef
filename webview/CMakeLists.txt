@@ -118,8 +118,11 @@ elseif(PLATFORM_WINDOWS)
   )
 endif()
 
+set(WEF_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../capi/include" CACHE PATH "Path to wef.h header directory")
+
 target_include_directories(${WEF_TARGET} PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${WEF_INCLUDE_DIR}
 )
 
 set_target_properties(${WEF_TARGET} PROPERTIES

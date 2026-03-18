@@ -308,6 +308,27 @@ static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   }
 }
 
+static void Backend_PollJsCalls(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->PollPendingJsCalls();
+}
+
+static void Backend_SetJsCallNotify(void* data, void (*notify_fn)(void*), void* notify_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetJsCallNotify(notify_fn, notify_data);
+}
+
+static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
+                                       wef_menu_click_fn on_click,
+                                       void* on_click_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend && menu_template) {
+    backend->SetApplicationMenu(menu_template, &loader->GetBackendApi(),
+                                on_click, on_click_data);
+  }
+}
+
 void RuntimeLoader::InitializeBackendApi() {
   backend_api_.version = WEF_API_VERSION;
   backend_api_.backend_data = this;
@@ -363,6 +384,9 @@ void RuntimeLoader::InitializeBackendApi() {
 
   backend_api_.invoke_js_callback = Backend_InvokeJsCallback;
   backend_api_.release_js_callback = Backend_ReleaseJsCallback;
+  backend_api_.poll_js_calls = Backend_PollJsCalls;
+  backend_api_.set_js_call_notify = Backend_SetJsCallNotify;
+  backend_api_.set_application_menu = Backend_SetApplicationMenu;
 }
 
 RuntimeLoader::RuntimeLoader() {
@@ -493,22 +517,45 @@ void RuntimeLoader::Shutdown() {
 
 void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
                               wef::ValuePtr args) {
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    pending_js_calls_.push({call_id, method_path, args});
+  }
+
+  std::lock_guard<std::mutex> lock(notify_mutex_);
+  if (js_call_notify_fn_) {
+    js_call_notify_fn_(js_call_notify_data_);
+  }
+}
+
+void RuntimeLoader::PollPendingJsCalls() {
+  std::vector<PendingJsCall> calls;
+  {
+    std::lock_guard<std::mutex> lock(pending_mutex_);
+    while (!pending_js_calls_.empty()) {
+      calls.push_back(std::move(pending_js_calls_.front()));
+      pending_js_calls_.pop();
+    }
+  }
+
+  if (calls.empty()) return;
+
   wef_js_call_fn handler;
   void* user_data;
-
   {
     std::lock_guard<std::mutex> lock(handler_mutex_);
     handler = js_call_handler_;
     user_data = js_call_user_data_;
   }
 
-  if (!handler) {
-    JsCallRespond(call_id, nullptr, "No JS call handler registered");
-    return;
+  for (auto& call : calls) {
+    if (handler) {
+      wef_value_t* argsWrapper = new wef_value(call.args);
+      handler(user_data, call.call_id, call.method_path.c_str(), argsWrapper);
+    } else {
+      JsCallRespond(call.call_id, nullptr, "No JS call handler registered");
+    }
   }
-
-  wef_value_t* argsWrapper = new wef_value(args);
-  handler(user_data, call_id, method_path.c_str(), argsWrapper);
 }
 
 void RuntimeLoader::JsCallRespond(uint64_t call_id, wef::ValuePtr result, const char* error) {
