@@ -48,6 +48,12 @@ pub type WefKeyboardEventFn = unsafe extern "C" fn(
     u32,           // modifiers
     bool,          // repeat
 );
+pub type WefMouseMoveFn = unsafe extern "C" fn(
+    *mut c_void, // user_data
+    f64,         // x
+    f64,         // y
+    u32,         // modifiers
+);
 pub type WefMouseClickFn = unsafe extern "C" fn(
     *mut c_void, // user_data
     c_int,       // state (0=pressed, 1=released)
@@ -142,6 +148,8 @@ pub struct WefBackendApi {
         Option<unsafe extern "C" fn(*mut c_void, Option<WefKeyboardEventFn>, *mut c_void)>,
     pub set_mouse_click_handler:
         Option<unsafe extern "C" fn(*mut c_void, Option<WefMouseClickFn>, *mut c_void)>,
+    pub set_mouse_move_handler:
+        Option<unsafe extern "C" fn(*mut c_void, Option<WefMouseMoveFn>, *mut c_void)>,
     pub poll_js_calls: Option<unsafe extern "C" fn(*mut c_void)>,
     pub set_js_call_notify: Option<
         unsafe extern "C" fn(
@@ -372,6 +380,7 @@ pub fn create_api_base() -> WefBackendApi {
         get_window_handle_type: None,
         set_keyboard_event_handler: None,
         set_mouse_click_handler: None,
+        set_mouse_move_handler: None,
         poll_js_calls: None,
         set_js_call_notify: None,
         set_application_menu: None,
@@ -459,6 +468,7 @@ pub struct CommonState {
     pub pending_visible: Mutex<Option<bool>>,
     pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
     pub mouse_click_handler: Mutex<Option<(WefMouseClickFn, usize)>>,
+    pub mouse_move_handler: Mutex<Option<(WefMouseMoveFn, usize)>>,
     pub cursor_position: Mutex<(f64, f64)>,
     // Double-click tracking for winit (which doesn't provide click_count natively)
     pub last_press_time: Mutex<Option<std::time::Instant>>,
@@ -477,6 +487,7 @@ impl CommonState {
             pending_visible: Mutex::new(None),
             keyboard_handler: Mutex::new(None),
             mouse_click_handler: Mutex::new(None),
+            mouse_move_handler: Mutex::new(None),
             cursor_position: Mutex::new((0.0, 0.0)),
             last_press_time: Mutex::new(None),
             last_press_button: Mutex::new(None),
@@ -735,6 +746,17 @@ macro_rules! define_common_backend_fns {
                     handler.map(|h| (h, user_data as usize));
             }
         }
+
+        unsafe extern "C" fn backend_set_mouse_move_handler(
+            _data: *mut ::std::ffi::c_void,
+            handler: Option<$crate::WefMouseMoveFn>,
+            user_data: *mut ::std::ffi::c_void,
+        ) {
+            if let Some(state) = <$B as $crate::BackendAccess>::get() {
+                *state.common().mouse_move_handler.lock().unwrap() =
+                    handler.map(|h| (h, user_data as usize));
+            }
+        }
     };
 }
 
@@ -765,6 +787,7 @@ macro_rules! fill_common_api {
         $api.get_window_handle_type = Some($crate::backend_get_window_handle_type);
         $api.set_keyboard_event_handler = Some(backend_set_keyboard_event_handler);
         $api.set_mouse_click_handler = Some(backend_set_mouse_click_handler);
+        $api.set_mouse_move_handler = Some(backend_set_mouse_move_handler);
     };
 }
 
@@ -1029,6 +1052,21 @@ pub fn dispatch_mouse_click_event(
                 mods,
                 click_count,
             );
+        }
+    }
+}
+
+pub fn dispatch_mouse_move_event(
+    common: &CommonState,
+    x: f64,
+    y: f64,
+    modifiers: winit::keyboard::ModifiersState,
+) {
+    let handler = common.mouse_move_handler.lock().unwrap();
+    if let Some((cb, user_data)) = *handler {
+        let mods = modifiers_to_wef(modifiers);
+        unsafe {
+            cb(user_data as *mut c_void, x, y, mods);
         }
     }
 }

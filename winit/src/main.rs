@@ -183,6 +183,12 @@ impl ApplicationHandler<UserEvent> for App {
                 if let Some(state) = BackendState::get() {
                     *state.common.cursor_position.lock().unwrap() =
                         (position.x, position.y);
+                    wef_backend_winit_common::dispatch_mouse_move_event(
+                        &state.common,
+                        position.x,
+                        position.y,
+                        *modifiers,
+                    );
                 }
             }
             WindowEvent::MouseInput {

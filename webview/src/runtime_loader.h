@@ -69,6 +69,19 @@ class RuntimeLoader {
     }
   }
 
+  void SetMouseMoveHandler(wef_mouse_move_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(mouse_move_mutex_);
+    mouse_move_handler_ = handler;
+    mouse_move_user_data_ = user_data;
+  }
+
+  void DispatchMouseMoveEvent(double x, double y, uint32_t modifiers) {
+    std::lock_guard<std::mutex> lock(mouse_move_mutex_);
+    if (mouse_move_handler_) {
+      mouse_move_handler_(mouse_move_user_data_, x, y, modifiers);
+    }
+  }
+
   void SetJsCallNotify(void (*notify_fn)(void*), void* notify_data) {
     std::lock_guard<std::mutex> lock(notify_mutex_);
     js_call_notify_fn_ = notify_fn;
@@ -104,6 +117,10 @@ class RuntimeLoader {
   wef_mouse_click_fn mouse_click_handler_ = nullptr;
   void* mouse_click_user_data_ = nullptr;
   std::mutex mouse_mutex_;
+
+  wef_mouse_move_fn mouse_move_handler_ = nullptr;
+  void* mouse_move_user_data_ = nullptr;
+  std::mutex mouse_move_mutex_;
 
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;

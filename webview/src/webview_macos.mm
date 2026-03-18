@@ -52,6 +52,7 @@ class WKWebViewBackend : public WefBackend {
   WefWindowDelegate* window_delegate_;
   id keyboard_monitor_;
   id mouse_monitor_;
+  id mouse_move_monitor_;
 
 };
 
@@ -458,6 +459,23 @@ WKWebViewBackend::WKWebViewBackend(int width, int height, const std::string& tit
 
           return event; // Don't consume the event
         }];
+
+    mouse_move_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
+        (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
+         NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
+        handler:^NSEvent*(NSEvent* event) {
+          uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+          NSPoint loc = [event locationInWindow];
+          NSWindow* win = [event window];
+          double x = loc.x;
+          double y = 0;
+          if (win) {
+            y = [win contentLayoutRect].size.height - loc.y;
+          }
+
+          RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(x, y, modifiers);
+          return event;
+        }];
   }
 }
 
@@ -470,6 +488,10 @@ WKWebViewBackend::~WKWebViewBackend() {
     if (mouse_monitor_) {
       [NSEvent removeMonitor:mouse_monitor_];
       mouse_monitor_ = nil;
+    }
+    if (mouse_move_monitor_) {
+      [NSEvent removeMonitor:mouse_move_monitor_];
+      mouse_move_monitor_ = nil;
     }
     if (webview_) {
       [webview_.configuration.userContentController removeScriptMessageHandlerForName:@"wef"];

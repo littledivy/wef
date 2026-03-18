@@ -84,6 +84,14 @@ typedef void (*wef_mouse_click_fn)(
     int32_t click_count // 1 = single, 2 = double click
 );
 
+// Callback for mouse move events.
+typedef void (*wef_mouse_move_fn)(
+    void* user_data,
+    double x,           // x position in window coordinates
+    double y,           // y position in window coordinates
+    uint32_t modifiers  // bitmask of WEF_MOD_* flags
+);
+
 // Callback for keyboard events.
 typedef void (*wef_keyboard_event_fn)(
     void* user_data,
@@ -206,6 +214,13 @@ struct wef_backend_api {
     void (*set_mouse_click_handler)(
         void* backend_data,
         wef_mouse_click_fn handler,
+        void* user_data
+    );
+
+    // Register a handler for mouse move events.
+    void (*set_mouse_move_handler)(
+        void* backend_data,
+        wef_mouse_move_fn handler,
         void* user_data
     );
 

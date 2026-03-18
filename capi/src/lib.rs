@@ -524,6 +524,14 @@ impl Window {
         self
     }
 
+    pub fn on_mouse_move<F>(self, handler: F) -> Self
+    where
+        F: Fn(MouseMoveEvent) + Send + Sync + 'static,
+    {
+        on_mouse_move(handler);
+        self
+    }
+
     pub fn bind<F>(self, name: &str, handler: F) -> Self
     where
         F: Fn(JsCall) + Send + Sync + 'static,
@@ -1137,6 +1145,60 @@ where
             set_handler(
                 api.backend_data,
                 Some(mouse_click_trampoline),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+}
+
+// --- Mouse move events ---
+
+#[derive(Debug, Clone, Copy)]
+pub struct MouseMoveEvent {
+    pub x: f64,
+    pub y: f64,
+    pub modifiers: KeyModifiers,
+}
+
+static MOUSE_MOVE_HANDLER: OnceLock<Mutex<Option<Box<dyn Fn(MouseMoveEvent) + Send + Sync>>>> =
+    OnceLock::new();
+
+fn mouse_move_handler_store(
+) -> &'static Mutex<Option<Box<dyn Fn(MouseMoveEvent) + Send + Sync>>> {
+    MOUSE_MOVE_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn mouse_move_trampoline(
+    _user_data: *mut c_void,
+    x: f64,
+    y: f64,
+    modifiers: u32,
+) {
+    let event = MouseMoveEvent {
+        x,
+        y,
+        modifiers: KeyModifiers::from_raw(modifiers),
+    };
+
+    let guard = mouse_move_handler_store().lock().unwrap();
+    if let Some(handler) = guard.as_ref() {
+        handler(event);
+    }
+}
+
+/// Register a handler for mouse move events.
+pub fn on_mouse_move<F>(handler: F)
+where
+    F: Fn(MouseMoveEvent) + Send + Sync + 'static,
+{
+    *mouse_move_handler_store().lock().unwrap() = Some(Box::new(handler));
+
+    let api = api();
+    if let Some(set_handler) = api.set_mouse_move_handler {
+        unsafe {
+            set_handler(
+                api.backend_data,
+                Some(mouse_move_trampoline),
                 std::ptr::null_mut(),
             );
         }

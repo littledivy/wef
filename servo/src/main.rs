@@ -374,6 +374,12 @@ impl ApplicationHandler<UserEvent> for App {
                     if let Some(backend_state) = BackendState::get() {
                         *backend_state.common.cursor_position.lock().unwrap() =
                             (position.x, position.y);
+                        wef_backend_winit_common::dispatch_mouse_move_event(
+                            &backend_state.common,
+                            position.x,
+                            position.y,
+                            state.modifiers.get(),
+                        );
                     }
                 }
             }

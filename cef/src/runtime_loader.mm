@@ -21,6 +21,7 @@ RuntimeLoader* RuntimeLoader::instance_ = nullptr;
 // --- Native Mouse Monitor (macOS) ---
 
 static id g_mouse_monitor = nil;
+static id g_mouse_move_monitor = nil;
 
 static uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
   uint32_t mods = 0;
@@ -82,12 +83,33 @@ void InstallNativeMouseMonitor() {
 
         return event; // Don't consume
       }];
+
+  g_mouse_move_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:
+      (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
+       NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
+      handler:^NSEvent*(NSEvent* event) {
+        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+        NSPoint loc = [event locationInWindow];
+        NSWindow* win = [event window];
+        double x = loc.x;
+        double y = 0;
+        if (win) {
+          y = [win contentLayoutRect].size.height - loc.y;
+        }
+
+        RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(x, y, modifiers);
+        return event;
+      }];
 }
 
 void RemoveNativeMouseMonitor() {
   if (g_mouse_monitor) {
     [NSEvent removeMonitor:g_mouse_monitor];
     g_mouse_monitor = nil;
+  }
+  if (g_mouse_move_monitor) {
+    [NSEvent removeMonitor:g_mouse_move_monitor];
+    g_mouse_move_monitor = nil;
   }
 }
 
@@ -651,6 +673,13 @@ static void Backend_SetMouseClickHandler(void* data,
   loader->SetMouseClickHandler(handler, user_data);
 }
 
+static void Backend_SetMouseMoveHandler(void* data,
+                                         wef_mouse_move_fn handler,
+                                         void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetMouseMoveHandler(handler, user_data);
+}
+
 static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
@@ -1037,6 +1066,7 @@ void RuntimeLoader::InitializeBackendApi() {
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
+  backend_api_.set_mouse_move_handler = Backend_SetMouseMoveHandler;
 
   backend_api_.poll_js_calls = [](void* data) {
     RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);

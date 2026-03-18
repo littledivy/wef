@@ -40,7 +40,7 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
-all: runtimes winit webview ## Build runtimes + winit + webview backends
+all: runtimes winit webview cef servo ## Build all backends
 
 check-deps: ## Check that required build tools are installed
 	@echo "Checking build dependencies..."
@@ -106,6 +106,11 @@ cef: check-deps cef-deps ## Build the CEF backend
 		-DCEF_ROOT=$(CEF_ROOT)
 	ninja -C cef/build
 	@echo "Built: cef/build/Release/wef.app"
+
+# ─── Servo Backend ──────────────────────────────────────────────────
+
+servo: check-deps ## Build the Servo backend
+	cd servo && cargo build --release
 
 # ─── Clean ───────────────────────────────────────────────────────────
 
