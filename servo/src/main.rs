@@ -89,8 +89,6 @@ struct WefBackendApi {
 
 type RuntimeInitFn = unsafe extern "C" fn(*const WefBackendApi) -> c_int;
 type RuntimeStartFn = unsafe extern "C" fn() -> c_int;
-#[allow(dead_code)]
-type RuntimeShutdownFn = unsafe extern "C" fn();
 
 static BACKEND_STATE: AtomicPtr<BackendState> = AtomicPtr::new(std::ptr::null_mut());
 

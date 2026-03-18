@@ -11,8 +11,6 @@
 #include "include/cef_render_process_handler.h"
 #include "include/cef_v8.h"
 
-class PromiseResolver;
-
 struct StoredCallback {
   CefRefPtr<CefV8Value> func;
   CefRefPtr<CefV8Context> context;
@@ -64,10 +62,8 @@ class PromiseResolver : public CefBaseRefCounted {
   void Resolve(CefRefPtr<CefV8Value> value);
   void Reject(const std::string& error);
 
-  uint64_t GetCallId() const { return call_id_; }
 
  private:
-  uint64_t call_id_;
   CefRefPtr<CefV8Value> promise_;
   CefRefPtr<CefV8Context> context_;
 

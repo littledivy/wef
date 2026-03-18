@@ -7,7 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
-#include <map>
+#include <queue>
 
 #include "include/cef_browser.h"
 #include "include/cef_values.h"
@@ -42,16 +42,23 @@ class RuntimeLoader {
 
   CefRefPtr<CefBrowser> GetBrowser();
 
+  const wef_backend_api_t& GetBackendApi() const { return backend_api_; }
+
   void OnJsCall(uint64_t call_id, const std::string& method_path,
                 CefRefPtr<CefListValue> args);
 
-  wef_js_call_fn GetJsCallHandler() const { return js_call_handler_; }
-  void* GetJsCallUserData() const { return js_call_user_data_; }
+  void PollPendingJsCalls();
 
   void SetJsCallHandler(wef_js_call_fn handler, void* user_data) {
     std::lock_guard<std::mutex> lock(handler_mutex_);
     js_call_handler_ = handler;
     js_call_user_data_ = user_data;
+  }
+
+  void SetJsCallNotify(void (*notify_fn)(void*), void* notify_data) {
+    std::lock_guard<std::mutex> lock(notify_mutex_);
+    js_call_notify_fn_ = notify_fn;
+    js_call_notify_data_ = notify_data;
   }
 
  private:
@@ -75,6 +82,18 @@ class RuntimeLoader {
   wef_js_call_fn js_call_handler_ = nullptr;
   void* js_call_user_data_ = nullptr;
   std::mutex handler_mutex_;
+
+  void (*js_call_notify_fn_)(void*) = nullptr;
+  void* js_call_notify_data_ = nullptr;
+  std::mutex notify_mutex_;
+
+  struct PendingJsCall {
+    uint64_t call_id;
+    std::string method_path;
+    CefRefPtr<CefListValue> args;
+  };
+  std::queue<PendingJsCall> pending_js_calls_;
+  std::mutex pending_mutex_;
 
   static RuntimeLoader* instance_;
 };

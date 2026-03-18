@@ -2,8 +2,11 @@
 
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::future::Future;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+use tokio::sync::Notify;
 
 #[allow(non_upper_case_globals)]
 #[allow(non_camel_case_types)]
@@ -13,7 +16,7 @@ mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub const WEF_API_VERSION: u32 = 1;
+pub const WEF_API_VERSION: u32 = 5;
 pub type WefValue = ffi::wef_value_t;
 pub type WefBackendApi = ffi::wef_backend_api_t;
 
@@ -22,15 +25,26 @@ unsafe impl Sync for WefBackendApi {}
 
 static BACKEND_API: OnceLock<&'static WefBackendApi> = OnceLock::new();
 static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
-static BINDINGS: OnceLock<Mutex<HashMap<String, Box<dyn Fn(JsCall) + Send + Sync>>>> =
+static BINDINGS: OnceLock<Mutex<HashMap<String, BindingHandler>>> = OnceLock::new();
+static JS_CALL_NOTIFY: OnceLock<Notify> = OnceLock::new();
+static MENU_CLICK_HANDLER: OnceLock<Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>> =
     OnceLock::new();
+
+enum BindingHandler {
+    Sync(Box<dyn Fn(JsCall) + Send + Sync>),
+    Async(Box<dyn Fn(JsCall) -> std::pin::Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>),
+}
 
 fn api() -> &'static WefBackendApi {
     BACKEND_API.get().expect("Backend API not initialized")
 }
 
-fn bindings() -> &'static Mutex<HashMap<String, Box<dyn Fn(JsCall) + Send + Sync>>> {
+fn bindings() -> &'static Mutex<HashMap<String, BindingHandler>> {
     BINDINGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn js_call_notify() -> &'static Notify {
+    JS_CALL_NOTIFY.get_or_init(Notify::new)
 }
 
 pub fn init_api(api: *const WefBackendApi) -> c_int {
@@ -53,6 +67,10 @@ pub fn init_api(api: *const WefBackendApi) -> c_int {
 
 pub fn shutdown() {
     SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
+    // Wake up run() so it can exit
+    if let Some(notify) = JS_CALL_NOTIFY.get() {
+        notify.notify_one();
+    }
 }
 
 pub fn should_shutdown() -> bool {
@@ -265,7 +283,7 @@ impl Value {
 }
 
 pub struct JsCall {
-    call_id: u64,
+    pub call_id: u64,
     pub method: String,
     pub args: Vec<Value>,
 }
@@ -324,7 +342,13 @@ unsafe extern "C" fn js_call_handler(
 
     let bindings = bindings().lock().unwrap();
     if let Some(handler) = bindings.get(&method) {
-        handler(call);
+        match handler {
+            BindingHandler::Sync(f) => f(call),
+            BindingHandler::Async(f) => {
+                let fut = f(call);
+                tokio::spawn(fut);
+            }
+        }
     } else {
         drop(bindings);
         call.reject(&format!("No binding for '{}'", method));
@@ -340,6 +364,44 @@ fn register_js_handler() {
                 Some(js_call_handler),
                 std::ptr::null_mut(),
             );
+        }
+    }
+}
+
+unsafe extern "C" fn js_call_notify_callback(_user_data: *mut c_void) {
+    js_call_notify().notify_one();
+}
+
+fn register_js_notify() {
+    let api = api();
+    if let Some(set_notify) = api.set_js_call_notify {
+        unsafe {
+            set_notify(
+                api.backend_data,
+                Some(js_call_notify_callback),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+}
+
+fn ensure_js_handler() {
+    static HANDLER_REGISTERED: AtomicBool = AtomicBool::new(false);
+    if !HANDLER_REGISTERED.swap(true, Ordering::SeqCst) {
+        register_js_handler();
+        register_js_notify();
+    }
+}
+
+/// Async event loop that dispatches JS calls as they arrive.
+/// Blocks until `should_shutdown()` returns true.
+pub async fn run() {
+    ensure_js_handler();
+    loop {
+        js_call_notify().notified().await;
+        poll_js_calls();
+        if should_shutdown() {
+            break;
         }
     }
 }
@@ -364,11 +426,11 @@ impl Window {
         self
     }
 
-    pub fn load_url(self, url: &str) -> Self {
+    pub fn load(self, path: &str) -> Self {
         let api = api();
         if let Some(f) = api.navigate {
-            let c_url = CString::new(url).expect("Invalid URL");
-            unsafe { f(api.backend_data, c_url.as_ptr()) };
+            let c_path = CString::new(path).expect("Invalid path");
+            unsafe { f(api.backend_data, c_path.as_ptr()) };
         }
         self
     }
@@ -385,13 +447,23 @@ impl Window {
     where
         F: Fn(JsCall) + Send + Sync + 'static,
     {
-        static HANDLER_REGISTERED: AtomicBool = AtomicBool::new(false);
-        if !HANDLER_REGISTERED.swap(true, Ordering::SeqCst) {
-            register_js_handler();
-        }
-
+        ensure_js_handler();
         let mut bindings = bindings().lock().unwrap();
-        bindings.insert(name.to_string(), Box::new(handler));
+        bindings.insert(name.to_string(), BindingHandler::Sync(Box::new(handler)));
+        self
+    }
+
+    pub fn bind_async<F, Fut>(self, name: &str, handler: F) -> Self
+    where
+        F: Fn(JsCall) -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
+        ensure_js_handler();
+        let mut bindings = bindings().lock().unwrap();
+        bindings.insert(
+            name.to_string(),
+            BindingHandler::Async(Box::new(move |call| Box::pin(handler(call)))),
+        );
         self
     }
 }
@@ -434,17 +506,171 @@ pub fn set_window_size(width: i32, height: i32) {
     }
 }
 
+pub fn poll_js_calls() {
+    let api = api();
+    if let Some(f) = api.poll_js_calls {
+        unsafe { f(api.backend_data) };
+    }
+}
+
 pub fn bind<F>(name: &str, handler: F)
 where
     F: Fn(JsCall) + Send + Sync + 'static,
 {
-    static HANDLER_REGISTERED: AtomicBool = AtomicBool::new(false);
-    if !HANDLER_REGISTERED.swap(true, Ordering::SeqCst) {
-        register_js_handler();
+    ensure_js_handler();
+    let mut bindings = bindings().lock().unwrap();
+    bindings.insert(name.to_string(), BindingHandler::Sync(Box::new(handler)));
+}
+
+pub fn bind_async<F, Fut>(name: &str, handler: F)
+where
+    F: Fn(JsCall) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    ensure_js_handler();
+    let mut bindings = bindings().lock().unwrap();
+    bindings.insert(
+        name.to_string(),
+        BindingHandler::Async(Box::new(move |call| Box::pin(handler(call)))),
+    );
+}
+
+/// A menu item in an application menu template.
+#[derive(Clone, Debug)]
+pub enum MenuItem {
+    /// A regular menu item with label and optional properties.
+    Item {
+        label: String,
+        id: Option<String>,
+        accelerator: Option<String>,
+        enabled: bool,
+    },
+    /// A submenu containing child items.
+    Submenu {
+        label: String,
+        items: Vec<MenuItem>,
+    },
+    /// A separator line.
+    Separator,
+    /// A standard role-based item (quit, copy, paste, etc.)
+    Role {
+        role: String,
+    },
+}
+
+impl MenuItem {
+    fn to_value(&self) -> Value {
+        match self {
+            MenuItem::Item {
+                label,
+                id,
+                accelerator,
+                enabled,
+            } => {
+                let mut dict = HashMap::new();
+                dict.insert("label".to_string(), Value::String(label.clone()));
+                if let Some(id) = id {
+                    dict.insert("id".to_string(), Value::String(id.clone()));
+                }
+                if let Some(accel) = accelerator {
+                    dict.insert("accelerator".to_string(), Value::String(accel.clone()));
+                }
+                if !enabled {
+                    dict.insert("enabled".to_string(), Value::Bool(false));
+                }
+                Value::Dict(dict)
+            }
+            MenuItem::Submenu { label, items } => {
+                let mut dict = HashMap::new();
+                dict.insert("label".to_string(), Value::String(label.clone()));
+                dict.insert(
+                    "submenu".to_string(),
+                    Value::List(items.iter().map(|i| i.to_value()).collect()),
+                );
+                Value::Dict(dict)
+            }
+            MenuItem::Separator => {
+                let mut dict = HashMap::new();
+                dict.insert("type".to_string(), Value::String("separator".to_string()));
+                Value::Dict(dict)
+            }
+            MenuItem::Role { role } => {
+                let mut dict = HashMap::new();
+                dict.insert("role".to_string(), Value::String(role.clone()));
+                Value::Dict(dict)
+            }
+        }
+    }
+}
+
+unsafe extern "C" fn menu_click_callback(
+    _user_data: *mut c_void,
+    item_id: *const c_char,
+) {
+    if item_id.is_null() {
+        return;
+    }
+    let id = CStr::from_ptr(item_id).to_string_lossy();
+    let handler = MENU_CLICK_HANDLER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
+    if let Some(ref f) = *handler {
+        f(&id);
+    }
+}
+
+/// Set the application menu from a template and register a click handler.
+pub fn set_application_menu<F>(template: &[MenuItem], on_click: F)
+where
+    F: Fn(&str) + Send + Sync + 'static,
+{
+    {
+        let mut handler = MENU_CLICK_HANDLER
+            .get_or_init(|| Mutex::new(None))
+            .lock()
+            .unwrap();
+        *handler = Some(Box::new(on_click));
     }
 
-    let mut bindings = bindings().lock().unwrap();
-    bindings.insert(name.to_string(), Box::new(handler));
+    let api = api();
+    if let Some(f) = api.set_application_menu {
+        let value = Value::List(template.iter().map(|i| i.to_value()).collect());
+        let raw = value.to_raw();
+        unsafe {
+            f(
+                api.backend_data,
+                raw,
+                Some(menu_click_callback),
+                std::ptr::null_mut(),
+            );
+        }
+    }
+}
+
+/// Set the menu click handler (called when a custom menu item is clicked).
+pub fn set_menu_click_handler(handler: impl Fn(&str) + Send + Sync + 'static) {
+    let mut h = MENU_CLICK_HANDLER
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
+    *h = Some(Box::new(handler));
+}
+
+/// Set the application menu from a raw `Value` template.
+pub fn set_application_menu_raw(template: Value) {
+    let api = api();
+    if let Some(f) = api.set_application_menu {
+        let raw = template.to_raw();
+        unsafe {
+            f(
+                api.backend_data,
+                raw,
+                Some(menu_click_callback),
+                std::ptr::null_mut(),
+            );
+        }
+    }
 }
 
 #[macro_export]

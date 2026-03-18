@@ -66,8 +66,6 @@
     return;
   }
 
-  self.backend->PostUiTask([](void* data) {
-  }, nullptr);
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
@@ -82,18 +80,85 @@
 
 @end
 
+// Run the runtime headless (no window) for forked worker processes.
+// Framework dev servers (e.g. Next.js Turbopack) fork child processes
+// via child_process.fork(), which re-executes this binary. We detect
+// these workers and run the Deno runtime without creating a window.
+static int run_headless(const char* runtimePath) {
+  RuntimeLoader* loader = RuntimeLoader::GetInstance();
+
+  // Create a minimal backend with no visible window
+  loader->SetBackend(nullptr);
+
+  std::string path;
+  if (runtimePath) {
+    path = runtimePath;
+  } else {
+    const char* envPath = getenv("WEF_RUNTIME_PATH");
+    if (envPath) {
+      path = envPath;
+    }
+  }
+
+  if (path.empty()) {
+    std::cerr << "No runtime library found for headless worker." << std::endl;
+    return 1;
+  }
+
+  if (!loader->Load(path)) {
+    std::cerr << "Failed to load runtime for headless worker." << std::endl;
+    return 1;
+  }
+
+  if (!loader->Start()) {
+    std::cerr << "Failed to start headless worker runtime." << std::endl;
+    return 1;
+  }
+
+  // Wait for the runtime thread to finish
+  loader->Shutdown();
+  return 0;
+}
+
+static bool is_cli_worker_command(int argc, char* argv[]) {
+  if (argc < 3 || strcmp(argv[1], "run") != 0) {
+    return false;
+  }
+
+  for (int i = 2; i < argc; ++i) {
+    if (argv[i][0] == '-') {
+      continue;
+    }
+    return true;
+  }
+
+  return false;
+}
+
+static bool is_forked_worker() {
+  return getenv("NODE_CHANNEL_FD") != nullptr
+      || getenv("NEXT_PRIVATE_WORKER") != nullptr;
+}
+
 int main(int argc, char* argv[]) {
+  NSString* runtimePathArg = nil;
+  for (int i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--runtime") == 0 && i + 1 < argc) {
+      runtimePathArg = [NSString stringWithUTF8String:argv[++i]];
+    }
+  }
+
+  // Forked worker processes should not create a window.
+  if (is_forked_worker() || is_cli_worker_command(argc, argv)) {
+    return run_headless(runtimePathArg ? [runtimePathArg UTF8String] : nullptr);
+  }
+
   @autoreleasepool {
     [NSApplication sharedApplication];
     [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
 
     AppDelegate* delegate = [[AppDelegate alloc] init];
-
-    for (int i = 1; i < argc; ++i) {
-      if (strcmp(argv[i], "--runtime") == 0 && i + 1 < argc) {
-        delegate.runtimePath = [NSString stringWithUTF8String:argv[++i]];
-      }
-    }
+    delegate.runtimePath = runtimePathArg;
 
     [NSApp setDelegate:delegate];
 

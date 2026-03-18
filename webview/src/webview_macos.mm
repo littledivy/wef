@@ -4,288 +4,7 @@
 #import <WebKit/WebKit.h>
 
 #include "runtime_loader.h"
-#include "webview_value.h"
-
-#include <atomic>
-#include <map>
-#include <mutex>
-#include <sstream>
-
-namespace json {
-
-std::string Escape(const std::string& s) {
-  std::string result;
-  for (char c : s) {
-    switch (c) {
-      case '"': result += "\\\""; break;
-      case '\\': result += "\\\\"; break;
-      case '\b': result += "\\b"; break;
-      case '\f': result += "\\f"; break;
-      case '\n': result += "\\n"; break;
-      case '\r': result += "\\r"; break;
-      case '\t': result += "\\t"; break;
-      default:
-        if (static_cast<unsigned char>(c) < 0x20) {
-          char buf[8];
-          snprintf(buf, sizeof(buf), "\\u%04x", c);
-          result += buf;
-        } else {
-          result += c;
-        }
-    }
-  }
-  return result;
-}
-
-std::string Serialize(const wef::ValuePtr& value);
-
-std::string SerializeList(const wef::ValueList& list) {
-  std::ostringstream ss;
-  ss << "[";
-  for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0) ss << ",";
-    ss << Serialize(list[i]);
-  }
-  ss << "]";
-  return ss.str();
-}
-
-std::string SerializeDict(const wef::ValueDict& dict) {
-  std::ostringstream ss;
-  ss << "{";
-  bool first = true;
-  for (const auto& pair : dict) {
-    if (!first) ss << ",";
-    first = false;
-    ss << "\"" << Escape(pair.first) << "\":" << Serialize(pair.second);
-  }
-  ss << "}";
-  return ss.str();
-}
-
-std::string Serialize(const wef::ValuePtr& value) {
-  if (!value) return "null";
-  switch (value->type) {
-    case wef::ValueType::Null:
-      return "null";
-    case wef::ValueType::Bool:
-      return value->GetBool() ? "true" : "false";
-    case wef::ValueType::Int:
-      return std::to_string(value->GetInt());
-    case wef::ValueType::Double: {
-      char buf[64];
-      snprintf(buf, sizeof(buf), "%.17g", value->GetDouble());
-      return buf;
-    }
-    case wef::ValueType::String:
-      return "\"" + Escape(value->GetString()) + "\"";
-    case wef::ValueType::Binary: {
-      const auto& binary = value->GetBinary();
-      std::string base64;
-      static const char* chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-      size_t i = 0;
-      const uint8_t* data = binary.data.data();
-      size_t len = binary.data.size();
-      while (i < len) {
-        uint32_t n = (data[i] << 16);
-        if (i + 1 < len) n |= (data[i + 1] << 8);
-        if (i + 2 < len) n |= data[i + 2];
-        base64 += chars[(n >> 18) & 0x3F];
-        base64 += chars[(n >> 12) & 0x3F];
-        base64 += (i + 1 < len) ? chars[(n >> 6) & 0x3F] : '=';
-        base64 += (i + 2 < len) ? chars[n & 0x3F] : '=';
-        i += 3;
-      }
-      return "{\"__binary__\":\"" + base64 + "\"}";
-    }
-    case wef::ValueType::List:
-      return SerializeList(value->GetList());
-    case wef::ValueType::Dict:
-      return SerializeDict(value->GetDict());
-    case wef::ValueType::Callback:
-      return "{\"__callback__\":\"" + std::to_string(value->GetCallbackId()) + "\"}";
-  }
-  return "null";
-}
-
-wef::ValuePtr Parse(const char*& p);
-
-void SkipWhitespace(const char*& p) {
-  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) ++p;
-}
-
-std::string ParseString(const char*& p) {
-  std::string result;
-  ++p;
-  while (*p && *p != '"') {
-    if (*p == '\\' && *(p + 1)) {
-      ++p;
-      switch (*p) {
-        case '"': result += '"'; break;
-        case '\\': result += '\\'; break;
-        case 'b': result += '\b'; break;
-        case 'f': result += '\f'; break;
-        case 'n': result += '\n'; break;
-        case 'r': result += '\r'; break;
-        case 't': result += '\t'; break;
-        case 'u': {
-          if (p[1] && p[2] && p[3] && p[4]) {
-            char hex[5] = {p[1], p[2], p[3], p[4], 0};
-            int codepoint = (int)strtol(hex, nullptr, 16);
-            if (codepoint < 0x80) {
-              result += (char)codepoint;
-            } else if (codepoint < 0x800) {
-              result += (char)(0xC0 | (codepoint >> 6));
-              result += (char)(0x80 | (codepoint & 0x3F));
-            } else {
-              result += (char)(0xE0 | (codepoint >> 12));
-              result += (char)(0x80 | ((codepoint >> 6) & 0x3F));
-              result += (char)(0x80 | (codepoint & 0x3F));
-            }
-            p += 4;
-          }
-          break;
-        }
-        default: result += *p;
-      }
-    } else {
-      result += *p;
-    }
-    ++p;
-  }
-  if (*p == '"') ++p;
-  return result;
-}
-
-wef::ValuePtr ParseArray(const char*& p) {
-  auto list = wef::Value::List();
-  ++p;
-  SkipWhitespace(p);
-  while (*p && *p != ']') {
-    list->GetList().push_back(Parse(p));
-    SkipWhitespace(p);
-    if (*p == ',') ++p;
-    SkipWhitespace(p);
-  }
-  if (*p == ']') ++p;
-  return list;
-}
-
-wef::ValuePtr ParseObject(const char*& p) {
-  auto dict = wef::Value::Dict();
-  ++p;
-  SkipWhitespace(p);
-  while (*p && *p != '}') {
-    SkipWhitespace(p);
-    if (*p != '"') break;
-    std::string key = ParseString(p);
-    SkipWhitespace(p);
-    if (*p == ':') ++p;
-    SkipWhitespace(p);
-    dict->GetDict()[key] = Parse(p);
-    SkipWhitespace(p);
-    if (*p == ',') ++p;
-    SkipWhitespace(p);
-  }
-  if (*p == '}') ++p;
-
-  const auto& d = dict->GetDict();
-  auto it = d.find("__callback__");
-  if (it != d.end() && it->second->IsString()) {
-    uint64_t id = std::stoull(it->second->GetString());
-    return wef::Value::Callback(id);
-  }
-  it = d.find("__binary__");
-  if (it != d.end() && it->second->IsString()) {
-    const std::string& base64 = it->second->GetString();
-    std::vector<uint8_t> data;
-    static const int decode[256] = {
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
-      52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
-      -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-      15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-      -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
-      41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
-    int val = 0, bits = -8;
-    for (char c : base64) {
-      if (c == '=') break;
-      int d = decode[(unsigned char)c];
-      if (d < 0) continue;
-      val = (val << 6) | d;
-      bits += 6;
-      if (bits >= 0) {
-        data.push_back((val >> bits) & 0xFF);
-        bits -= 8;
-      }
-    }
-    return wef::Value::Binary(data.data(), data.size());
-  }
-
-  return dict;
-}
-
-wef::ValuePtr Parse(const char*& p) {
-  SkipWhitespace(p);
-  if (!*p) return wef::Value::Null();
-
-  if (*p == 'n' && strncmp(p, "null", 4) == 0) {
-    p += 4;
-    return wef::Value::Null();
-  }
-  if (*p == 't' && strncmp(p, "true", 4) == 0) {
-    p += 4;
-    return wef::Value::Bool(true);
-  }
-  if (*p == 'f' && strncmp(p, "false", 5) == 0) {
-    p += 5;
-    return wef::Value::Bool(false);
-  }
-  if (*p == '"') {
-    return wef::Value::String(ParseString(p));
-  }
-  if (*p == '[') {
-    return ParseArray(p);
-  }
-  if (*p == '{') {
-    return ParseObject(p);
-  }
-  if (*p == '-' || (*p >= '0' && *p <= '9')) {
-    char* end;
-    double d = strtod(p, &end);
-    bool isInt = true;
-    for (const char* c = p; c < end; ++c) {
-      if (*c == '.' || *c == 'e' || *c == 'E') {
-        isInt = false;
-        break;
-      }
-    }
-    p = end;
-    if (isInt && d >= INT_MIN && d <= INT_MAX) {
-      return wef::Value::Int((int)d);
-    }
-    return wef::Value::Double(d);
-  }
-
-  return wef::Value::Null();
-}
-
-wef::ValuePtr ParseJson(const std::string& json) {
-  const char* p = json.c_str();
-  return Parse(p);
-}
-
-}
+#include "wef_json.h"
 
 @class WefScriptMessageHandler;
 @class WefWindowDelegate;
@@ -308,6 +27,11 @@ class WKWebViewBackend : public WefBackend {
 
   void Run() override;
 
+  void SetApplicationMenu(wef_value_t* menu_template,
+                          const wef_backend_api_t* api,
+                          wef_menu_click_fn on_click,
+                          void* on_click_data) override;
+
   void HandleJsMessage(uint64_t call_id, const std::string& method, wef::ValuePtr args);
 
  private:
@@ -316,9 +40,6 @@ class WKWebViewBackend : public WefBackend {
   WefScriptMessageHandler* message_handler_;
   WefWindowDelegate* window_delegate_;
 
-  std::atomic<uint64_t> next_callback_id_{1};
-  std::map<uint64_t, bool> stored_callbacks_;
-  std::mutex callbacks_mutex_;
 };
 
 @interface WefScriptMessageHandler : NSObject <WKScriptMessageHandler>
@@ -556,9 +277,10 @@ void WKWebViewBackend::Navigate(const std::string& url) {
 }
 
 void WKWebViewBackend::SetTitle(const std::string& title) {
+  std::string titleCopy = title;
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
-      [window_ setTitle:[NSString stringWithUTF8String:title.c_str()]];
+      [window_ setTitle:[NSString stringWithUTF8String:titleCopy.c_str()]];
     }
   });
 }
@@ -661,6 +383,233 @@ void WKWebViewBackend::Run() {
 void WKWebViewBackend::HandleJsMessage(uint64_t call_id, const std::string& method,
                                         wef::ValuePtr args) {
   RuntimeLoader::GetInstance()->OnJsCall(call_id, method, args);
+}
+
+// --- Application Menu ---
+
+static wef_menu_click_fn g_webview_menu_click_fn = nullptr;
+static void* g_webview_menu_click_data = nullptr;
+
+@interface WefMenuTarget : NSObject
++ (instancetype)shared;
+- (void)menuItemClicked:(id)sender;
+@end
+
+@implementation WefMenuTarget
++ (instancetype)shared {
+  static WefMenuTarget* instance = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    instance = [[WefMenuTarget alloc] init];
+  });
+  return instance;
+}
+
+- (void)menuItemClicked:(id)sender {
+  NSMenuItem* item = (NSMenuItem*)sender;
+  NSString* itemId = [item representedObject];
+  if (itemId && g_webview_menu_click_fn) {
+    g_webview_menu_click_fn(g_webview_menu_click_data, [itemId UTF8String]);
+  }
+}
+@end
+
+static void ParseAccelerator(const std::string& accel, NSString** outKey,
+                             NSEventModifierFlags* outMask) {
+  *outKey = @"";
+  *outMask = 0;
+
+  std::string lower = accel;
+  for (auto& c : lower) c = tolower(c);
+
+  size_t pos = 0;
+  std::vector<std::string> parts;
+  std::string remaining = lower;
+  while ((pos = remaining.find('+')) != std::string::npos) {
+    parts.push_back(remaining.substr(0, pos));
+    remaining = remaining.substr(pos + 1);
+  }
+  if (!remaining.empty()) parts.push_back(remaining);
+
+  for (const auto& part : parts) {
+    if (part == "cmd" || part == "command" || part == "cmdorctrl" ||
+        part == "commandorcontrol") {
+      *outMask |= NSEventModifierFlagCommand;
+    } else if (part == "shift") {
+      *outMask |= NSEventModifierFlagShift;
+    } else if (part == "alt" || part == "option") {
+      *outMask |= NSEventModifierFlagOption;
+    } else if (part == "ctrl" || part == "control") {
+      *outMask |= NSEventModifierFlagControl;
+    } else {
+      *outKey = [NSString stringWithUTF8String:part.c_str()];
+    }
+  }
+}
+
+static NSMenuItem* CreateRoleMenuItem(const std::string& role) {
+  NSString* title = @"";
+  SEL action = nil;
+  NSString* keyEquiv = @"";
+  NSEventModifierFlags mask = NSEventModifierFlagCommand;
+
+  if (role == "quit") {
+    title = @"Quit"; action = @selector(terminate:); keyEquiv = @"q";
+  } else if (role == "copy") {
+    title = @"Copy"; action = @selector(copy:); keyEquiv = @"c";
+  } else if (role == "paste") {
+    title = @"Paste"; action = @selector(paste:); keyEquiv = @"v";
+  } else if (role == "cut") {
+    title = @"Cut"; action = @selector(cut:); keyEquiv = @"x";
+  } else if (role == "selectall" || role == "selectAll") {
+    title = @"Select All"; action = @selector(selectAll:); keyEquiv = @"a";
+  } else if (role == "undo") {
+    title = @"Undo"; action = @selector(undo:); keyEquiv = @"z";
+  } else if (role == "redo") {
+    title = @"Redo"; action = @selector(redo:); keyEquiv = @"Z";
+    mask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+  } else if (role == "minimize") {
+    title = @"Minimize"; action = @selector(performMiniaturize:); keyEquiv = @"m";
+  } else if (role == "zoom") {
+    title = @"Zoom"; action = @selector(performZoom:);
+  } else if (role == "close") {
+    title = @"Close"; action = @selector(performClose:); keyEquiv = @"w";
+  } else if (role == "about") {
+    title = @"About"; action = @selector(orderFrontStandardAboutPanel:);
+  } else if (role == "hide") {
+    title = @"Hide"; action = @selector(hide:); keyEquiv = @"h";
+  } else if (role == "hideothers" || role == "hideOthers") {
+    title = @"Hide Others"; action = @selector(hideOtherApplications:);
+    keyEquiv = @"h"; mask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  } else if (role == "unhide") {
+    title = @"Show All"; action = @selector(unhideAllApplications:);
+  } else if (role == "front") {
+    title = @"Bring All to Front"; action = @selector(arrangeInFront:);
+  } else if (role == "togglefullscreen" || role == "toggleFullScreen") {
+    title = @"Toggle Full Screen"; action = @selector(toggleFullScreen:);
+    keyEquiv = @"f"; mask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
+  } else {
+    return nil;
+  }
+
+  NSMenuItem* item = [[NSMenuItem alloc]
+      initWithTitle:title action:action keyEquivalent:keyEquiv];
+  [item setKeyEquivalentModifierMask:mask];
+  return item;
+}
+
+static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) {
+  if (!val || !api->value_is_list(val)) return nil;
+
+  NSMenu* menu = [[NSMenu alloc] init];
+  [menu setAutoenablesItems:NO];
+
+  size_t count = api->value_list_size(val);
+  for (size_t i = 0; i < count; ++i) {
+    wef_value_t* itemVal = api->value_list_get(val, i);
+    if (!itemVal || !api->value_is_dict(itemVal)) continue;
+
+    // Separator
+    wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
+    if (typeVal && api->value_is_string(typeVal)) {
+      size_t len = 0;
+      char* typeStr = api->value_get_string(typeVal, &len);
+      if (typeStr && std::string(typeStr) == "separator") {
+        [menu addItem:[NSMenuItem separatorItem]];
+        api->value_free_string(typeStr);
+        continue;
+      }
+      if (typeStr) api->value_free_string(typeStr);
+    }
+
+    // Role
+    wef_value_t* roleVal = api->value_dict_get(itemVal, "role");
+    if (roleVal && api->value_is_string(roleVal)) {
+      size_t len = 0;
+      char* roleStr = api->value_get_string(roleVal, &len);
+      if (roleStr) {
+        NSMenuItem* roleItem = CreateRoleMenuItem(roleStr);
+        if (roleItem) [menu addItem:roleItem];
+        api->value_free_string(roleStr);
+        continue;
+      }
+    }
+
+    // Label
+    wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
+    if (!labelVal || !api->value_is_string(labelVal)) continue;
+    size_t labelLen = 0;
+    char* labelStr = api->value_get_string(labelVal, &labelLen);
+    if (!labelStr) continue;
+    NSString* label = [NSString stringWithUTF8String:labelStr];
+    api->value_free_string(labelStr);
+
+    // Submenu
+    wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
+    if (submenuVal && api->value_is_list(submenuVal)) {
+      NSMenuItem* submenuItem = [[NSMenuItem alloc] init];
+      [submenuItem setTitle:label];
+      NSMenu* submenu = BuildMenuFromValue(submenuVal, api);
+      [submenu setTitle:label];
+      [submenuItem setSubmenu:submenu];
+      [menu addItem:submenuItem];
+      continue;
+    }
+
+    // Regular clickable item
+    NSString* keyEquiv = @"";
+    NSEventModifierFlags modMask = NSEventModifierFlagCommand;
+    wef_value_t* accelVal = api->value_dict_get(itemVal, "accelerator");
+    if (accelVal && api->value_is_string(accelVal)) {
+      size_t accelLen = 0;
+      char* accelStr = api->value_get_string(accelVal, &accelLen);
+      if (accelStr) {
+        ParseAccelerator(accelStr, &keyEquiv, &modMask);
+        api->value_free_string(accelStr);
+      }
+    }
+
+    NSMenuItem* nsItem = [[NSMenuItem alloc]
+        initWithTitle:label action:@selector(menuItemClicked:) keyEquivalent:keyEquiv];
+    [nsItem setKeyEquivalentModifierMask:modMask];
+    [nsItem setTarget:[WefMenuTarget shared]];
+
+    wef_value_t* idVal = api->value_dict_get(itemVal, "id");
+    if (idVal && api->value_is_string(idVal)) {
+      size_t idLen = 0;
+      char* idStr = api->value_get_string(idVal, &idLen);
+      if (idStr) {
+        [nsItem setRepresentedObject:[NSString stringWithUTF8String:idStr]];
+        api->value_free_string(idStr);
+      }
+    }
+
+    wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
+    if (enabledVal && api->value_is_bool(enabledVal)) {
+      [nsItem setEnabled:api->value_get_bool(enabledVal)];
+    } else {
+      [nsItem setEnabled:YES];
+    }
+
+    [menu addItem:nsItem];
+  }
+
+  return menu;
+}
+
+void WKWebViewBackend::SetApplicationMenu(wef_value_t* menu_template,
+                                           const wef_backend_api_t* api,
+                                           wef_menu_click_fn on_click,
+                                           void* on_click_data) {
+  g_webview_menu_click_fn = on_click;
+  g_webview_menu_click_data = on_click_data;
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menubar = BuildMenuFromValue(menu_template, api);
+    if (menubar) {
+      [NSApp setMainMenu:menubar];
+    }
+  });
 }
 
 WefBackend* CreateWefBackend(int width, int height, const std::string& title) {
