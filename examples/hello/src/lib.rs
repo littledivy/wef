@@ -1,8 +1,8 @@
 use wef::{Value, Window};
 
 fn hello_main() {
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
+  let rt = tokio::runtime::Runtime::new().unwrap();
+  rt.block_on(async {
         let _win = Window::new(800, 600)
             .title("WEF - Bindings Demo")
             .bind("greet", |call| {
