@@ -6,7 +6,7 @@ use serde::Serialize;
 use sysinfo::{ProcessesToUpdate, System};
 use wef::{navigate, quit, set_title, set_window_size};
 
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 struct SendPtr<T>(*mut T);
 unsafe impl<T> Send for SendPtr<T> {}
@@ -73,7 +73,7 @@ impl BrowserWindow {
 
     #[fast]
     fn execute_js(&self, #[string] script: &str) {
-        wef::execute_js(script);
+        wef::execute_js::<fn(Result<wef::Value, wef::Value>)>(script, None);
     }
 
     #[fast]
@@ -112,7 +112,7 @@ fn register_wef_binding(name: &str, callback: v8::Global<v8::Function>) {
 
         match result {
             Some(json) => call.resolve(wef::Value::String(json)),
-            None => call.reject("Handler call failed"),
+            None => call.reject(wef::Value::String("Handler call failed".to_string())),
         }
     });
 }

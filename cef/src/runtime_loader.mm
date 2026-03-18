@@ -18,6 +18,78 @@
 
 RuntimeLoader* RuntimeLoader::instance_ = nullptr;
 
+// --- Native Mouse Monitor (macOS) ---
+
+static id g_mouse_monitor = nil;
+
+static uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
+  uint32_t mods = 0;
+  if (flags & NSEventModifierFlagShift)   mods |= WEF_MOD_SHIFT;
+  if (flags & NSEventModifierFlagControl) mods |= WEF_MOD_CONTROL;
+  if (flags & NSEventModifierFlagOption)  mods |= WEF_MOD_ALT;
+  if (flags & NSEventModifierFlagCommand) mods |= WEF_MOD_META;
+  return mods;
+}
+
+static int NSButtonToWef(NSInteger buttonNumber) {
+  switch (buttonNumber) {
+    case 0: return WEF_MOUSE_BUTTON_LEFT;
+    case 1: return WEF_MOUSE_BUTTON_RIGHT;
+    case 2: return WEF_MOUSE_BUTTON_MIDDLE;
+    case 3: return WEF_MOUSE_BUTTON_BACK;
+    case 4: return WEF_MOUSE_BUTTON_FORWARD;
+    default: return WEF_MOUSE_BUTTON_LEFT;
+  }
+}
+
+void InstallNativeMouseMonitor() {
+  if (g_mouse_monitor) return;
+
+  NSEventMask mask = NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp
+                   | NSEventMaskRightMouseDown | NSEventMaskRightMouseUp
+                   | NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp;
+
+  g_mouse_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask
+      handler:^NSEvent*(NSEvent* event) {
+        int state;
+        switch ([event type]) {
+          case NSEventTypeLeftMouseDown:
+          case NSEventTypeRightMouseDown:
+          case NSEventTypeOtherMouseDown:
+            state = WEF_MOUSE_PRESSED;
+            break;
+          default:
+            state = WEF_MOUSE_RELEASED;
+            break;
+        }
+
+        int button = NSButtonToWef([event buttonNumber]);
+        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+
+        // Get position in window coordinates
+        NSPoint loc = [event locationInWindow];
+        NSWindow* win = [event window];
+        double x = loc.x;
+        double y = 0;
+        if (win) {
+          // Flip Y: NSWindow uses bottom-left origin, we want top-left
+          y = [win contentLayoutRect].size.height - loc.y;
+        }
+
+        RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
+            state, button, x, y, modifiers);
+
+        return event; // Don't consume
+      }];
+}
+
+void RemoveNativeMouseMonitor() {
+  if (g_mouse_monitor) {
+    [NSEvent removeMonitor:g_mouse_monitor];
+    g_mouse_monitor = nil;
+  }
+}
+
 static void Backend_Navigate(void* data, const char* url) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
@@ -50,7 +122,8 @@ static void Backend_SetTitle(void* data, const char* title) {
   }
 }
 
-static void Backend_ExecuteJs(void* data, const char* script) {
+static void Backend_ExecuteJs(void* data, const char* script,
+                              wef_js_result_fn callback, void* callback_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
   if (browser && script) {
@@ -60,6 +133,11 @@ static void Backend_ExecuteJs(void* data, const char* script) {
           b->GetMainFrame()->ExecuteJavaScript(s, "", 0);
         },
         browser, script_str));
+    // TODO: CEF's ExecuteJavaScript is fire-and-forget, no result callback support
+    // For now, if a callback is provided, call it with null result immediately
+    if (callback) {
+      callback(nullptr, nullptr, callback_data);
+    }
   }
 }
 
@@ -951,6 +1029,10 @@ void RuntimeLoader::InitializeBackendApi() {
 
   backend_api_.invoke_js_callback = Backend_InvokeJsCallback;
   backend_api_.release_js_callback = Backend_ReleaseJsCallback;
+
+  backend_api_.get_window_handle = [](void*) -> void* { return nullptr; };
+  backend_api_.get_display_handle = [](void*) -> void* { return nullptr; };
+  backend_api_.get_window_handle_type = [](void*) -> int { return WEF_WINDOW_HANDLE_APPKIT; };
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
