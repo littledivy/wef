@@ -16,7 +16,7 @@ mod ffi {
     include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 }
 
-pub const WEF_API_VERSION: u32 = 5;
+pub const WEF_API_VERSION: u32 = 6;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -1039,6 +1039,24 @@ pub struct MouseClickEvent {
     pub x: f64,
     pub y: f64,
     pub modifiers: KeyModifiers,
+    /// 1 = single click, 2 = double click.
+    pub click_count: i32,
+}
+
+impl MouseClickEvent {
+    /// True when this is a "click" event (primary button released).
+    pub fn is_click(&self) -> bool {
+        self.state == MouseButtonState::Released
+            && self.button == MouseButton::Left
+            && self.click_count >= 1
+    }
+
+    /// True when this is a "dblclick" event (primary button released, double click).
+    pub fn is_double_click(&self) -> bool {
+        self.state == MouseButtonState::Released
+            && self.button == MouseButton::Left
+            && self.click_count >= 2
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1085,6 +1103,7 @@ unsafe extern "C" fn mouse_click_trampoline(
     x: f64,
     y: f64,
     modifiers: u32,
+    click_count: i32,
 ) {
     let event = MouseClickEvent {
         state: if state == WEF_MOUSE_PRESSED {
@@ -1096,6 +1115,7 @@ unsafe extern "C" fn mouse_click_trampoline(
         x,
         y,
         modifiers: KeyModifiers::from_raw(modifiers),
+        click_count,
     };
 
     let guard = mouse_click_handler_store().lock().unwrap();

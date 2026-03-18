@@ -76,10 +76,10 @@ class RuntimeLoader {
   }
 
   void DispatchMouseClickEvent(int state, int button, double x, double y,
-                               uint32_t modifiers) {
+                               uint32_t modifiers, int32_t click_count) {
     std::lock_guard<std::mutex> lock(mouse_mutex_);
     if (mouse_click_handler_) {
-      mouse_click_handler_(mouse_click_user_data_, state, button, x, y, modifiers);
+      mouse_click_handler_(mouse_click_user_data_, state, button, x, y, modifiers, click_count);
     }
   }
 

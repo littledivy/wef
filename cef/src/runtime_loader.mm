@@ -65,6 +65,7 @@ void InstallNativeMouseMonitor() {
 
         int button = NSButtonToWef([event buttonNumber]);
         uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+        int32_t click_count = (int32_t)[event clickCount];
 
         // Get position in window coordinates
         NSPoint loc = [event locationInWindow];
@@ -77,7 +78,7 @@ void InstallNativeMouseMonitor() {
         }
 
         RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-            state, button, x, y, modifiers);
+            state, button, x, y, modifiers, click_count);
 
         return event; // Don't consume
       }];

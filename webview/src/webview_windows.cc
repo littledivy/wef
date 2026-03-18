@@ -265,8 +265,9 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
       double x = static_cast<double>(GET_X_LPARAM(lParam));
       double y = static_cast<double>(GET_Y_LPARAM(lParam));
       uint32_t modifiers = keyboard::GetWefModifiers();
+      // TODO: track click_count for double-click support on Windows
       RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-          state, button, x, y, modifiers);
+          state, button, x, y, modifiers, 1);
       break;
     }
     case WM_KEYDOWN:

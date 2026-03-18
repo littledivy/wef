@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 5
+#define WEF_API_VERSION 6
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -80,7 +80,8 @@ typedef void (*wef_mouse_click_fn)(
     int button,         // WEF_MOUSE_BUTTON_*
     double x,           // x position in window coordinates
     double y,           // y position in window coordinates
-    uint32_t modifiers  // bitmask of WEF_MOD_* flags
+    uint32_t modifiers, // bitmask of WEF_MOD_* flags
+    int32_t click_count // 1 = single, 2 = double click
 );
 
 // Callback for keyboard events.

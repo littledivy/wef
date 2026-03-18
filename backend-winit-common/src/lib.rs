@@ -18,7 +18,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 5;
+pub const WEF_API_VERSION: u32 = 6;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -55,6 +55,7 @@ pub type WefMouseClickFn = unsafe extern "C" fn(
     f64,         // x
     f64,         // y
     u32,         // modifiers
+    i32,         // click_count
 );
 
 #[repr(C)]
@@ -459,6 +460,10 @@ pub struct CommonState {
     pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
     pub mouse_click_handler: Mutex<Option<(WefMouseClickFn, usize)>>,
     pub cursor_position: Mutex<(f64, f64)>,
+    // Double-click tracking for winit (which doesn't provide click_count natively)
+    pub last_press_time: Mutex<Option<std::time::Instant>>,
+    pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
+    pub click_count: Mutex<i32>,
 }
 
 impl CommonState {
@@ -473,6 +478,9 @@ impl CommonState {
             keyboard_handler: Mutex::new(None),
             mouse_click_handler: Mutex::new(None),
             cursor_position: Mutex::new((0.0, 0.0)),
+            last_press_time: Mutex::new(None),
+            last_press_button: Mutex::new(None),
+            click_count: Mutex::new(0),
         }
     }
 }
@@ -966,6 +974,9 @@ pub fn winit_button_to_wef(button: winit::event::MouseButton) -> c_int {
 }
 
 /// Dispatch a mouse click event to the registered handler on the CommonState.
+/// Double-click interval (500ms is the standard across most platforms).
+const DOUBLE_CLICK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
+
 pub fn dispatch_mouse_click_event(
     common: &CommonState,
     button_state: winit::event::ElementState,
@@ -985,8 +996,39 @@ pub fn dispatch_mouse_click_event(
         let (x, y) = *common.cursor_position.lock().unwrap();
         let mods = modifiers_to_wef(modifiers);
 
+        // Compute click_count on press events (winit doesn't provide this natively)
+        let click_count = if button_state == winit::event::ElementState::Pressed {
+            let now = std::time::Instant::now();
+            let mut last_time = common.last_press_time.lock().unwrap();
+            let mut last_btn = common.last_press_button.lock().unwrap();
+            let mut count = common.click_count.lock().unwrap();
+
+            if *last_btn == Some(button)
+                && *count < 2
+                && last_time.map_or(false, |t| now.duration_since(t) < DOUBLE_CLICK_INTERVAL)
+            {
+                *count = 2;
+            } else if *count >= 2 || *last_btn != Some(button) {
+                *count = 1;
+            }
+            *last_time = Some(now);
+            *last_btn = Some(button);
+            *count
+        } else {
+            // Released: use the click_count from the most recent press
+            *common.click_count.lock().unwrap()
+        };
+
         unsafe {
-            cb(user_data as *mut c_void, state, wef_button, x, y, mods);
+            cb(
+                user_data as *mut c_void,
+                state,
+                wef_button,
+                x,
+                y,
+                mods,
+                click_count,
+            );
         }
     }
 }

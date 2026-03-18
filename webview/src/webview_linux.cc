@@ -164,8 +164,39 @@ uint32_t GdkModifiersToWef(guint state) {
 
 } // namespace keyboard
 
+// Track the click_count from press events for use in the corresponding release.
+static int32_t g_last_click_count = 1;
+
 static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpointer user_data) {
-  int state = (event->type == GDK_BUTTON_PRESS) ? WEF_MOUSE_PRESSED : WEF_MOUSE_RELEASED;
+  int state;
+  int32_t click_count;
+
+  switch (event->type) {
+    case GDK_BUTTON_PRESS:
+      state = WEF_MOUSE_PRESSED;
+      click_count = 1;
+      break;
+    case GDK_2BUTTON_PRESS:
+      state = WEF_MOUSE_PRESSED;
+      click_count = 2;
+      break;
+    case GDK_3BUTTON_PRESS:
+      // No triple-click in web APIs; treat as double click
+      state = WEF_MOUSE_PRESSED;
+      click_count = 2;
+      break;
+    case GDK_BUTTON_RELEASE:
+      state = WEF_MOUSE_RELEASED;
+      click_count = g_last_click_count;
+      break;
+    default:
+      return FALSE;
+  }
+
+  if (state == WEF_MOUSE_PRESSED) {
+    g_last_click_count = click_count;
+  }
+
   int button;
   switch (event->button) {
     case 1: button = WEF_MOUSE_BUTTON_LEFT; break;
@@ -178,7 +209,7 @@ static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpoint
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
 
   RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-      state, button, event->x, event->y, modifiers);
+      state, button, event->x, event->y, modifiers, click_count);
 
   return FALSE; // Don't consume the event
 }

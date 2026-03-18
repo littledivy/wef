@@ -51,6 +51,7 @@ class WKWebViewBackend : public WefBackend {
   WefScriptMessageHandler* message_handler_;
   WefWindowDelegate* window_delegate_;
   id keyboard_monitor_;
+  id mouse_monitor_;
 
 };
 
@@ -259,6 +260,17 @@ uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
   return modifiers;
 }
 
+int NSButtonToWef(NSInteger buttonNumber) {
+  switch (buttonNumber) {
+    case 0: return WEF_MOUSE_BUTTON_LEFT;
+    case 1: return WEF_MOUSE_BUTTON_RIGHT;
+    case 2: return WEF_MOUSE_BUTTON_MIDDLE;
+    case 3: return WEF_MOUSE_BUTTON_BACK;
+    case 4: return WEF_MOUSE_BUTTON_FORWARD;
+    default: return WEF_MOUSE_BUTTON_LEFT;
+  }
+}
+
 } // namespace
 
 WKWebViewBackend::WKWebViewBackend(int width, int height, const std::string& title) {
@@ -411,6 +423,41 @@ WKWebViewBackend::WKWebViewBackend(int width, int height, const std::string& tit
 
           return event; // Don't consume the event
         }];
+
+    mouse_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
+        (NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp |
+         NSEventMaskRightMouseDown | NSEventMaskRightMouseUp |
+         NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp)
+        handler:^NSEvent*(NSEvent* event) {
+          int state;
+          switch ([event type]) {
+            case NSEventTypeLeftMouseDown:
+            case NSEventTypeRightMouseDown:
+            case NSEventTypeOtherMouseDown:
+              state = WEF_MOUSE_PRESSED;
+              break;
+            default:
+              state = WEF_MOUSE_RELEASED;
+              break;
+          }
+
+          int button = NSButtonToWef([event buttonNumber]);
+          uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+          int32_t click_count = (int32_t)[event clickCount];
+
+          NSPoint loc = [event locationInWindow];
+          NSWindow* win = [event window];
+          double x = loc.x;
+          double y = 0;
+          if (win) {
+            y = [win contentLayoutRect].size.height - loc.y;
+          }
+
+          RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
+              state, button, x, y, modifiers, click_count);
+
+          return event; // Don't consume the event
+        }];
   }
 }
 
@@ -419,6 +466,10 @@ WKWebViewBackend::~WKWebViewBackend() {
     if (keyboard_monitor_) {
       [NSEvent removeMonitor:keyboard_monitor_];
       keyboard_monitor_ = nil;
+    }
+    if (mouse_monitor_) {
+      [NSEvent removeMonitor:mouse_monitor_];
+      mouse_monitor_ = nil;
     }
     if (webview_) {
       [webview_.configuration.userContentController removeScriptMessageHandlerForName:@"wef"];
