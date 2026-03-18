@@ -117,8 +117,6 @@ servo: check-deps ## Build the Servo backend
 clean: ## Remove all build artifacts
 	cargo clean
 	rm -rf webview/build cef/build
-	cd winit && cargo clean || true
-	cd servo && cargo clean || true
 
 clean-cef-vendor: ## Remove downloaded CEF files
 	rm -rf vendor/cef
