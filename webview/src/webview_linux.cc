@@ -220,6 +220,27 @@ static gboolean on_motion_event(GtkWidget* widget, GdkEventMotion* event, gpoint
   return FALSE;
 }
 
+static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpointer user_data) {
+  double delta_x = 0, delta_y = 0;
+  int32_t delta_mode = WEF_WHEEL_DELTA_LINE;
+
+  switch (event->direction) {
+    case GDK_SCROLL_UP:    delta_y = -1.0; break;
+    case GDK_SCROLL_DOWN:  delta_y = 1.0; break;
+    case GDK_SCROLL_LEFT:  delta_x = -1.0; break;
+    case GDK_SCROLL_RIGHT: delta_x = 1.0; break;
+    case GDK_SCROLL_SMOOTH:
+      gdk_event_get_scroll_deltas((GdkEvent*)event, &delta_x, &delta_y);
+      delta_mode = WEF_WHEEL_DELTA_PIXEL;
+      break;
+  }
+
+  uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
+  RuntimeLoader::GetInstance()->DispatchWheelEvent(
+      delta_x, delta_y, event->x, event->y, modifiers, delta_mode);
+  return FALSE;
+}
+
 static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer user_data) {
   int state = (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
   std::string key = keyboard::GdkKeyvalToKey(event->keyval);
@@ -303,8 +324,9 @@ WebKitGTKBackend::WebKitGTKBackend(int width, int height, const std::string& tit
   g_signal_connect(window_, "key-release-event", G_CALLBACK(on_key_event), this);
   g_signal_connect(window_, "button-press-event", G_CALLBACK(on_button_event), this);
   g_signal_connect(window_, "button-release-event", G_CALLBACK(on_button_event), this);
-  gtk_widget_add_events(window_, GDK_POINTER_MOTION_MASK);
+  gtk_widget_add_events(window_, GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
   g_signal_connect(window_, "motion-notify-event", G_CALLBACK(on_motion_event), this);
+  g_signal_connect(window_, "scroll-event", G_CALLBACK(on_scroll_event), this);
 
   // Create user content manager for message handling
   content_manager_ = webkit_user_content_manager_new();

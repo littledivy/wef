@@ -342,6 +342,15 @@ impl ApplicationHandler<UserEvent> for App {
                             DevicePoint::default().into(),
                         )));
                     }
+
+                    // Dispatch to runtime callback
+                    if let Some(backend_state) = BackendState::get() {
+                        wef_backend_winit_common::dispatch_wheel_event(
+                            &backend_state.common,
+                            delta,
+                            state.modifiers.get(),
+                        );
+                    }
                 }
             }
             WindowEvent::Resized(new_size) => {

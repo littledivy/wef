@@ -205,6 +205,15 @@ impl ApplicationHandler<UserEvent> for App {
                     );
                 }
             }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if let Some(state) = BackendState::get() {
+                    wef_backend_winit_common::dispatch_wheel_event(
+                        &state.common,
+                        delta,
+                        *modifiers,
+                    );
+                }
+            }
             _ => {}
         }
     }

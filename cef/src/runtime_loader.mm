@@ -22,6 +22,7 @@ RuntimeLoader* RuntimeLoader::instance_ = nullptr;
 
 static id g_mouse_monitor = nil;
 static id g_mouse_move_monitor = nil;
+static id g_scroll_monitor = nil;
 
 static uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
   uint32_t mods = 0;
@@ -100,6 +101,29 @@ void InstallNativeMouseMonitor() {
         RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(x, y, modifiers);
         return event;
       }];
+
+  g_scroll_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
+      handler:^NSEvent*(NSEvent* event) {
+        double delta_x = [event scrollingDeltaX];
+        double delta_y = [event scrollingDeltaY];
+        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+
+        // Determine delta mode: continuous (trackpad) = pixel, line-based (mouse wheel) = line
+        int32_t delta_mode = [event hasPreciseScrollingDeltas]
+            ? WEF_WHEEL_DELTA_PIXEL : WEF_WHEEL_DELTA_LINE;
+
+        NSPoint loc = [event locationInWindow];
+        NSWindow* win = [event window];
+        double x = loc.x;
+        double y = 0;
+        if (win) {
+          y = [win contentLayoutRect].size.height - loc.y;
+        }
+
+        RuntimeLoader::GetInstance()->DispatchWheelEvent(
+            delta_x, delta_y, x, y, modifiers, delta_mode);
+        return event;
+      }];
 }
 
 void RemoveNativeMouseMonitor() {
@@ -110,6 +134,10 @@ void RemoveNativeMouseMonitor() {
   if (g_mouse_move_monitor) {
     [NSEvent removeMonitor:g_mouse_move_monitor];
     g_mouse_move_monitor = nil;
+  }
+  if (g_scroll_monitor) {
+    [NSEvent removeMonitor:g_scroll_monitor];
+    g_scroll_monitor = nil;
   }
 }
 
@@ -680,6 +708,13 @@ static void Backend_SetMouseMoveHandler(void* data,
   loader->SetMouseMoveHandler(handler, user_data);
 }
 
+static void Backend_SetWheelHandler(void* data,
+                                     wef_wheel_fn handler,
+                                     void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetWheelHandler(handler, user_data);
+}
+
 static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
@@ -1067,6 +1102,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
   backend_api_.set_mouse_move_handler = Backend_SetMouseMoveHandler;
+  backend_api_.set_wheel_handler = Backend_SetWheelHandler;
 
   backend_api_.poll_js_calls = [](void* data) {
     RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);

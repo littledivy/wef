@@ -18,7 +18,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 6;
+pub const WEF_API_VERSION: u32 = 7;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -63,6 +63,18 @@ pub type WefMouseClickFn = unsafe extern "C" fn(
     u32,         // modifiers
     i32,         // click_count
 );
+pub type WefWheelFn = unsafe extern "C" fn(
+    *mut c_void, // user_data
+    f64,         // delta_x
+    f64,         // delta_y
+    f64,         // x
+    f64,         // y
+    u32,         // modifiers
+    i32,         // delta_mode
+);
+
+pub const WEF_WHEEL_DELTA_PIXEL: i32 = 0;
+pub const WEF_WHEEL_DELTA_LINE: i32 = 1;
 
 #[repr(C)]
 pub struct WefBackendApi {
@@ -150,6 +162,8 @@ pub struct WefBackendApi {
         Option<unsafe extern "C" fn(*mut c_void, Option<WefMouseClickFn>, *mut c_void)>,
     pub set_mouse_move_handler:
         Option<unsafe extern "C" fn(*mut c_void, Option<WefMouseMoveFn>, *mut c_void)>,
+    pub set_wheel_handler:
+        Option<unsafe extern "C" fn(*mut c_void, Option<WefWheelFn>, *mut c_void)>,
     pub poll_js_calls: Option<unsafe extern "C" fn(*mut c_void)>,
     pub set_js_call_notify: Option<
         unsafe extern "C" fn(
@@ -381,6 +395,7 @@ pub fn create_api_base() -> WefBackendApi {
         set_keyboard_event_handler: None,
         set_mouse_click_handler: None,
         set_mouse_move_handler: None,
+        set_wheel_handler: None,
         poll_js_calls: None,
         set_js_call_notify: None,
         set_application_menu: None,
@@ -469,6 +484,7 @@ pub struct CommonState {
     pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
     pub mouse_click_handler: Mutex<Option<(WefMouseClickFn, usize)>>,
     pub mouse_move_handler: Mutex<Option<(WefMouseMoveFn, usize)>>,
+    pub wheel_handler: Mutex<Option<(WefWheelFn, usize)>>,
     pub cursor_position: Mutex<(f64, f64)>,
     // Double-click tracking for winit (which doesn't provide click_count natively)
     pub last_press_time: Mutex<Option<std::time::Instant>>,
@@ -488,6 +504,7 @@ impl CommonState {
             keyboard_handler: Mutex::new(None),
             mouse_click_handler: Mutex::new(None),
             mouse_move_handler: Mutex::new(None),
+            wheel_handler: Mutex::new(None),
             cursor_position: Mutex::new((0.0, 0.0)),
             last_press_time: Mutex::new(None),
             last_press_button: Mutex::new(None),
@@ -757,6 +774,17 @@ macro_rules! define_common_backend_fns {
                     handler.map(|h| (h, user_data as usize));
             }
         }
+
+        unsafe extern "C" fn backend_set_wheel_handler(
+            _data: *mut ::std::ffi::c_void,
+            handler: Option<$crate::WefWheelFn>,
+            user_data: *mut ::std::ffi::c_void,
+        ) {
+            if let Some(state) = <$B as $crate::BackendAccess>::get() {
+                *state.common().wheel_handler.lock().unwrap() =
+                    handler.map(|h| (h, user_data as usize));
+            }
+        }
     };
 }
 
@@ -788,6 +816,7 @@ macro_rules! fill_common_api {
         $api.set_keyboard_event_handler = Some(backend_set_keyboard_event_handler);
         $api.set_mouse_click_handler = Some(backend_set_mouse_click_handler);
         $api.set_mouse_move_handler = Some(backend_set_mouse_move_handler);
+        $api.set_wheel_handler = Some(backend_set_wheel_handler);
     };
 }
 
@@ -1067,6 +1096,29 @@ pub fn dispatch_mouse_move_event(
         let mods = modifiers_to_wef(modifiers);
         unsafe {
             cb(user_data as *mut c_void, x, y, mods);
+        }
+    }
+}
+
+pub fn dispatch_wheel_event(
+    common: &CommonState,
+    delta: winit::event::MouseScrollDelta,
+    modifiers: winit::keyboard::ModifiersState,
+) {
+    let handler = common.wheel_handler.lock().unwrap();
+    if let Some((cb, user_data)) = *handler {
+        let (delta_x, delta_y, delta_mode) = match delta {
+            winit::event::MouseScrollDelta::LineDelta(dx, dy) => {
+                (dx as f64, dy as f64, WEF_WHEEL_DELTA_LINE)
+            }
+            winit::event::MouseScrollDelta::PixelDelta(d) => {
+                (d.x, d.y, WEF_WHEEL_DELTA_PIXEL)
+            }
+        };
+        let (x, y) = *common.cursor_position.lock().unwrap();
+        let mods = modifiers_to_wef(modifiers);
+        unsafe {
+            cb(user_data as *mut c_void, delta_x, delta_y, x, y, mods, delta_mode);
         }
     }
 }

@@ -82,6 +82,20 @@ class RuntimeLoader {
     }
   }
 
+  void SetWheelHandler(wef_wheel_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    wheel_handler_ = handler;
+    wheel_user_data_ = user_data;
+  }
+
+  void DispatchWheelEvent(double delta_x, double delta_y, double x, double y,
+                          uint32_t modifiers, int32_t delta_mode) {
+    std::lock_guard<std::mutex> lock(wheel_mutex_);
+    if (wheel_handler_) {
+      wheel_handler_(wheel_user_data_, delta_x, delta_y, x, y, modifiers, delta_mode);
+    }
+  }
+
   void SetJsCallNotify(void (*notify_fn)(void*), void* notify_data) {
     std::lock_guard<std::mutex> lock(notify_mutex_);
     js_call_notify_fn_ = notify_fn;
@@ -121,6 +135,10 @@ class RuntimeLoader {
   wef_mouse_move_fn mouse_move_handler_ = nullptr;
   void* mouse_move_user_data_ = nullptr;
   std::mutex mouse_move_mutex_;
+
+  wef_wheel_fn wheel_handler_ = nullptr;
+  void* wheel_user_data_ = nullptr;
+  std::mutex wheel_mutex_;
 
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;

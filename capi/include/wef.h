@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 6
+#define WEF_API_VERSION 7
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -90,6 +90,22 @@ typedef void (*wef_mouse_move_fn)(
     double x,           // x position in window coordinates
     double y,           // y position in window coordinates
     uint32_t modifiers  // bitmask of WEF_MOD_* flags
+);
+
+// Wheel delta mode
+#define WEF_WHEEL_DELTA_PIXEL 0
+#define WEF_WHEEL_DELTA_LINE  1
+#define WEF_WHEEL_DELTA_PAGE  2
+
+// Callback for wheel (scroll) events.
+typedef void (*wef_wheel_fn)(
+    void* user_data,
+    double delta_x,     // horizontal scroll amount
+    double delta_y,     // vertical scroll amount
+    double x,           // cursor x position in window coordinates
+    double y,           // cursor y position in window coordinates
+    uint32_t modifiers, // bitmask of WEF_MOD_* flags
+    int32_t delta_mode  // WEF_WHEEL_DELTA_*
 );
 
 // Callback for keyboard events.
@@ -221,6 +237,13 @@ struct wef_backend_api {
     void (*set_mouse_move_handler)(
         void* backend_data,
         wef_mouse_move_fn handler,
+        void* user_data
+    );
+
+    // Register a handler for wheel (scroll) events.
+    void (*set_wheel_handler)(
+        void* backend_data,
+        wef_wheel_fn handler,
         void* user_data
     );
 

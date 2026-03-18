@@ -53,6 +53,7 @@ class WKWebViewBackend : public WefBackend {
   id keyboard_monitor_;
   id mouse_monitor_;
   id mouse_move_monitor_;
+  id scroll_monitor_;
 
 };
 
@@ -476,6 +477,28 @@ WKWebViewBackend::WKWebViewBackend(int width, int height, const std::string& tit
           RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(x, y, modifiers);
           return event;
         }];
+
+    scroll_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
+        handler:^NSEvent*(NSEvent* event) {
+          double delta_x = [event scrollingDeltaX];
+          double delta_y = [event scrollingDeltaY];
+          uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+
+          int32_t delta_mode = [event hasPreciseScrollingDeltas]
+              ? WEF_WHEEL_DELTA_PIXEL : WEF_WHEEL_DELTA_LINE;
+
+          NSPoint loc = [event locationInWindow];
+          NSWindow* win = [event window];
+          double x = loc.x;
+          double y = 0;
+          if (win) {
+            y = [win contentLayoutRect].size.height - loc.y;
+          }
+
+          RuntimeLoader::GetInstance()->DispatchWheelEvent(
+              delta_x, delta_y, x, y, modifiers, delta_mode);
+          return event;
+        }];
   }
 }
 
@@ -492,6 +515,10 @@ WKWebViewBackend::~WKWebViewBackend() {
     if (mouse_move_monitor_) {
       [NSEvent removeMonitor:mouse_move_monitor_];
       mouse_move_monitor_ = nil;
+    }
+    if (scroll_monitor_) {
+      [NSEvent removeMonitor:scroll_monitor_];
+      scroll_monitor_ = nil;
     }
     if (webview_) {
       [webview_.configuration.userContentController removeScriptMessageHandlerForName:@"wef"];
