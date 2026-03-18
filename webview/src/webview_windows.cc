@@ -5,6 +5,7 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <windowsx.h>
 #include <wrl.h>
 #include <wil/com.h>
 
@@ -522,6 +523,37 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
         backend->controller_->put_Bounds(bounds);
       }
       return 0;
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP: {
+      int state = (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
+                   msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN)
+                      ? WEF_MOUSE_PRESSED : WEF_MOUSE_RELEASED;
+      int button;
+      switch (msg) {
+        case WM_LBUTTONDOWN: case WM_LBUTTONUP:
+          button = WEF_MOUSE_BUTTON_LEFT; break;
+        case WM_RBUTTONDOWN: case WM_RBUTTONUP:
+          button = WEF_MOUSE_BUTTON_RIGHT; break;
+        case WM_MBUTTONDOWN: case WM_MBUTTONUP:
+          button = WEF_MOUSE_BUTTON_MIDDLE; break;
+        default:
+          button = (GET_XBUTTON_WPARAM(wParam) == XBUTTON1)
+                       ? WEF_MOUSE_BUTTON_BACK : WEF_MOUSE_BUTTON_FORWARD;
+          break;
+      }
+      double x = static_cast<double>(GET_X_LPARAM(lParam));
+      double y = static_cast<double>(GET_Y_LPARAM(lParam));
+      uint32_t modifiers = keyboard::GetWefModifiers();
+      RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
+          state, button, x, y, modifiers);
+      break;
+    }
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
       std::string key = keyboard::VirtualKeyToKey(wParam, lParam);

@@ -370,6 +370,11 @@ impl ApplicationHandler<UserEvent> for App {
                             MouseMoveEvent::new(point.to_f32().into()),
                         ));
                     }
+
+                    if let Some(backend_state) = BackendState::get() {
+                        *backend_state.common.cursor_position.lock().unwrap() =
+                            (position.x, position.y);
+                    }
                 }
             }
             WindowEvent::MouseInput {
@@ -378,6 +383,7 @@ impl ApplicationHandler<UserEvent> for App {
                 ..
             } => {
                 if let Self::Running(state) = self {
+                    // Forward to servo webview
                     if let Some(webview) = state.webviews.borrow().last() {
                         let mouse_button = match button {
                             MouseButton::Left => ServoMouseButton::Left,
@@ -399,6 +405,16 @@ impl ApplicationHandler<UserEvent> for App {
                                 point.to_f32().into(),
                             ),
                         ));
+                    }
+
+                    // Dispatch to runtime callback
+                    if let Some(backend_state) = BackendState::get() {
+                        wef_backend_winit_common::dispatch_mouse_click_event(
+                            &backend_state.common,
+                            button_state,
+                            button,
+                            state.modifiers.get(),
+                        );
                     }
                 }
             }

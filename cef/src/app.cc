@@ -25,9 +25,11 @@ class WefWindowDelegate : public CefWindowDelegate {
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
     window->AddChildView(browser_view_);
     window->Show();
+    InstallNativeMouseMonitor();
   }
 
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
+    RemoveNativeMouseMonitor();
     browser_view_ = nullptr;
   }
 

@@ -32,6 +32,27 @@ typedef void (*wef_js_call_fn)(
 #define WEF_MOD_ALT     (1 << 2)
 #define WEF_MOD_META    (1 << 3)
 
+// Mouse button constants
+#define WEF_MOUSE_BUTTON_LEFT    0
+#define WEF_MOUSE_BUTTON_RIGHT   1
+#define WEF_MOUSE_BUTTON_MIDDLE  2
+#define WEF_MOUSE_BUTTON_BACK    3
+#define WEF_MOUSE_BUTTON_FORWARD 4
+
+// Mouse event state
+#define WEF_MOUSE_PRESSED  0
+#define WEF_MOUSE_RELEASED 1
+
+// Callback for mouse click events.
+typedef void (*wef_mouse_click_fn)(
+    void* user_data,
+    int state,          // WEF_MOUSE_PRESSED or WEF_MOUSE_RELEASED
+    int button,         // WEF_MOUSE_BUTTON_*
+    double x,           // x position in window coordinates
+    double y,           // y position in window coordinates
+    uint32_t modifiers  // bitmask of WEF_MOD_* flags
+);
+
 // Callback for keyboard events.
 typedef void (*wef_keyboard_event_fn)(
     void* user_data,
@@ -112,6 +133,12 @@ typedef struct wef_backend_api {
     void (*set_keyboard_event_handler)(
         void* backend_data,
         wef_keyboard_event_fn handler,
+        void* user_data
+    );
+
+    void (*set_mouse_click_handler)(
+        void* backend_data,
+        wef_mouse_click_fn handler,
         void* user_data
     );
 

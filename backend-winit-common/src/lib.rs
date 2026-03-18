@@ -48,6 +48,14 @@ pub type WefKeyboardEventFn = unsafe extern "C" fn(
     u32,           // modifiers
     bool,          // repeat
 );
+pub type WefMouseClickFn = unsafe extern "C" fn(
+    *mut c_void, // user_data
+    c_int,       // state (0=pressed, 1=released)
+    c_int,       // button
+    f64,         // x
+    f64,         // y
+    u32,         // modifiers
+);
 
 #[repr(C)]
 pub struct WefBackendApi {
@@ -131,6 +139,8 @@ pub struct WefBackendApi {
     pub get_window_handle_type: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
     pub set_keyboard_event_handler:
         Option<unsafe extern "C" fn(*mut c_void, Option<WefKeyboardEventFn>, *mut c_void)>,
+    pub set_mouse_click_handler:
+        Option<unsafe extern "C" fn(*mut c_void, Option<WefMouseClickFn>, *mut c_void)>,
 }
 
 unsafe impl Send for WefBackendApi {}
@@ -344,6 +354,7 @@ pub fn create_api_base() -> WefBackendApi {
         get_display_handle: None,
         get_window_handle_type: None,
         set_keyboard_event_handler: None,
+        set_mouse_click_handler: None,
     }
 }
 
@@ -427,6 +438,8 @@ pub struct CommonState {
     pub pending_always_on_top: Mutex<Option<bool>>,
     pub pending_visible: Mutex<Option<bool>>,
     pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
+    pub mouse_click_handler: Mutex<Option<(WefMouseClickFn, usize)>>,
+    pub cursor_position: Mutex<(f64, f64)>,
 }
 
 impl CommonState {
@@ -439,6 +452,8 @@ impl CommonState {
             pending_always_on_top: Mutex::new(None),
             pending_visible: Mutex::new(None),
             keyboard_handler: Mutex::new(None),
+            mouse_click_handler: Mutex::new(None),
+            cursor_position: Mutex::new((0.0, 0.0)),
         }
     }
 }
@@ -682,6 +697,17 @@ macro_rules! define_common_backend_fns {
                     handler.map(|h| (h, user_data as usize));
             }
         }
+
+        unsafe extern "C" fn backend_set_mouse_click_handler(
+            _data: *mut ::std::ffi::c_void,
+            handler: Option<$crate::WefMouseClickFn>,
+            user_data: *mut ::std::ffi::c_void,
+        ) {
+            if let Some(state) = <$B as $crate::BackendAccess>::get() {
+                *state.common().mouse_click_handler.lock().unwrap() =
+                    handler.map(|h| (h, user_data as usize));
+            }
+        }
     };
 }
 
@@ -711,6 +737,7 @@ macro_rules! fill_common_api {
         $api.get_display_handle = Some($crate::backend_get_display_handle);
         $api.get_window_handle_type = Some($crate::backend_get_window_handle_type);
         $api.set_keyboard_event_handler = Some(backend_set_keyboard_event_handler);
+        $api.set_mouse_click_handler = Some(backend_set_mouse_click_handler);
     };
 }
 
@@ -823,6 +850,15 @@ pub const WEF_MOD_META: u32 = 1 << 3;
 pub const WEF_KEY_PRESSED: c_int = 0;
 pub const WEF_KEY_RELEASED: c_int = 1;
 
+pub const WEF_MOUSE_BUTTON_LEFT: c_int = 0;
+pub const WEF_MOUSE_BUTTON_RIGHT: c_int = 1;
+pub const WEF_MOUSE_BUTTON_MIDDLE: c_int = 2;
+pub const WEF_MOUSE_BUTTON_BACK: c_int = 3;
+pub const WEF_MOUSE_BUTTON_FORWARD: c_int = 4;
+
+pub const WEF_MOUSE_PRESSED: c_int = 0;
+pub const WEF_MOUSE_RELEASED: c_int = 1;
+
 /// Convert winit modifier state to WEF modifier bitmask.
 pub fn modifiers_to_wef(mods: winit::keyboard::ModifiersState) -> u32 {
     let mut flags = 0u32;
@@ -894,6 +930,44 @@ pub fn dispatch_keyboard_event(
                 mods,
                 key_event.repeat,
             );
+        }
+    }
+}
+
+/// Convert a winit mouse button to a WEF mouse button constant.
+pub fn winit_button_to_wef(button: winit::event::MouseButton) -> c_int {
+    match button {
+        winit::event::MouseButton::Left => WEF_MOUSE_BUTTON_LEFT,
+        winit::event::MouseButton::Right => WEF_MOUSE_BUTTON_RIGHT,
+        winit::event::MouseButton::Middle => WEF_MOUSE_BUTTON_MIDDLE,
+        winit::event::MouseButton::Back => WEF_MOUSE_BUTTON_BACK,
+        winit::event::MouseButton::Forward => WEF_MOUSE_BUTTON_FORWARD,
+        winit::event::MouseButton::Other(_) => -1,
+    }
+}
+
+/// Dispatch a mouse click event to the registered handler on the CommonState.
+pub fn dispatch_mouse_click_event(
+    common: &CommonState,
+    button_state: winit::event::ElementState,
+    button: winit::event::MouseButton,
+    modifiers: winit::keyboard::ModifiersState,
+) {
+    let handler = common.mouse_click_handler.lock().unwrap();
+    if let Some((cb, user_data)) = *handler {
+        let state = match button_state {
+            winit::event::ElementState::Pressed => WEF_MOUSE_PRESSED,
+            winit::event::ElementState::Released => WEF_MOUSE_RELEASED,
+        };
+        let wef_button = winit_button_to_wef(button);
+        if wef_button < 0 {
+            return;
+        }
+        let (x, y) = *common.cursor_position.lock().unwrap();
+        let mods = modifiers_to_wef(modifiers);
+
+        unsafe {
+            cb(user_data as *mut c_void, state, wef_button, x, y, mods);
         }
     }
 }

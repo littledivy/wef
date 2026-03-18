@@ -74,6 +74,20 @@ class RuntimeLoader {
     }
   }
 
+  void SetMouseClickHandler(wef_mouse_click_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(mouse_mutex_);
+    mouse_click_handler_ = handler;
+    mouse_click_user_data_ = user_data;
+  }
+
+  void DispatchMouseClickEvent(int state, int button, double x, double y,
+                               uint32_t modifiers) {
+    std::lock_guard<std::mutex> lock(mouse_mutex_);
+    if (mouse_click_handler_) {
+      mouse_click_handler_(mouse_click_user_data_, state, button, x, y, modifiers);
+    }
+  }
+
   const wef_backend_api_t* GetBackendApi() const { return &backend_api_; }
 
  private:
@@ -101,6 +115,10 @@ class RuntimeLoader {
   wef_keyboard_event_fn keyboard_handler_ = nullptr;
   void* keyboard_user_data_ = nullptr;
   std::mutex keyboard_mutex_;
+
+  wef_mouse_click_fn mouse_click_handler_ = nullptr;
+  void* mouse_click_user_data_ = nullptr;
+  std::mutex mouse_mutex_;
 
   static RuntimeLoader* instance_;
 };

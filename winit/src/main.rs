@@ -179,6 +179,26 @@ impl ApplicationHandler<UserEvent> for App {
                     );
                 }
             }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(state) = BackendState::get() {
+                    *state.common.cursor_position.lock().unwrap() =
+                        (position.x, position.y);
+                }
+            }
+            WindowEvent::MouseInput {
+                state: button_state,
+                button,
+                ..
+            } => {
+                if let Some(state) = BackendState::get() {
+                    wef_backend_winit_common::dispatch_mouse_click_event(
+                        &state.common,
+                        button_state,
+                        button,
+                        *modifiers,
+                    );
+                }
+            }
             _ => {}
         }
     }

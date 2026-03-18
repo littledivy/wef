@@ -447,6 +447,25 @@ uint32_t GdkModifiersToWef(guint state) {
 
 } // namespace keyboard
 
+static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpointer user_data) {
+  int state = (event->type == GDK_BUTTON_PRESS) ? WEF_MOUSE_PRESSED : WEF_MOUSE_RELEASED;
+  int button;
+  switch (event->button) {
+    case 1: button = WEF_MOUSE_BUTTON_LEFT; break;
+    case 2: button = WEF_MOUSE_BUTTON_MIDDLE; break;
+    case 3: button = WEF_MOUSE_BUTTON_RIGHT; break;
+    case 8: button = WEF_MOUSE_BUTTON_BACK; break;
+    case 9: button = WEF_MOUSE_BUTTON_FORWARD; break;
+    default: button = static_cast<int>(event->button); break;
+  }
+  uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
+
+  RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
+      state, button, event->x, event->y, modifiers);
+
+  return FALSE; // Don't consume the event
+}
+
 static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer user_data) {
   int state = (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
   std::string key = keyboard::GdkKeyvalToKey(event->keyval);
@@ -531,6 +550,8 @@ WebKitGTKBackend::WebKitGTKBackend(int width, int height, const std::string& tit
   g_signal_connect(window_, "destroy", G_CALLBACK(on_window_destroy), this);
   g_signal_connect(window_, "key-press-event", G_CALLBACK(on_key_event), this);
   g_signal_connect(window_, "key-release-event", G_CALLBACK(on_key_event), this);
+  g_signal_connect(window_, "button-press-event", G_CALLBACK(on_button_event), this);
+  g_signal_connect(window_, "button-release-event", G_CALLBACK(on_button_event), this);
 
   // Create user content manager for message handling
   content_manager_ = webkit_user_content_manager_new();

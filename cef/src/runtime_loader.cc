@@ -563,6 +563,13 @@ static void Backend_SetKeyboardEventHandler(void* data,
   loader->SetKeyboardEventHandler(handler, user_data);
 }
 
+static void Backend_SetMouseClickHandler(void* data,
+                                          wef_mouse_click_fn handler,
+                                          void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetMouseClickHandler(handler, user_data);
+}
+
 static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
@@ -647,6 +654,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.release_js_callback = Backend_ReleaseJsCallback;
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
+  backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
 }
 
 RuntimeLoader::RuntimeLoader() {
