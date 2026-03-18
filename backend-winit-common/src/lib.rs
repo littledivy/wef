@@ -141,6 +141,22 @@ pub struct WefBackendApi {
         Option<unsafe extern "C" fn(*mut c_void, Option<WefKeyboardEventFn>, *mut c_void)>,
     pub set_mouse_click_handler:
         Option<unsafe extern "C" fn(*mut c_void, Option<WefMouseClickFn>, *mut c_void)>,
+    pub poll_js_calls: Option<unsafe extern "C" fn(*mut c_void)>,
+    pub set_js_call_notify: Option<
+        unsafe extern "C" fn(
+            *mut c_void,
+            Option<unsafe extern "C" fn(*mut c_void)>,
+            *mut c_void,
+        ),
+    >,
+    pub set_application_menu: Option<
+        unsafe extern "C" fn(
+            *mut c_void,
+            *mut WefValue,
+            Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+            *mut c_void,
+        ),
+    >,
 }
 
 unsafe impl Send for WefBackendApi {}
@@ -355,6 +371,9 @@ pub fn create_api_base() -> WefBackendApi {
         get_window_handle_type: None,
         set_keyboard_event_handler: None,
         set_mouse_click_handler: None,
+        poll_js_calls: None,
+        set_js_call_notify: None,
+        set_application_menu: None,
     }
 }
 
