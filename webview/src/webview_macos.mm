@@ -54,6 +54,9 @@ class WKWebViewBackend : public WefBackend {
   id mouse_monitor_;
   id mouse_move_monitor_;
   id scroll_monitor_;
+  // TODO: NSEvent enter/exit monitors require NSTrackingArea which is complex.
+  // The browser engine handles mouseenter/mouseleave DOM events independently.
+  // id cursor_enter_leave_monitor_;
 
 };
 

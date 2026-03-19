@@ -425,6 +425,13 @@ static void Backend_SetWheelHandler(void* data,
   loader->SetWheelHandler(handler, user_data);
 }
 
+static void Backend_SetCursorEnterLeaveHandler(void* data,
+                                                wef_cursor_enter_leave_fn handler,
+                                                void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetCursorEnterLeaveHandler(handler, user_data);
+}
+
 static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
@@ -529,6 +536,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
   backend_api_.set_mouse_move_handler = Backend_SetMouseMoveHandler;
   backend_api_.set_wheel_handler = Backend_SetWheelHandler;
+  backend_api_.set_cursor_enter_leave_handler = Backend_SetCursorEnterLeaveHandler;
   backend_api_.poll_js_calls = Backend_PollJsCalls;
   backend_api_.set_js_call_notify = Backend_SetJsCallNotify;
   backend_api_.set_application_menu = Backend_SetApplicationMenu;

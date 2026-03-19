@@ -22,7 +22,7 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
-pub const WEF_API_VERSION: u32 = 7;
+pub const WEF_API_VERSION: u32 = 8;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -549,6 +549,14 @@ impl Window {
     F: Fn(WheelEvent) + Send + Sync + 'static,
   {
     on_wheel(handler);
+    self
+  }
+
+  pub fn on_cursor_enter_leave<F>(self, handler: F) -> Self
+  where
+    F: Fn(CursorEnterLeaveEvent) + Send + Sync + 'static,
+  {
+    on_cursor_enter_leave(handler);
     self
   }
 

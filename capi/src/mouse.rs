@@ -258,3 +258,64 @@ where
     }
   }
 }
+
+// --- Cursor enter/leave events ---
+
+#[derive(Debug, Clone, Copy)]
+pub struct CursorEnterLeaveEvent {
+  /// True when the cursor entered the window, false when it left.
+  pub entered: bool,
+  pub x: f64,
+  pub y: f64,
+  pub modifiers: KeyModifiers,
+}
+
+static CURSOR_ENTER_LEAVE_HANDLER: OnceLock<
+  Mutex<Option<Box<dyn Fn(CursorEnterLeaveEvent) + Send + Sync>>>,
+> = OnceLock::new();
+
+fn cursor_enter_leave_handler_store(
+) -> &'static Mutex<Option<Box<dyn Fn(CursorEnterLeaveEvent) + Send + Sync>>>
+{
+  CURSOR_ENTER_LEAVE_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn cursor_enter_leave_trampoline(
+  _user_data: *mut c_void,
+  entered: c_int,
+  x: f64,
+  y: f64,
+  modifiers: u32,
+) {
+  let event = CursorEnterLeaveEvent {
+    entered: entered != 0,
+    x,
+    y,
+    modifiers: KeyModifiers::from_raw(modifiers),
+  };
+
+  let guard = cursor_enter_leave_handler_store().lock().unwrap();
+  if let Some(handler) = guard.as_ref() {
+    handler(event);
+  }
+}
+
+/// Register a handler for cursor enter/leave events.
+pub fn on_cursor_enter_leave<F>(handler: F)
+where
+  F: Fn(CursorEnterLeaveEvent) + Send + Sync + 'static,
+{
+  *cursor_enter_leave_handler_store().lock().unwrap() =
+    Some(Box::new(handler));
+
+  let api = api();
+  if let Some(set_handler) = api.set_cursor_enter_leave_handler {
+    unsafe {
+      set_handler(
+        api.backend_data,
+        Some(cursor_enter_leave_trampoline),
+        std::ptr::null_mut(),
+      );
+    }
+  }
+}

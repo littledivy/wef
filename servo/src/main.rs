@@ -482,6 +482,28 @@ impl ApplicationHandler<UserEvent> for App {
           }
         }
       }
+      WindowEvent::CursorEntered { .. } => {
+        if let Self::Running(state) = self {
+          if let Some(backend_state) = BackendState::get() {
+            wef_backend_winit_common::dispatch_cursor_enter_leave_event(
+              &backend_state.common,
+              true,
+              state.modifiers.get(),
+            );
+          }
+        }
+      }
+      WindowEvent::CursorLeft { .. } => {
+        if let Self::Running(state) = self {
+          if let Some(backend_state) = BackendState::get() {
+            wef_backend_winit_common::dispatch_cursor_enter_leave_event(
+              &backend_state.common,
+              false,
+              state.modifiers.get(),
+            );
+          }
+        }
+      }
       _ => (),
     }
   }

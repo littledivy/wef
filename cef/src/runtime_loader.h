@@ -110,6 +110,20 @@ class RuntimeLoader {
     }
   }
 
+  void SetCursorEnterLeaveHandler(wef_cursor_enter_leave_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
+    cursor_enter_leave_handler_ = handler;
+    cursor_enter_leave_user_data_ = user_data;
+  }
+
+  void DispatchCursorEnterLeaveEvent(int entered, double x, double y,
+                                     uint32_t modifiers) {
+    std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
+    if (cursor_enter_leave_handler_) {
+      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, entered, x, y, modifiers);
+    }
+  }
+
   void SetJsCallNotify(void (*notify_fn)(void*), void* notify_data) {
     std::lock_guard<std::mutex> lock(notify_mutex_);
     js_call_notify_fn_ = notify_fn;
@@ -153,6 +167,10 @@ class RuntimeLoader {
   wef_wheel_fn wheel_handler_ = nullptr;
   void* wheel_user_data_ = nullptr;
   std::mutex wheel_mutex_;
+
+  wef_cursor_enter_leave_fn cursor_enter_leave_handler_ = nullptr;
+  void* cursor_enter_leave_user_data_ = nullptr;
+  std::mutex cursor_enter_leave_mutex_;
 
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;

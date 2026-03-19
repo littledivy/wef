@@ -241,6 +241,18 @@ static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpoint
   return FALSE;
 }
 
+static gboolean on_enter_notify_event(GtkWidget* widget, GdkEventCrossing* event, gpointer user_data) {
+  uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
+  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(1, event->x, event->y, modifiers);
+  return FALSE;
+}
+
+static gboolean on_leave_notify_event(GtkWidget* widget, GdkEventCrossing* event, gpointer user_data) {
+  uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
+  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(0, event->x, event->y, modifiers);
+  return FALSE;
+}
+
 static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer user_data) {
   int state = (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
   std::string key = keyboard::GdkKeyvalToKey(event->keyval);
@@ -324,9 +336,11 @@ WebKitGTKBackend::WebKitGTKBackend(int width, int height, const std::string& tit
   g_signal_connect(window_, "key-release-event", G_CALLBACK(on_key_event), this);
   g_signal_connect(window_, "button-press-event", G_CALLBACK(on_button_event), this);
   g_signal_connect(window_, "button-release-event", G_CALLBACK(on_button_event), this);
-  gtk_widget_add_events(window_, GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK);
+  gtk_widget_add_events(window_, GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK);
   g_signal_connect(window_, "motion-notify-event", G_CALLBACK(on_motion_event), this);
   g_signal_connect(window_, "scroll-event", G_CALLBACK(on_scroll_event), this);
+  g_signal_connect(window_, "enter-notify-event", G_CALLBACK(on_enter_notify_event), this);
+  g_signal_connect(window_, "leave-notify-event", G_CALLBACK(on_leave_notify_event), this);
 
   // Create user content manager for message handling
   content_manager_ = webkit_user_content_manager_new();

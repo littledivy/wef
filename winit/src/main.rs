@@ -227,7 +227,48 @@ impl ApplicationHandler<UserEvent> for App {
           );
         }
       }
-      _ => {}
+      WindowEvent::CursorEntered { .. } => {
+        if let Some(state) = BackendState::get() {
+          wef_backend_winit_common::dispatch_cursor_enter_leave_event(
+            &state.common,
+            true,
+            *modifiers,
+          );
+        }
+      }
+      WindowEvent::CursorLeft { .. } => {
+        if let Some(state) = BackendState::get() {
+          wef_backend_winit_common::dispatch_cursor_enter_leave_event(
+            &state.common,
+            false,
+            *modifiers,
+          );
+        }
+      }
+      WindowEvent::Focused(_) => {}
+
+      WindowEvent::ThemeChanged(_) => {}
+      WindowEvent::Destroyed => {}
+      WindowEvent::DroppedFile(_) => {}
+      WindowEvent::HoveredFile(_) => {}
+      WindowEvent::HoveredFileCancelled => {}
+      WindowEvent::Ime(_) => {}
+
+      WindowEvent::Touch(_) |
+      WindowEvent::PinchGesture { .. } |
+      WindowEvent::PanGesture { .. } |
+      WindowEvent::DoubleTapGesture { .. } |
+      WindowEvent::RotationGesture { .. } |
+      WindowEvent::TouchpadPressure { .. } => {
+        // TODO: touch
+      }
+      WindowEvent::ActivationTokenDone { .. } |
+      WindowEvent::AxisMotion { .. } |
+      WindowEvent::ScaleFactorChanged { .. } |
+      WindowEvent::Occluded(_) |
+      WindowEvent::RedrawRequested => {
+        // wont implement
+      }
     }
   }
 }
