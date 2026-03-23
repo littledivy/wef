@@ -20,7 +20,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 8;
+pub const WEF_API_VERSION: u32 = 11;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -82,6 +82,20 @@ pub type WefCursorEnterLeaveFn = unsafe extern "C" fn(
   f64,         // x
   f64,         // y
   u32,         // modifiers
+);
+pub type WefFocusedFn = unsafe extern "C" fn(
+  *mut c_void, // user_data
+  c_int,       // focused (1=gained, 0=lost)
+);
+pub type WefResizeFn = unsafe extern "C" fn(
+  *mut c_void, // user_data
+  c_int,       // width
+  c_int,       // height
+);
+pub type WefMoveFn = unsafe extern "C" fn(
+  *mut c_void, // user_data
+  c_int,       // x
+  c_int,       // y
 );
 
 pub const WEF_WHEEL_DELTA_PIXEL: i32 = 0;
@@ -206,6 +220,15 @@ pub struct WefBackendApi {
       Option<WefCursorEnterLeaveFn>,
       *mut c_void,
     ),
+  >,
+  pub set_focused_handler: Option<
+    unsafe extern "C" fn(*mut c_void, Option<WefFocusedFn>, *mut c_void),
+  >,
+  pub set_resize_handler: Option<
+    unsafe extern "C" fn(*mut c_void, Option<WefResizeFn>, *mut c_void),
+  >,
+  pub set_move_handler: Option<
+    unsafe extern "C" fn(*mut c_void, Option<WefMoveFn>, *mut c_void),
   >,
   pub poll_js_calls: Option<unsafe extern "C" fn(*mut c_void)>,
   pub set_js_call_notify: Option<
@@ -483,6 +506,9 @@ pub fn create_api_base() -> WefBackendApi {
     set_mouse_move_handler: None,
     set_wheel_handler: None,
     set_cursor_enter_leave_handler: None,
+    set_focused_handler: None,
+    set_resize_handler: None,
+    set_move_handler: None,
     poll_js_calls: None,
     set_js_call_notify: None,
     set_application_menu: None,
@@ -577,6 +603,9 @@ pub struct CommonState {
   pub wheel_handler: Mutex<Option<(WefWheelFn, usize)>>,
   pub cursor_enter_leave_handler:
     Mutex<Option<(WefCursorEnterLeaveFn, usize)>>,
+  pub focused_handler: Mutex<Option<(WefFocusedFn, usize)>>,
+  pub resize_handler: Mutex<Option<(WefResizeFn, usize)>>,
+  pub move_handler: Mutex<Option<(WefMoveFn, usize)>>,
   pub cursor_position: Mutex<(f64, f64)>,
   // Double-click tracking for winit (which doesn't provide click_count natively)
   pub last_press_time: Mutex<Option<std::time::Instant>>,
@@ -598,6 +627,9 @@ impl CommonState {
       mouse_move_handler: Mutex::new(None),
       wheel_handler: Mutex::new(None),
       cursor_enter_leave_handler: Mutex::new(None),
+      focused_handler: Mutex::new(None),
+      resize_handler: Mutex::new(None),
+      move_handler: Mutex::new(None),
       cursor_position: Mutex::new((0.0, 0.0)),
       last_press_time: Mutex::new(None),
       last_press_button: Mutex::new(None),
@@ -914,6 +946,39 @@ macro_rules! define_common_backend_fns {
           handler.map(|h| (h, user_data as usize));
       }
     }
+
+    unsafe extern "C" fn backend_set_focused_handler(
+      _data: *mut ::std::ffi::c_void,
+      handler: Option<$crate::WefFocusedFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        *state.common().focused_handler.lock().unwrap() =
+          handler.map(|h| (h, user_data as usize));
+      }
+    }
+
+    unsafe extern "C" fn backend_set_resize_handler(
+      _data: *mut ::std::ffi::c_void,
+      handler: Option<$crate::WefResizeFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        *state.common().resize_handler.lock().unwrap() =
+          handler.map(|h| (h, user_data as usize));
+      }
+    }
+
+    unsafe extern "C" fn backend_set_move_handler(
+      _data: *mut ::std::ffi::c_void,
+      handler: Option<$crate::WefMoveFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        *state.common().move_handler.lock().unwrap() =
+          handler.map(|h| (h, user_data as usize));
+      }
+    }
   };
 }
 
@@ -948,6 +1013,9 @@ macro_rules! fill_common_api {
     $api.set_wheel_handler = Some(backend_set_wheel_handler);
     $api.set_cursor_enter_leave_handler =
       Some(backend_set_cursor_enter_leave_handler);
+    $api.set_focused_handler = Some(backend_set_focused_handler);
+    $api.set_resize_handler = Some(backend_set_resize_handler);
+    $api.set_move_handler = Some(backend_set_move_handler);
   };
 }
 
@@ -1289,6 +1357,37 @@ pub fn dispatch_cursor_enter_leave_event(
         y,
         mods,
       );
+    }
+  }
+}
+
+pub fn dispatch_focused_event(common: &CommonState, focused: bool) {
+  let handler = common.focused_handler.lock().unwrap();
+  if let Some((cb, user_data)) = *handler {
+    unsafe {
+      cb(user_data as *mut c_void, if focused { 1 } else { 0 });
+    }
+  }
+}
+
+pub fn dispatch_resize_event(
+  common: &CommonState,
+  width: i32,
+  height: i32,
+) {
+  let handler = common.resize_handler.lock().unwrap();
+  if let Some((cb, user_data)) = *handler {
+    unsafe {
+      cb(user_data as *mut c_void, width, height);
+    }
+  }
+}
+
+pub fn dispatch_move_event(common: &CommonState, x: i32, y: i32) {
+  let handler = common.move_handler.lock().unwrap();
+  if let Some((cb, user_data)) = *handler {
+    unsafe {
+      cb(user_data as *mut c_void, x, y);
     }
   }
 }

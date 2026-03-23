@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 8
+#define WEF_API_VERSION 11
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -115,6 +115,26 @@ typedef void (*wef_cursor_enter_leave_fn)(
     double x,           // cursor x position in window coordinates
     double y,           // cursor y position in window coordinates
     uint32_t modifiers  // bitmask of WEF_MOD_* flags
+);
+
+// Callback for window move events.
+typedef void (*wef_move_fn)(
+    void* user_data,
+    int x,               // new x position
+    int y                // new y position
+);
+
+// Callback for window resize events.
+typedef void (*wef_resize_fn)(
+    void* user_data,
+    int width,           // new width in pixels
+    int height           // new height in pixels
+);
+
+// Callback for window focus/blur events.
+typedef void (*wef_focused_fn)(
+    void* user_data,
+    int focused          // 1 = window gained focus, 0 = window lost focus
 );
 
 // Callback for keyboard events.
@@ -260,6 +280,27 @@ struct wef_backend_api {
     void (*set_cursor_enter_leave_handler)(
         void* backend_data,
         wef_cursor_enter_leave_fn handler,
+        void* user_data
+    );
+
+    // Register a handler for window focus/blur events.
+    void (*set_focused_handler)(
+        void* backend_data,
+        wef_focused_fn handler,
+        void* user_data
+    );
+
+    // Register a handler for window resize events.
+    void (*set_resize_handler)(
+        void* backend_data,
+        wef_resize_fn handler,
+        void* user_data
+    );
+
+    // Register a handler for window move events.
+    void (*set_move_handler)(
+        void* backend_data,
+        wef_move_fn handler,
         void* user_data
     );
 

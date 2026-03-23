@@ -170,11 +170,21 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(state) = BackendState::get() {
           *state.common.pending_size.lock().unwrap() =
             Some((width as i32, height as i32));
+          wef_backend_winit_common::dispatch_resize_event(
+            &state.common,
+            width as i32,
+            height as i32,
+          );
         }
       }
       WindowEvent::Moved(PhysicalPosition { x, y }) => {
         if let Some(state) = BackendState::get() {
           *state.common.pending_position.lock().unwrap() = Some((x, y));
+          wef_backend_winit_common::dispatch_move_event(
+            &state.common,
+            x,
+            y,
+          );
         }
       }
       WindowEvent::ModifiersChanged(new_modifiers) => {
@@ -245,7 +255,14 @@ impl ApplicationHandler<UserEvent> for App {
           );
         }
       }
-      WindowEvent::Focused(_) => {}
+      WindowEvent::Focused(focused) => {
+        if let Some(state) = BackendState::get() {
+          wef_backend_winit_common::dispatch_focused_event(
+            &state.common,
+            focused,
+          );
+        }
+      }
 
       WindowEvent::ThemeChanged(_) => {}
       WindowEvent::Destroyed => {}

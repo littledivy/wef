@@ -319,3 +319,151 @@ where
     }
   }
 }
+
+// --- Focused events ---
+
+#[derive(Debug, Clone, Copy)]
+pub struct FocusedEvent {
+  /// True when the window gained focus, false when it lost focus.
+  pub focused: bool,
+}
+
+static FOCUSED_HANDLER: OnceLock<
+  Mutex<Option<Box<dyn Fn(FocusedEvent) + Send + Sync>>>,
+> = OnceLock::new();
+
+fn focused_handler_store(
+) -> &'static Mutex<Option<Box<dyn Fn(FocusedEvent) + Send + Sync>>> {
+  FOCUSED_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn focused_trampoline(
+  _user_data: *mut c_void,
+  focused: c_int,
+) {
+  let event = FocusedEvent {
+    focused: focused != 0,
+  };
+
+  let guard = focused_handler_store().lock().unwrap();
+  if let Some(handler) = guard.as_ref() {
+    handler(event);
+  }
+}
+
+/// Register a handler for window focus/blur events.
+pub fn on_focused<F>(handler: F)
+where
+  F: Fn(FocusedEvent) + Send + Sync + 'static,
+{
+  *focused_handler_store().lock().unwrap() = Some(Box::new(handler));
+
+  let api = api();
+  if let Some(set_handler) = api.set_focused_handler {
+    unsafe {
+      set_handler(
+        api.backend_data,
+        Some(focused_trampoline),
+        std::ptr::null_mut(),
+      );
+    }
+  }
+}
+
+// --- Resize events ---
+
+#[derive(Debug, Clone, Copy)]
+pub struct ResizeEvent {
+  pub width: i32,
+  pub height: i32,
+}
+
+static RESIZE_HANDLER: OnceLock<
+  Mutex<Option<Box<dyn Fn(ResizeEvent) + Send + Sync>>>,
+> = OnceLock::new();
+
+fn resize_handler_store(
+) -> &'static Mutex<Option<Box<dyn Fn(ResizeEvent) + Send + Sync>>> {
+  RESIZE_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn resize_trampoline(
+  _user_data: *mut c_void,
+  width: c_int,
+  height: c_int,
+) {
+  let event = ResizeEvent { width, height };
+
+  let guard = resize_handler_store().lock().unwrap();
+  if let Some(handler) = guard.as_ref() {
+    handler(event);
+  }
+}
+
+/// Register a handler for window resize events.
+pub fn on_resize<F>(handler: F)
+where
+  F: Fn(ResizeEvent) + Send + Sync + 'static,
+{
+  *resize_handler_store().lock().unwrap() = Some(Box::new(handler));
+
+  let api = api();
+  if let Some(set_handler) = api.set_resize_handler {
+    unsafe {
+      set_handler(
+        api.backend_data,
+        Some(resize_trampoline),
+        std::ptr::null_mut(),
+      );
+    }
+  }
+}
+
+// --- Move events ---
+
+#[derive(Debug, Clone, Copy)]
+pub struct MoveEvent {
+  pub x: i32,
+  pub y: i32,
+}
+
+static MOVE_HANDLER: OnceLock<
+  Mutex<Option<Box<dyn Fn(MoveEvent) + Send + Sync>>>,
+> = OnceLock::new();
+
+fn move_handler_store(
+) -> &'static Mutex<Option<Box<dyn Fn(MoveEvent) + Send + Sync>>> {
+  MOVE_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn move_trampoline(
+  _user_data: *mut c_void,
+  x: c_int,
+  y: c_int,
+) {
+  let event = MoveEvent { x, y };
+
+  let guard = move_handler_store().lock().unwrap();
+  if let Some(handler) = guard.as_ref() {
+    handler(event);
+  }
+}
+
+/// Register a handler for window move events.
+pub fn on_move<F>(handler: F)
+where
+  F: Fn(MoveEvent) + Send + Sync + 'static,
+{
+  *move_handler_store().lock().unwrap() = Some(Box::new(handler));
+
+  let api = api();
+  if let Some(set_handler) = api.set_move_handler {
+    unsafe {
+      set_handler(
+        api.backend_data,
+        Some(move_trampoline),
+        std::ptr::null_mut(),
+      );
+    }
+  }
+}

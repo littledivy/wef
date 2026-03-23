@@ -110,6 +110,45 @@ class RuntimeLoader {
     }
   }
 
+  void SetFocusedHandler(wef_focused_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(focused_mutex_);
+    focused_handler_ = handler;
+    focused_user_data_ = user_data;
+  }
+
+  void DispatchFocusedEvent(int focused) {
+    std::lock_guard<std::mutex> lock(focused_mutex_);
+    if (focused_handler_) {
+      focused_handler_(focused_user_data_, focused);
+    }
+  }
+
+  void SetResizeHandler(wef_resize_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(resize_mutex_);
+    resize_handler_ = handler;
+    resize_user_data_ = user_data;
+  }
+
+  void DispatchResizeEvent(int width, int height) {
+    std::lock_guard<std::mutex> lock(resize_mutex_);
+    if (resize_handler_) {
+      resize_handler_(resize_user_data_, width, height);
+    }
+  }
+
+  void SetMoveHandler(wef_move_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(move_mutex_);
+    move_handler_ = handler;
+    move_user_data_ = user_data;
+  }
+
+  void DispatchMoveEvent(int x, int y) {
+    std::lock_guard<std::mutex> lock(move_mutex_);
+    if (move_handler_) {
+      move_handler_(move_user_data_, x, y);
+    }
+  }
+
   void SetJsCallNotify(void (*notify_fn)(void*), void* notify_data) {
     std::lock_guard<std::mutex> lock(notify_mutex_);
     js_call_notify_fn_ = notify_fn;
@@ -157,6 +196,18 @@ class RuntimeLoader {
   wef_cursor_enter_leave_fn cursor_enter_leave_handler_ = nullptr;
   void* cursor_enter_leave_user_data_ = nullptr;
   std::mutex cursor_enter_leave_mutex_;
+
+  wef_focused_fn focused_handler_ = nullptr;
+  void* focused_user_data_ = nullptr;
+  std::mutex focused_mutex_;
+
+  wef_resize_fn resize_handler_ = nullptr;
+  void* resize_user_data_ = nullptr;
+  std::mutex resize_mutex_;
+
+  wef_move_fn move_handler_ = nullptr;
+  void* move_user_data_ = nullptr;
+  std::mutex move_mutex_;
 
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;

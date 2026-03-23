@@ -379,6 +379,11 @@ impl ApplicationHandler<UserEvent> for App {
           if let Some(backend_state) = BackendState::get() {
             *backend_state.common.pending_size.lock().unwrap() =
               Some((new_size.width as i32, new_size.height as i32));
+            wef_backend_winit_common::dispatch_resize_event(
+              &backend_state.common,
+              new_size.width as i32,
+              new_size.height as i32,
+            );
           }
           if let Some(webview) = state.webviews.borrow().last() {
             webview.resize(new_size);
@@ -389,6 +394,11 @@ impl ApplicationHandler<UserEvent> for App {
         if let Some(backend_state) = BackendState::get() {
           *backend_state.common.pending_position.lock().unwrap() =
             Some((position.x, position.y));
+          wef_backend_winit_common::dispatch_move_event(
+            &backend_state.common,
+            position.x,
+            position.y,
+          );
         }
       }
       WindowEvent::CursorMoved { position, .. } => {
@@ -502,6 +512,14 @@ impl ApplicationHandler<UserEvent> for App {
               state.modifiers.get(),
             );
           }
+        }
+      }
+      WindowEvent::Focused(focused) => {
+        if let Some(backend_state) = BackendState::get() {
+          wef_backend_winit_common::dispatch_focused_event(
+            &backend_state.common,
+            focused,
+          );
         }
       }
       _ => (),

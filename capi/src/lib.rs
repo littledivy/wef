@@ -22,7 +22,7 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
-pub const WEF_API_VERSION: u32 = 8;
+pub const WEF_API_VERSION: u32 = 11;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -557,6 +557,30 @@ impl Window {
     F: Fn(CursorEnterLeaveEvent) + Send + Sync + 'static,
   {
     on_cursor_enter_leave(handler);
+    self
+  }
+
+  pub fn on_focused<F>(self, handler: F) -> Self
+  where
+    F: Fn(FocusedEvent) + Send + Sync + 'static,
+  {
+    on_focused(handler);
+    self
+  }
+
+  pub fn on_resize<F>(self, handler: F) -> Self
+  where
+    F: Fn(ResizeEvent) + Send + Sync + 'static,
+  {
+    on_resize(handler);
+    self
+  }
+
+  pub fn on_move<F>(self, handler: F) -> Self
+  where
+    F: Fn(MoveEvent) + Send + Sync + 'static,
+  {
+    on_move(handler);
     self
   }
 

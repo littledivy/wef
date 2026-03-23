@@ -57,6 +57,10 @@ class WKWebViewBackend : public WefBackend {
   // TODO: NSEvent enter/exit monitors require NSTrackingArea which is complex.
   // The browser engine handles mouseenter/mouseleave DOM events independently.
   // id cursor_enter_leave_monitor_;
+  id focus_observer_;
+  id blur_observer_;
+  id resize_observer_;
+  id move_observer_;
 
 };
 
@@ -502,6 +506,48 @@ WKWebViewBackend::WKWebViewBackend(int width, int height, const std::string& tit
               delta_x, delta_y, x, y, modifiers, delta_mode);
           return event;
         }];
+
+    focus_observer_ = [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSWindowDidBecomeKeyNotification
+        object:window_
+        queue:nil
+        usingBlock:^(NSNotification*) {
+          RuntimeLoader::GetInstance()->DispatchFocusedEvent(1);
+        }];
+
+    blur_observer_ = [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSWindowDidResignKeyNotification
+        object:window_
+        queue:nil
+        usingBlock:^(NSNotification*) {
+          RuntimeLoader::GetInstance()->DispatchFocusedEvent(0);
+        }];
+
+    resize_observer_ = [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSWindowDidResizeNotification
+        object:window_
+        queue:nil
+        usingBlock:^(NSNotification* note) {
+          NSWindow* win = [note object];
+          if (win) {
+            NSRect frame = [[win contentView] frame];
+            RuntimeLoader::GetInstance()->DispatchResizeEvent(
+                (int)frame.size.width, (int)frame.size.height);
+          }
+        }];
+
+    move_observer_ = [[NSNotificationCenter defaultCenter]
+        addObserverForName:NSWindowDidMoveNotification
+        object:window_
+        queue:nil
+        usingBlock:^(NSNotification* note) {
+          NSWindow* win = [note object];
+          if (win) {
+            NSRect frame = [win frame];
+            RuntimeLoader::GetInstance()->DispatchMoveEvent(
+                (int)frame.origin.x, (int)frame.origin.y);
+          }
+        }];
   }
 }
 
@@ -522,6 +568,22 @@ WKWebViewBackend::~WKWebViewBackend() {
     if (scroll_monitor_) {
       [NSEvent removeMonitor:scroll_monitor_];
       scroll_monitor_ = nil;
+    }
+    if (focus_observer_) {
+      [[NSNotificationCenter defaultCenter] removeObserver:focus_observer_];
+      focus_observer_ = nil;
+    }
+    if (blur_observer_) {
+      [[NSNotificationCenter defaultCenter] removeObserver:blur_observer_];
+      blur_observer_ = nil;
+    }
+    if (resize_observer_) {
+      [[NSNotificationCenter defaultCenter] removeObserver:resize_observer_];
+      resize_observer_ = nil;
+    }
+    if (move_observer_) {
+      [[NSNotificationCenter defaultCenter] removeObserver:move_observer_];
+      move_observer_ = nil;
     }
     if (webview_) {
       [webview_.configuration.userContentController removeScriptMessageHandlerForName:@"wef"];

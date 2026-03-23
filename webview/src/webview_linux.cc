@@ -253,6 +253,22 @@ static gboolean on_leave_notify_event(GtkWidget* widget, GdkEventCrossing* event
   return FALSE;
 }
 
+static gboolean on_focus_in_event(GtkWidget* widget, GdkEventFocus* event, gpointer user_data) {
+  RuntimeLoader::GetInstance()->DispatchFocusedEvent(1);
+  return FALSE;
+}
+
+static gboolean on_focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer user_data) {
+  RuntimeLoader::GetInstance()->DispatchFocusedEvent(0);
+  return FALSE;
+}
+
+static gboolean on_configure_event(GtkWidget* widget, GdkEventConfigure* event, gpointer user_data) {
+  RuntimeLoader::GetInstance()->DispatchResizeEvent(event->width, event->height);
+  RuntimeLoader::GetInstance()->DispatchMoveEvent(event->x, event->y);
+  return FALSE;
+}
+
 static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer user_data) {
   int state = (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
   std::string key = keyboard::GdkKeyvalToKey(event->keyval);
@@ -341,6 +357,9 @@ WebKitGTKBackend::WebKitGTKBackend(int width, int height, const std::string& tit
   g_signal_connect(window_, "scroll-event", G_CALLBACK(on_scroll_event), this);
   g_signal_connect(window_, "enter-notify-event", G_CALLBACK(on_enter_notify_event), this);
   g_signal_connect(window_, "leave-notify-event", G_CALLBACK(on_leave_notify_event), this);
+  g_signal_connect(window_, "focus-in-event", G_CALLBACK(on_focus_in_event), this);
+  g_signal_connect(window_, "focus-out-event", G_CALLBACK(on_focus_out_event), this);
+  g_signal_connect(window_, "configure-event", G_CALLBACK(on_configure_event), this);
 
   // Create user content manager for message handling
   content_manager_ = webkit_user_content_manager_new();

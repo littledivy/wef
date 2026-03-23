@@ -23,6 +23,10 @@ RuntimeLoader* RuntimeLoader::instance_ = nullptr;
 static id g_mouse_monitor = nil;
 static id g_mouse_move_monitor = nil;
 static id g_scroll_monitor = nil;
+static id g_focus_observer = nil;
+static id g_blur_observer = nil;
+static id g_resize_observer = nil;
+static id g_move_observer = nil;
 
 static uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
   uint32_t mods = 0;
@@ -124,6 +128,48 @@ void InstallNativeMouseMonitor() {
             delta_x, delta_y, x, y, modifiers, delta_mode);
         return event;
       }];
+
+  g_focus_observer = [[NSNotificationCenter defaultCenter]
+      addObserverForName:NSWindowDidBecomeKeyNotification
+      object:nil
+      queue:nil
+      usingBlock:^(NSNotification*) {
+        RuntimeLoader::GetInstance()->DispatchFocusedEvent(1);
+      }];
+
+  g_blur_observer = [[NSNotificationCenter defaultCenter]
+      addObserverForName:NSWindowDidResignKeyNotification
+      object:nil
+      queue:nil
+      usingBlock:^(NSNotification*) {
+        RuntimeLoader::GetInstance()->DispatchFocusedEvent(0);
+      }];
+
+  g_resize_observer = [[NSNotificationCenter defaultCenter]
+      addObserverForName:NSWindowDidResizeNotification
+      object:nil
+      queue:nil
+      usingBlock:^(NSNotification* note) {
+        NSWindow* win = [note object];
+        if (win) {
+          NSRect frame = [[win contentView] frame];
+          RuntimeLoader::GetInstance()->DispatchResizeEvent(
+              (int)frame.size.width, (int)frame.size.height);
+        }
+      }];
+
+  g_move_observer = [[NSNotificationCenter defaultCenter]
+      addObserverForName:NSWindowDidMoveNotification
+      object:nil
+      queue:nil
+      usingBlock:^(NSNotification* note) {
+        NSWindow* win = [note object];
+        if (win) {
+          NSRect frame = [win frame];
+          RuntimeLoader::GetInstance()->DispatchMoveEvent(
+              (int)frame.origin.x, (int)frame.origin.y);
+        }
+      }];
 }
 
 void RemoveNativeMouseMonitor() {
@@ -138,6 +184,22 @@ void RemoveNativeMouseMonitor() {
   if (g_scroll_monitor) {
     [NSEvent removeMonitor:g_scroll_monitor];
     g_scroll_monitor = nil;
+  }
+  if (g_focus_observer) {
+    [[NSNotificationCenter defaultCenter] removeObserver:g_focus_observer];
+    g_focus_observer = nil;
+  }
+  if (g_blur_observer) {
+    [[NSNotificationCenter defaultCenter] removeObserver:g_blur_observer];
+    g_blur_observer = nil;
+  }
+  if (g_resize_observer) {
+    [[NSNotificationCenter defaultCenter] removeObserver:g_resize_observer];
+    g_resize_observer = nil;
+  }
+  if (g_move_observer) {
+    [[NSNotificationCenter defaultCenter] removeObserver:g_move_observer];
+    g_move_observer = nil;
   }
 }
 
@@ -722,6 +784,27 @@ static void Backend_SetCursorEnterLeaveHandler(void* data,
   loader->SetCursorEnterLeaveHandler(handler, user_data);
 }
 
+static void Backend_SetFocusedHandler(void* data,
+                                       wef_focused_fn handler,
+                                       void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetFocusedHandler(handler, user_data);
+}
+
+static void Backend_SetResizeHandler(void* data,
+                                      wef_resize_fn handler,
+                                      void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetResizeHandler(handler, user_data);
+}
+
+static void Backend_SetMoveHandler(void* data,
+                                    wef_move_fn handler,
+                                    void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetMoveHandler(handler, user_data);
+}
+
 static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowser();
@@ -1111,6 +1194,9 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_mouse_move_handler = Backend_SetMouseMoveHandler;
   backend_api_.set_wheel_handler = Backend_SetWheelHandler;
   backend_api_.set_cursor_enter_leave_handler = Backend_SetCursorEnterLeaveHandler;
+  backend_api_.set_focused_handler = Backend_SetFocusedHandler;
+  backend_api_.set_resize_handler = Backend_SetResizeHandler;
+  backend_api_.set_move_handler = Backend_SetMoveHandler;
 
   backend_api_.poll_js_calls = [](void* data) {
     RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
