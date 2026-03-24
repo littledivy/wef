@@ -5,10 +5,6 @@
 
 #include <iostream>
 
-#ifdef __APPLE__
-#import <Cocoa/Cocoa.h>
-#endif
-
 #include "include/base/cef_callback.h"
 #include "include/cef_browser.h"
 #include "include/views/cef_browser_view.h"
@@ -23,65 +19,44 @@ namespace {
 WefHandler* g_handler = nullptr;
 }
 
-class WefWindowDelegate : public CefWindowDelegate {
- public:
-  WefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id)
-      : browser_view_(browser_view), wef_id_(wef_id) {
-  }
+// WefWindowDelegate implementation
 
-  void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->AddChildView(browser_view_);
-    window->Show();
-    InstallNativeMouseMonitor();
+void WefWindowDelegate::OnWindowCreated(CefRefPtr<CefWindow> window) {
+  window->AddChildView(browser_view_);
+  window->Show();
+  InstallNativeMouseMonitor();
 
-    // Register NSWindow for event routing
-    CefWindowHandle handle = window->GetWindowHandle();
-    if (handle && wef_id_ > 0) {
+  // Register native window for event routing
+  CefWindowHandle handle = window->GetWindowHandle();
+  if (handle && wef_id_ > 0) {
 #ifdef __APPLE__
-      NSView* view = (__bridge NSView*)handle;
-      NSWindow* nswindow = [view window];
-      if (nswindow) {
-        RuntimeLoader::GetInstance()->RegisterNSWindow((__bridge void*)nswindow, wef_id_);
-      }
+    RegisterNSWindowForCefHandle(handle, wef_id_);
 #endif
-    }
   }
+}
 
-  void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
-    // Unregister NSWindow
-    CefWindowHandle handle = window->GetWindowHandle();
-    if (handle) {
+void WefWindowDelegate::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
+  // Unregister native window
+  CefWindowHandle handle = window->GetWindowHandle();
+  if (handle) {
 #ifdef __APPLE__
-      NSView* view = (__bridge NSView*)handle;
-      NSWindow* nswindow = [view window];
-      if (nswindow) {
-        RuntimeLoader::GetInstance()->UnregisterNSWindow((__bridge void*)nswindow);
-      }
+    UnregisterNSWindowForCefHandle(handle);
 #endif
-    }
-    if (wef_id_ > 0) {
-      RuntimeLoader::GetInstance()->UnregisterBrowser(wef_id_);
-    }
-    browser_view_ = nullptr;
   }
-
-  bool CanClose(CefRefPtr<CefWindow> window) override {
-    CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
-    return browser ? browser->GetHost()->TryCloseBrowser() : true;
+  if (wef_id_ > 0) {
+    RuntimeLoader::GetInstance()->UnregisterBrowser(wef_id_);
   }
+  RemoveNativeMouseMonitor();
+  browser_view_ = nullptr;
+}
 
-  CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
-    return CefSize(800, 600);
-  }
+bool WefWindowDelegate::CanClose(CefRefPtr<CefWindow> window) {
+  CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
+  return browser ? browser->GetHost()->TryCloseBrowser() : true;
+}
 
- private:
-  CefRefPtr<CefBrowserView> browser_view_;
-  uint32_t wef_id_ = 0;
-  IMPLEMENT_REFCOUNTING(WefWindowDelegate);
-};
-
-CefRefPtr<CefWindowDelegate> CreateWefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id) {
-  return new WefWindowDelegate(browser_view, wef_id);
+CefSize WefWindowDelegate::GetPreferredSize(CefRefPtr<CefView> view) {
+  return CefSize(800, 600);
 }
 
 WefHandler::WefHandler() {

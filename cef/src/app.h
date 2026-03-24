@@ -20,8 +20,21 @@ extern std::string g_runtime_path;
 // Both happen on the UI thread so no synchronization needed.
 extern std::queue<uint32_t> g_pending_wef_ids;
 
-// Factory function to create a WefWindowDelegate (defined in app.mm)
-CefRefPtr<CefWindowDelegate> CreateWefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id);
+class WefWindowDelegate : public CefWindowDelegate {
+ public:
+  WefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id)
+      : browser_view_(browser_view), wef_id_(wef_id) {}
+
+  void OnWindowCreated(CefRefPtr<CefWindow> window) override;
+  void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
+  bool CanClose(CefRefPtr<CefWindow> window) override;
+  CefSize GetPreferredSize(CefRefPtr<CefView> view) override;
+
+ private:
+  CefRefPtr<CefBrowserView> browser_view_;
+  uint32_t wef_id_ = 0;
+  IMPLEMENT_REFCOUNTING(WefWindowDelegate);
+};
 
 class WefHandler : public CefClient,
                    public CefLifeSpanHandler,

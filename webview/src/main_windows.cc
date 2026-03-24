@@ -4,6 +4,8 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <objbase.h>
+#include <shellapi.h>
 
 #include <cstdlib>
 #include <cstring>

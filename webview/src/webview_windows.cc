@@ -2,6 +2,7 @@
 
 #include "runtime_loader.h"
 #include "wef_json.h"
+#include <win32_menu.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -348,6 +349,10 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
       }
       DestroyWindow(hwnd);
       return 0;
+    case WM_COMMAND:
+      if (win32_menu::HandleMenuCommand(wParam))
+        return 0;
+      break;
     case WM_DESTROY:
       return 0;
     case WM_UI_TASK: {

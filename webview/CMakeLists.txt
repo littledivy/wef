@@ -111,6 +111,7 @@ elseif(PLATFORM_WINDOWS)
   endif()
 
   target_link_libraries(${WEF_TARGET}
+    WebView2LoaderStatic
     user32
     ole32
     oleaut32

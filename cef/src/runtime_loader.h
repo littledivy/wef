@@ -352,8 +352,14 @@ class RuntimeLoader {
 };
 
 // Platform-specific native event monitor hooks.
-// Implemented in the platform-specific main file (e.g. main_mac.mm).
+// Implemented in the platform-specific file (e.g. runtime_loader_mac.mm).
 void InstallNativeMouseMonitor();
 void RemoveNativeMouseMonitor();
+
+#ifdef __APPLE__
+// NSWindow helpers for cross-platform code (implemented in runtime_loader_mac.mm).
+void RegisterNSWindowForCefHandle(void* cef_handle, uint32_t window_id);
+void UnregisterNSWindowForCefHandle(void* cef_handle);
+#endif
 
 #endif

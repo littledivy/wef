@@ -3,11 +3,15 @@
 #include "runtime_loader.h"
 #include "app.h"
 
+#ifndef _WIN32
 #include <dlfcn.h>
+#else
+#include <windows.h>
+#endif
+
 #include <iostream>
 #include <cstring>
-
-#import <Cocoa/Cocoa.h>
+#include <vector>
 
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
@@ -19,212 +23,7 @@
 
 RuntimeLoader* RuntimeLoader::instance_ = nullptr;
 
-// --- Native Mouse Monitor (macOS) ---
-
-static id g_mouse_monitor = nil;
-static id g_mouse_move_monitor = nil;
-static id g_scroll_monitor = nil;
-static id g_focus_observer = nil;
-static id g_blur_observer = nil;
-static id g_resize_observer = nil;
-static id g_move_observer = nil;
-
-static uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
-  uint32_t mods = 0;
-  if (flags & NSEventModifierFlagShift)   mods |= WEF_MOD_SHIFT;
-  if (flags & NSEventModifierFlagControl) mods |= WEF_MOD_CONTROL;
-  if (flags & NSEventModifierFlagOption)  mods |= WEF_MOD_ALT;
-  if (flags & NSEventModifierFlagCommand) mods |= WEF_MOD_META;
-  return mods;
-}
-
-static int NSButtonToWef(NSInteger buttonNumber) {
-  switch (buttonNumber) {
-    case 0: return WEF_MOUSE_BUTTON_LEFT;
-    case 1: return WEF_MOUSE_BUTTON_RIGHT;
-    case 2: return WEF_MOUSE_BUTTON_MIDDLE;
-    case 3: return WEF_MOUSE_BUTTON_BACK;
-    case 4: return WEF_MOUSE_BUTTON_FORWARD;
-    default: return WEF_MOUSE_BUTTON_LEFT;
-  }
-}
-
-static uint32_t WefIdForNSWindow(NSWindow* win) {
-  if (!win) return 0;
-  return RuntimeLoader::GetInstance()->GetWefIdForNSWindow((__bridge void*)win);
-}
-
-void InstallNativeMouseMonitor() {
-  if (g_mouse_monitor) return;
-
-  NSEventMask mask = NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp
-                   | NSEventMaskRightMouseDown | NSEventMaskRightMouseUp
-                   | NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp;
-
-  g_mouse_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
-
-        int state;
-        switch ([event type]) {
-          case NSEventTypeLeftMouseDown:
-          case NSEventTypeRightMouseDown:
-          case NSEventTypeOtherMouseDown:
-            state = WEF_MOUSE_PRESSED;
-            break;
-          default:
-            state = WEF_MOUSE_RELEASED;
-            break;
-        }
-
-        int button = NSButtonToWef([event buttonNumber]);
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
-        int32_t click_count = (int32_t)[event clickCount];
-
-        // Get position in window coordinates
-        NSPoint loc = [event locationInWindow];
-        double x = loc.x;
-        double y = 0;
-        if (win) {
-          // Flip Y: NSWindow uses bottom-left origin, we want top-left
-          y = [win contentLayoutRect].size.height - loc.y;
-        }
-
-        RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-            wid, state, button, x, y, modifiers, click_count);
-
-        return event; // Don't consume
-      }];
-
-  g_mouse_move_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:
-      (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
-       NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
-
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
-        NSPoint loc = [event locationInWindow];
-        double x = loc.x;
-        double y = 0;
-        if (win) {
-          y = [win contentLayoutRect].size.height - loc.y;
-        }
-
-        RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(wid, x, y, modifiers);
-        return event;
-      }];
-
-  g_scroll_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
-
-        double delta_x = [event scrollingDeltaX];
-        double delta_y = [event scrollingDeltaY];
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
-
-        // Determine delta mode: continuous (trackpad) = pixel, line-based (mouse wheel) = line
-        int32_t delta_mode = [event hasPreciseScrollingDeltas]
-            ? WEF_WHEEL_DELTA_PIXEL : WEF_WHEEL_DELTA_LINE;
-
-        NSPoint loc = [event locationInWindow];
-        double x = loc.x;
-        double y = 0;
-        if (win) {
-          y = [win contentLayoutRect].size.height - loc.y;
-        }
-
-        RuntimeLoader::GetInstance()->DispatchWheelEvent(
-            wid, delta_x, delta_y, x, y, modifiers, delta_mode);
-        return event;
-      }];
-
-  g_focus_observer = [[NSNotificationCenter defaultCenter]
-      addObserverForName:NSWindowDidBecomeKeyNotification
-      object:nil
-      queue:nil
-      usingBlock:^(NSNotification* note) {
-        uint32_t wid = WefIdForNSWindow([note object]);
-        if (wid > 0) {
-          RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
-        }
-      }];
-
-  g_blur_observer = [[NSNotificationCenter defaultCenter]
-      addObserverForName:NSWindowDidResignKeyNotification
-      object:nil
-      queue:nil
-      usingBlock:^(NSNotification* note) {
-        uint32_t wid = WefIdForNSWindow([note object]);
-        if (wid > 0) {
-          RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
-        }
-      }];
-
-  g_resize_observer = [[NSNotificationCenter defaultCenter]
-      addObserverForName:NSWindowDidResizeNotification
-      object:nil
-      queue:nil
-      usingBlock:^(NSNotification* note) {
-        NSWindow* win = [note object];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid > 0 && win) {
-          NSRect frame = [[win contentView] frame];
-          RuntimeLoader::GetInstance()->DispatchResizeEvent(
-              wid, (int)frame.size.width, (int)frame.size.height);
-        }
-      }];
-
-  g_move_observer = [[NSNotificationCenter defaultCenter]
-      addObserverForName:NSWindowDidMoveNotification
-      object:nil
-      queue:nil
-      usingBlock:^(NSNotification* note) {
-        NSWindow* win = [note object];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid > 0 && win) {
-          NSRect frame = [win frame];
-          RuntimeLoader::GetInstance()->DispatchMoveEvent(
-              wid, (int)frame.origin.x, (int)frame.origin.y);
-        }
-      }];
-}
-
-void RemoveNativeMouseMonitor() {
-  if (g_mouse_monitor) {
-    [NSEvent removeMonitor:g_mouse_monitor];
-    g_mouse_monitor = nil;
-  }
-  if (g_mouse_move_monitor) {
-    [NSEvent removeMonitor:g_mouse_move_monitor];
-    g_mouse_move_monitor = nil;
-  }
-  if (g_scroll_monitor) {
-    [NSEvent removeMonitor:g_scroll_monitor];
-    g_scroll_monitor = nil;
-  }
-  if (g_focus_observer) {
-    [[NSNotificationCenter defaultCenter] removeObserver:g_focus_observer];
-    g_focus_observer = nil;
-  }
-  if (g_blur_observer) {
-    [[NSNotificationCenter defaultCenter] removeObserver:g_blur_observer];
-    g_blur_observer = nil;
-  }
-  if (g_resize_observer) {
-    [[NSNotificationCenter defaultCenter] removeObserver:g_resize_observer];
-    g_resize_observer = nil;
-  }
-  if (g_move_observer) {
-    [[NSNotificationCenter defaultCenter] removeObserver:g_move_observer];
-    g_move_observer = nil;
-  }
-}
+// --- Backend API functions (cross-platform, using CEF Views) ---
 
 static void Backend_Navigate(void* data, uint32_t window_id, const char* url) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
@@ -269,8 +68,6 @@ static void Backend_ExecuteJs(void* data, uint32_t window_id, const char* script
           b->GetMainFrame()->ExecuteJavaScript(s, "", 0);
         },
         browser, script_str));
-    // TODO: CEF's ExecuteJavaScript is fire-and-forget, no result callback support
-    // For now, if a callback is provided, call it with null result immediately
     if (callback) {
       callback(nullptr, nullptr, callback_data);
     }
@@ -483,6 +280,8 @@ static void Backend_PostUiTask(void* data, void (*task)(void*), void* task_data)
         task, task_data));
   }
 }
+
+// --- Value accessors ---
 
 static bool Backend_ValueIsNull(wef_value_t* val) {
   if (!val || !val->value) return true;
@@ -714,6 +513,8 @@ static void Backend_ValueFree(wef_value_t* val) {
   delete val;
 }
 
+// --- JS call/callback handling ---
+
 static void Backend_SetJsCallHandler(void* data, wef_js_call_fn handler, void* user_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   loader->SetJsCallHandler(handler, user_data);
@@ -847,302 +648,39 @@ static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   });
 }
 
-// --- Application Menu ---
+// --- Platform-specific menu (stub on Windows, implemented in runtime_loader.mm on macOS) ---
 
-// Store the menu click handler globally so NSMenu target-action can invoke it.
-static wef_menu_click_fn g_menu_click_fn = nullptr;
-static void* g_menu_click_data = nullptr;
-
-// Objective-C class that handles menu item clicks for custom items.
-#ifdef __OBJC__
-@interface WefMenuTarget : NSObject
-+ (instancetype)shared;
-- (void)menuItemClicked:(id)sender;
-@end
-
-@implementation WefMenuTarget
-
-+ (instancetype)shared {
-  static WefMenuTarget* instance = nil;
-  static dispatch_once_t onceToken;
-  dispatch_once(&onceToken, ^{
-    instance = [[WefMenuTarget alloc] init];
-  });
-  return instance;
-}
-
-- (void)menuItemClicked:(id)sender {
-  NSMenuItem* item = (NSMenuItem*)sender;
-  NSString* itemId = [item representedObject];
-  if (itemId && g_menu_click_fn) {
-    g_menu_click_fn(g_menu_click_data, [itemId UTF8String]);
-  }
-}
-
-@end
-#endif
-
-// Parse accelerator string like "cmd+shift+n" into key equivalent + modifier mask.
-static void ParseAccelerator(const std::string& accel, NSString** outKey,
-                             NSEventModifierFlags* outMask) {
-  *outKey = @"";
-  *outMask = 0;
-
-  std::string lower = accel;
-  for (auto& c : lower) c = tolower(c);
-
-  // Split by +
-  size_t pos = 0;
-  std::vector<std::string> parts;
-  std::string remaining = lower;
-  while ((pos = remaining.find('+')) != std::string::npos) {
-    parts.push_back(remaining.substr(0, pos));
-    remaining = remaining.substr(pos + 1);
-  }
-  if (!remaining.empty()) parts.push_back(remaining);
-
-  for (const auto& part : parts) {
-    if (part == "cmd" || part == "command" || part == "cmdorctrl" ||
-        part == "commandorcontrol") {
-      *outMask |= NSEventModifierFlagCommand;
-    } else if (part == "shift") {
-      *outMask |= NSEventModifierFlagShift;
-    } else if (part == "alt" || part == "option") {
-      *outMask |= NSEventModifierFlagOption;
-    } else if (part == "ctrl" || part == "control") {
-      *outMask |= NSEventModifierFlagControl;
-    } else {
-      // This is the key
-      *outKey = [NSString stringWithUTF8String:part.c_str()];
-    }
-  }
-}
-
-// Map a role string to an NSMenuItem with the standard action.
-static NSMenuItem* CreateRoleMenuItem(const std::string& role) {
-  NSString* title = @"";
-  SEL action = nil;
-  NSString* keyEquiv = @"";
-  NSEventModifierFlags mask = NSEventModifierFlagCommand;
-
-  if (role == "quit") {
-    title = @"Quit";
-    action = @selector(terminate:);
-    keyEquiv = @"q";
-  } else if (role == "copy") {
-    title = @"Copy";
-    action = @selector(copy:);
-    keyEquiv = @"c";
-  } else if (role == "paste") {
-    title = @"Paste";
-    action = @selector(paste:);
-    keyEquiv = @"v";
-  } else if (role == "cut") {
-    title = @"Cut";
-    action = @selector(cut:);
-    keyEquiv = @"x";
-  } else if (role == "selectall" || role == "selectAll") {
-    title = @"Select All";
-    action = @selector(selectAll:);
-    keyEquiv = @"a";
-  } else if (role == "undo") {
-    title = @"Undo";
-    action = @selector(undo:);
-    keyEquiv = @"z";
-  } else if (role == "redo") {
-    title = @"Redo";
-    action = @selector(redo:);
-    keyEquiv = @"Z";
-    mask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
-  } else if (role == "minimize") {
-    title = @"Minimize";
-    action = @selector(performMiniaturize:);
-    keyEquiv = @"m";
-  } else if (role == "zoom") {
-    title = @"Zoom";
-    action = @selector(performZoom:);
-  } else if (role == "close") {
-    title = @"Close";
-    action = @selector(performClose:);
-    keyEquiv = @"w";
-  } else if (role == "about") {
-    title = @"About";
-    action = @selector(orderFrontStandardAboutPanel:);
-  } else if (role == "hide") {
-    title = @"Hide";
-    action = @selector(hide:);
-    keyEquiv = @"h";
-  } else if (role == "hideothers" || role == "hideOthers") {
-    title = @"Hide Others";
-    action = @selector(hideOtherApplications:);
-    keyEquiv = @"h";
-    mask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
-  } else if (role == "unhide") {
-    title = @"Show All";
-    action = @selector(unhideAllApplications:);
-  } else if (role == "front") {
-    title = @"Bring All to Front";
-    action = @selector(arrangeInFront:);
-  } else if (role == "togglefullscreen" || role == "toggleFullScreen") {
-    title = @"Toggle Full Screen";
-    action = @selector(toggleFullScreen:);
-    keyEquiv = @"f";
-    mask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
-  } else {
-    return nil;
-  }
-
-  NSMenuItem* item = [[NSMenuItem alloc]
-      initWithTitle:title
-             action:action
-      keyEquivalent:keyEquiv];
-  [item setKeyEquivalentModifierMask:mask];
-  return item;
-}
-
-// Recursively build an NSMenu from a wef_value_t list.
-static NSMenu* BuildMenuFromValue(wef_value_t* val,
-                                  const wef_backend_api_t* api) {
-  if (!val || !api->value_is_list(val)) return nil;
-
-  NSMenu* menu = [[NSMenu alloc] init];
-  [menu setAutoenablesItems:NO];
-
-  size_t count = api->value_list_size(val);
-  for (size_t i = 0; i < count; ++i) {
-    wef_value_t* itemVal = api->value_list_get(val, i);
-    if (!itemVal || !api->value_is_dict(itemVal)) continue;
-
-    // Check for separator
-    wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
-    if (typeVal && api->value_is_string(typeVal)) {
-      size_t len = 0;
-      char* typeStr = api->value_get_string(typeVal, &len);
-      if (typeStr && std::string(typeStr) == "separator") {
-        [menu addItem:[NSMenuItem separatorItem]];
-        api->value_free_string(typeStr);
-        continue;
-      }
-      if (typeStr) api->value_free_string(typeStr);
-    }
-
-    // Check for role
-    wef_value_t* roleVal = api->value_dict_get(itemVal, "role");
-    if (roleVal && api->value_is_string(roleVal)) {
-      size_t len = 0;
-      char* roleStr = api->value_get_string(roleVal, &len);
-      if (roleStr) {
-        NSMenuItem* roleItem = CreateRoleMenuItem(roleStr);
-        if (roleItem) {
-          [menu addItem:roleItem];
-        }
-        api->value_free_string(roleStr);
-        continue;
-      }
-    }
-
-    // Regular item or submenu
-    wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
-    if (!labelVal || !api->value_is_string(labelVal)) continue;
-
-    size_t labelLen = 0;
-    char* labelStr = api->value_get_string(labelVal, &labelLen);
-    if (!labelStr) continue;
-    NSString* label = [NSString stringWithUTF8String:labelStr];
-    api->value_free_string(labelStr);
-
-    // Check for submenu
-    wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
-    if (submenuVal && api->value_is_list(submenuVal)) {
-      NSMenuItem* submenuItem = [[NSMenuItem alloc] init];
-      [submenuItem setTitle:label];
-      NSMenu* submenu = BuildMenuFromValue(submenuVal, api);
-      [submenu setTitle:label];
-      [submenuItem setSubmenu:submenu];
-      [menu addItem:submenuItem];
-      continue;
-    }
-
-    // Regular clickable item
-    NSString* keyEquiv = @"";
-    NSEventModifierFlags modMask = NSEventModifierFlagCommand;
-
-    wef_value_t* accelVal = api->value_dict_get(itemVal, "accelerator");
-    if (accelVal && api->value_is_string(accelVal)) {
-      size_t accelLen = 0;
-      char* accelStr = api->value_get_string(accelVal, &accelLen);
-      if (accelStr) {
-        ParseAccelerator(accelStr, &keyEquiv, &modMask);
-        api->value_free_string(accelStr);
-      }
-    }
-
-    NSMenuItem* nsItem = [[NSMenuItem alloc]
-        initWithTitle:label
-               action:@selector(menuItemClicked:)
-        keyEquivalent:keyEquiv];
-    [nsItem setKeyEquivalentModifierMask:modMask];
-    [nsItem setTarget:[WefMenuTarget shared]];
-
-    // Store the item id
-    wef_value_t* idVal = api->value_dict_get(itemVal, "id");
-    if (idVal && api->value_is_string(idVal)) {
-      size_t idLen = 0;
-      char* idStr = api->value_get_string(idVal, &idLen);
-      if (idStr) {
-        [nsItem setRepresentedObject:[NSString stringWithUTF8String:idStr]];
-        api->value_free_string(idStr);
-      }
-    }
-
-    // Check enabled state
-    wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
-    if (enabledVal && api->value_is_bool(enabledVal)) {
-      [nsItem setEnabled:api->value_get_bool(enabledVal)];
-    } else {
-      [nsItem setEnabled:YES];
-    }
-
-    [menu addItem:nsItem];
-  }
-
-  return menu;
-}
+#ifdef _WIN32
+#include <win32_menu.h>
 
 static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
                                        wef_menu_click_fn on_click,
                                        void* on_click_data) {
   if (!menu_template) return;
-
-  // Store callback
-  g_menu_click_fn = on_click;
-  g_menu_click_data = on_click_data;
-
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  // Need a reference to the API for value accessors
+  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  if (!browser) return;
+
   const wef_backend_api_t* api = &loader->GetBackendApi();
 
-  // Build the menu on the UI thread
-  // We need to copy the template since it may be freed after this call returns.
-  // For simplicity, we'll build the menu structure here and post to UI thread.
-  // Since CefPostTask requires the work to happen on the UI thread for NSMenu,
-  // we do the parsing here (safe from any thread) and post the NSMenu creation.
-
-  // Parse on current thread, create NSMenu on UI thread
-  // Actually, NSMenu creation must happen on the main thread.
-  // Let's just post the whole thing to the UI thread.
-
-  // We need to capture the value. Since wef_value_t is backend-owned,
-  // we need to build the NSMenu directly. Use dispatch_async for macOS.
-  dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menubar = BuildMenuFromValue(menu_template, api);
-    if (menubar) {
-      // The top-level menu is a list of submenus, each becoming a menubar item.
-      // BuildMenuFromValue already creates the structure correctly.
-      [NSApp setMainMenu:menubar];
-    }
-  });
+  CefPostTask(TID_UI, base::BindOnce(
+      [](CefRefPtr<CefBrowser> b, wef_value_t* tmpl, const wef_backend_api_t* a,
+         wef_menu_click_fn fn, void* d) {
+        HWND hwnd = b->GetHost()->GetWindowHandle();
+        if (hwnd) {
+          win32_menu::SetApplicationMenu(hwnd, tmpl, a, fn, d);
+        }
+      },
+      browser, menu_template, api, on_click, on_click_data));
 }
+#else
+// Defined in runtime_loader.mm
+extern void Backend_SetApplicationMenu_Mac(void* data, wef_value_t* menu_template,
+                                           wef_menu_click_fn on_click,
+                                           void* on_click_data);
+#endif
+
+// --- InitializeBackendApi ---
 
 static uint32_t Backend_CreateWindow(void* data) {
   auto* loader = RuntimeLoader::GetInstance();
@@ -1159,7 +697,7 @@ static uint32_t Backend_CreateWindow(void* data) {
     CefBrowserSettings browser_settings;
     CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
         handler, "about:blank", browser_settings, nullptr, nullptr, nullptr);
-    CefWindow::CreateTopLevelWindow(CreateWefWindowDelegate(browser_view, wid));
+    CefWindow::CreateTopLevelWindow(new WefWindowDelegate(browser_view, wid));
   }, window_id));
 
   // Block until the browser is registered by OnAfterCreated, so that
@@ -1260,7 +798,13 @@ void RuntimeLoader::InitializeBackendApi() {
 
   backend_api_.get_window_handle = [](void*, uint32_t) -> void* { return nullptr; };
   backend_api_.get_display_handle = [](void*, uint32_t) -> void* { return nullptr; };
+#if defined(_WIN32)
+  backend_api_.get_window_handle_type = [](void*, uint32_t) -> int { return WEF_WINDOW_HANDLE_WIN32; };
+#elif defined(__APPLE__)
   backend_api_.get_window_handle_type = [](void*, uint32_t) -> int { return WEF_WINDOW_HANDLE_APPKIT; };
+#else
+  backend_api_.get_window_handle_type = [](void*, uint32_t) -> int { return WEF_WINDOW_HANDLE_X11; };
+#endif
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
@@ -1282,8 +826,14 @@ void RuntimeLoader::InitializeBackendApi() {
     loader->SetJsCallNotify(notify_fn, notify_data);
   };
 
+#ifdef _WIN32
   backend_api_.set_application_menu = Backend_SetApplicationMenu;
+#else
+  backend_api_.set_application_menu = Backend_SetApplicationMenu_Mac;
+#endif
 }
+
+// --- RuntimeLoader lifecycle ---
 
 RuntimeLoader::RuntimeLoader() {
   instance_ = this;
@@ -1293,7 +843,11 @@ RuntimeLoader::RuntimeLoader() {
 RuntimeLoader::~RuntimeLoader() {
   Shutdown();
   if (library_handle_) {
+#ifndef _WIN32
     dlclose(library_handle_);
+#else
+    FreeLibrary(static_cast<HMODULE>(library_handle_));
+#endif
   }
   instance_ = nullptr;
 }
@@ -1306,6 +860,7 @@ RuntimeLoader* RuntimeLoader::GetInstance() {
 }
 
 bool RuntimeLoader::Load(const std::string& path) {
+#ifndef _WIN32
   library_handle_ = dlopen(path.c_str(), RTLD_NOW | RTLD_LOCAL);
   if (!library_handle_) {
     std::cerr << "Failed to load runtime: " << dlerror() << std::endl;
@@ -1332,6 +887,34 @@ bool RuntimeLoader::Load(const std::string& path) {
     std::cerr << "Failed to find " << WEF_RUNTIME_SHUTDOWN_SYMBOL << ": " << dlerror() << std::endl;
     return false;
   }
+#else
+  library_handle_ = LoadLibraryA(path.c_str());
+  if (!library_handle_) {
+    std::cerr << "Failed to load runtime: error " << GetLastError() << std::endl;
+    return false;
+  }
+
+  init_fn_ = reinterpret_cast<wef_runtime_init_fn>(
+      GetProcAddress(static_cast<HMODULE>(library_handle_), WEF_RUNTIME_INIT_SYMBOL));
+  if (!init_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_INIT_SYMBOL << std::endl;
+    return false;
+  }
+
+  start_fn_ = reinterpret_cast<wef_runtime_start_fn>(
+      GetProcAddress(static_cast<HMODULE>(library_handle_), WEF_RUNTIME_START_SYMBOL));
+  if (!start_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_START_SYMBOL << std::endl;
+    return false;
+  }
+
+  shutdown_fn_ = reinterpret_cast<wef_runtime_shutdown_fn>(
+      GetProcAddress(static_cast<HMODULE>(library_handle_), WEF_RUNTIME_SHUTDOWN_SYMBOL));
+  if (!shutdown_fn_) {
+    std::cerr << "Failed to find " << WEF_RUNTIME_SHUTDOWN_SYMBOL << std::endl;
+    return false;
+  }
+#endif
 
   std::cout << "Runtime loaded successfully from: " << path << std::endl;
   return true;
