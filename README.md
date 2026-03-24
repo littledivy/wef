@@ -32,12 +32,12 @@ wef::main!(main);
 
 wef ships three backends today. The [CEF](./cef) backend embeds Chromium 144 and runs a multi-process architecture identical to a full browser — you get the same renderer, GPU process, and DevTools you would in Chrome, bundled into your app. The system [WebView](./webview) backend delegates to the platform's native web engine (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux), so the engine is never bundled and your app stays small. The [Servo](./servo) backend uses Mozilla's experimental Rust-based engine with GPU-accelerated rendering via WebRender; it is still early and the JS bridge is stubbed out.
 
-| | CEF | WebView | Servo |
-|---|---|---|---|
-| **macOS** | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
-| **Windows** | - | x86_64 | - |
-| **Linux** | - | x86_64, aarch64 | x86_64, aarch64 |
-| **Android** | - | 🔜 | - |
+| | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| **macOS** | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
+| **Windows** | x86_64 | x86_64 | - | x86_64 |
+| **Linux** | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
+| **Android** | - | 🔜 | - | - |
 
 | | Engine | Multi-process | Bundled | JS bridge |
 |---|---|---|---|---|
