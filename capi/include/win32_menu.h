@@ -1,0 +1,262 @@
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
+// Win32 application menu built from wef_value_t menu templates.
+
+#ifndef WEF_WIN32_MENU_H_
+#define WEF_WIN32_MENU_H_
+
+#include <windows.h>
+#include <string>
+#include <vector>
+#include <map>
+#include <wef.h>
+
+namespace win32_menu {
+
+// Stored menu state — maps command IDs to item string IDs.
+struct MenuState {
+  std::map<UINT, std::string> command_to_id;
+  wef_menu_click_fn on_click = nullptr;
+  void* on_click_data = nullptr;
+  UINT next_command_id = 0x8000; // Start above standard IDs
+
+  UINT AllocCommandId(const std::string& item_id) {
+    UINT id = next_command_id++;
+    command_to_id[id] = item_id;
+    return id;
+  }
+
+  void HandleCommand(UINT cmd) {
+    if (on_click) {
+      auto it = command_to_id.find(cmd);
+      if (it != command_to_id.end()) {
+        on_click(on_click_data, it->second.c_str());
+      }
+    }
+  }
+};
+
+inline MenuState& GetMenuState() {
+  static MenuState state;
+  return state;
+}
+
+// Parse accelerator string like "ctrl+shift+n" into display text.
+inline std::string FormatAccelerator(const std::string& accel) {
+  std::string result;
+  std::string lower = accel;
+  for (auto& c : lower) c = static_cast<char>(tolower(c));
+
+  size_t pos = 0;
+  std::vector<std::string> parts;
+  std::string remaining = lower;
+  while ((pos = remaining.find('+')) != std::string::npos) {
+    parts.push_back(remaining.substr(0, pos));
+    remaining = remaining.substr(pos + 1);
+  }
+  if (!remaining.empty()) parts.push_back(remaining);
+
+  for (const auto& part : parts) {
+    if (!result.empty()) result += "+";
+    if (part == "cmd" || part == "command" || part == "cmdorctrl" || part == "commandorcontrol") {
+      result += "Ctrl";
+    } else if (part == "shift") {
+      result += "Shift";
+    } else if (part == "alt" || part == "option") {
+      result += "Alt";
+    } else if (part == "ctrl" || part == "control") {
+      result += "Ctrl";
+    } else {
+      // Capitalize the key
+      std::string key = part;
+      if (!key.empty()) key[0] = static_cast<char>(toupper(key[0]));
+      result += key;
+    }
+  }
+  return result;
+}
+
+// Create a role-based menu item (standard operations).
+inline bool CreateRoleMenuItem(HMENU menu, const std::string& role) {
+  // Standard roles map to WM_COMMAND with standard edit control messages.
+  // Since we're in a WebView/CEF context, these are mostly informational.
+  MenuState& state = GetMenuState();
+
+  struct RoleEntry { const char* role; const char* label; };
+  static const RoleEntry roles[] = {
+    {"quit", "E&xit"},
+    {"copy", "&Copy"},
+    {"paste", "&Paste"},
+    {"cut", "Cu&t"},
+    {"selectall", "&Select All"},
+    {"selectAll", "&Select All"},
+    {"undo", "&Undo"},
+    {"redo", "&Redo"},
+    {"minimize", "Mi&nimize"},
+    {"close", "&Close"},
+    {"about", "&About"},
+  };
+
+  for (const auto& entry : roles) {
+    if (role == entry.role) {
+      UINT id = state.AllocCommandId(role);
+      AppendMenuA(menu, MF_STRING, id, entry.label);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Helper to free a wef_value_t* if non-null.
+inline void FreeVal(const wef_backend_api_t* api, wef_value_t* v) {
+  if (v) api->value_free(v);
+}
+
+// Recursively build an HMENU from a wef_value_t list.
+inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) {
+  if (!val || !api->value_is_list(val)) return nullptr;
+
+  HMENU menu = CreateMenu();
+  size_t count = api->value_list_size(val);
+
+  for (size_t i = 0; i < count; ++i) {
+    wef_value_t* itemVal = api->value_list_get(val, i);
+    if (!itemVal || !api->value_is_dict(itemVal)) { FreeVal(api, itemVal); continue; }
+
+    // Check for separator
+    wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
+    if (typeVal && api->value_is_string(typeVal)) {
+      size_t len = 0;
+      char* typeStr = api->value_get_string(typeVal, &len);
+      FreeVal(api, typeVal);
+      if (typeStr && std::string(typeStr) == "separator") {
+        AppendMenuA(menu, MF_SEPARATOR, 0, nullptr);
+        api->value_free_string(typeStr);
+        FreeVal(api, itemVal);
+        continue;
+      }
+      if (typeStr) api->value_free_string(typeStr);
+    }
+
+    // Check for role
+    wef_value_t* roleVal = api->value_dict_get(itemVal, "role");
+    if (roleVal && api->value_is_string(roleVal)) {
+      size_t len = 0;
+      char* roleStr = api->value_get_string(roleVal, &len);
+      FreeVal(api, roleVal);
+      if (roleStr) {
+        CreateRoleMenuItem(menu, roleStr);
+        api->value_free_string(roleStr);
+        FreeVal(api, itemVal);
+        continue;
+      }
+    }
+
+    // Regular item or submenu — needs a label
+    wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
+    if (!labelVal || !api->value_is_string(labelVal)) { FreeVal(api, labelVal); FreeVal(api, itemVal); continue; }
+
+    size_t labelLen = 0;
+    char* labelStr = api->value_get_string(labelVal, &labelLen);
+    FreeVal(api, labelVal);
+    if (!labelStr) { FreeVal(api, itemVal); continue; }
+    std::string label = labelStr;
+    api->value_free_string(labelStr);
+
+    // Append accelerator text
+    wef_value_t* accelVal = api->value_dict_get(itemVal, "accelerator");
+    if (accelVal && api->value_is_string(accelVal)) {
+      size_t accelLen = 0;
+      char* accelStr = api->value_get_string(accelVal, &accelLen);
+      if (accelStr) {
+        label += "\t" + FormatAccelerator(accelStr);
+        api->value_free_string(accelStr);
+      }
+    }
+    FreeVal(api, accelVal);
+
+    // Check for submenu
+    wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
+    if (submenuVal && api->value_is_list(submenuVal)) {
+      HMENU submenu = BuildMenuFromValue(submenuVal, api);
+      FreeVal(api, submenuVal);
+      if (submenu) {
+        AppendMenuA(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), label.c_str());
+      }
+      FreeVal(api, itemVal);
+      continue;
+    }
+    FreeVal(api, submenuVal);
+
+    // Regular clickable item
+    MenuState& state = GetMenuState();
+    std::string itemId;
+    wef_value_t* idVal = api->value_dict_get(itemVal, "id");
+    if (idVal && api->value_is_string(idVal)) {
+      size_t idLen = 0;
+      char* idStr = api->value_get_string(idVal, &idLen);
+      if (idStr) {
+        itemId = idStr;
+        api->value_free_string(idStr);
+      }
+    }
+    FreeVal(api, idVal);
+
+    UINT cmdId = state.AllocCommandId(itemId.empty() ? label : itemId);
+
+    UINT flags = MF_STRING;
+    wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
+    if (enabledVal && api->value_is_bool(enabledVal) && !api->value_get_bool(enabledVal)) {
+      flags |= MF_GRAYED;
+    }
+    FreeVal(api, enabledVal);
+
+    AppendMenuA(menu, flags, cmdId, label.c_str());
+    FreeVal(api, itemVal);
+  }
+
+  return menu;
+}
+
+// Set the application menu on a given HWND.
+// Call this from the UI thread.
+inline void SetApplicationMenu(HWND hwnd, wef_value_t* menu_template,
+                                const wef_backend_api_t* api,
+                                wef_menu_click_fn on_click,
+                                void* on_click_data) {
+  if (!menu_template || !hwnd) return;
+
+  MenuState& state = GetMenuState();
+  state.command_to_id.clear();
+  state.next_command_id = 0x8000;
+  state.on_click = on_click;
+  state.on_click_data = on_click_data;
+
+  // Destroy the old menu to avoid HMENU leak
+  HMENU oldMenu = GetMenu(hwnd);
+
+  HMENU menubar = BuildMenuFromValue(menu_template, api);
+  if (menubar) {
+    SetMenu(hwnd, menubar);
+    DrawMenuBar(hwnd);
+  }
+
+  if (oldMenu) {
+    DestroyMenu(oldMenu);
+  }
+}
+
+// Call this from WndProc on WM_COMMAND to dispatch menu clicks.
+inline bool HandleMenuCommand(WPARAM wParam) {
+  UINT cmd = LOWORD(wParam);
+  MenuState& state = GetMenuState();
+  auto it = state.command_to_id.find(cmd);
+  if (it != state.command_to_id.end()) {
+    state.HandleCommand(cmd);
+    return true;
+  }
+  return false;
+}
+
+} // namespace win32_menu
+
+#endif // WEF_WIN32_MENU_H_

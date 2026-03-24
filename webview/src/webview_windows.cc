@@ -2,6 +2,7 @@
 
 #include "runtime_loader.h"
 #include "wef_json.h"
+#include <win32_menu.h>
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -165,7 +166,7 @@ static std::string WideToUtf8(const std::wstring& wstr) {
 // WebView2 Backend
 // ============================================================================
 
-class WebView2Backend : public WebviewBackend {
+class WebView2Backend : public WefBackend {
  public:
   WebView2Backend(int width, int height, const std::string& title);
   ~WebView2Backend() override;
@@ -195,6 +196,13 @@ class WebView2Backend : public WebviewBackend {
   void Run() override;
 
   void HandleJsMessage(const std::wstring& json);
+
+  void SetApplicationMenu(wef_value_t* menu_template,
+                          const wef_backend_api_t* api,
+                          wef_menu_click_fn on_click,
+                          void* on_click_data) override {
+    win32_menu::SetApplicationMenu(hwnd_, menu_template, api, on_click, on_click_data);
+  }
 
  private:
   bool InitializeWebView();
@@ -289,6 +297,10 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
           WEF_KEY_RELEASED, key.c_str(), code.c_str(), modifiers, false);
       break;
     }
+    case WM_COMMAND:
+      if (win32_menu::HandleMenuCommand(wParam))
+        return 0;
+      break;
     case WM_DESTROY:
       PostQuitMessage(0);
       return 0;
@@ -762,6 +774,6 @@ void WebView2Backend::HandleJsMessage(const std::wstring& json) {
 // Factory Function
 // ============================================================================
 
-WebviewBackend* CreateWebviewBackend(int width, int height, const std::string& title) {
+WefBackend* CreateWefBackend(int width, int height, const std::string& title) {
   return new WebView2Backend(width, height, title);
 }
