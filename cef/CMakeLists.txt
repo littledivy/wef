@@ -183,4 +183,53 @@ elseif(OS_WINDOWS)
             "${CEF_TARGET_OUT_DIR}"
     VERBATIM
   )
+
+elseif(OS_LINUX)
+  set(CEF_WRAPPER_LIB "${CEF_ROOT}/libcef_dll_wrapper/libcef_dll_wrapper.a")
+  if(EXISTS "${CEF_WRAPPER_LIB}" AND NOT TARGET libcef_dll_wrapper)
+    add_library(libcef_dll_wrapper STATIC IMPORTED GLOBAL)
+    set_target_properties(libcef_dll_wrapper PROPERTIES
+      IMPORTED_LOCATION "${CEF_WRAPPER_LIB}"
+    )
+    target_include_directories(libcef_dll_wrapper INTERFACE
+      "${CEF_ROOT}"
+      "${CEF_ROOT}/include"
+    )
+  endif()
+
+  set(WEF_SRCS_COMMON
+    src/app.cc
+    src/app.h
+    src/runtime_loader.cc
+    src/runtime_loader.h
+  )
+
+  set(WEF_SRCS_LINUX
+    src/main_linux.cc
+    ${WEF_RENDERER_SRCS}
+  )
+
+  add_executable(${CEF_TARGET} ${WEF_SRCS_COMMON} ${WEF_SRCS_LINUX})
+  SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
+  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  target_include_directories(${CEF_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${WEF_INCLUDE_DIR}")
+
+  # Set RPATH so the executable finds libcef.so next to it
+  set_target_properties(${CEF_TARGET} PROPERTIES
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_WITH_INSTALL_RPATH TRUE
+  )
+
+  # Copy CEF binaries and resources to the output directory
+  add_custom_command(
+    TARGET ${CEF_TARGET}
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CEF_BINARY_DIR_RELEASE}"
+            "${CEF_TARGET_OUT_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${CEF_RESOURCE_DIR}"
+            "${CEF_TARGET_OUT_DIR}"
+    VERBATIM
+  )
 endif()

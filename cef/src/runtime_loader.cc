@@ -650,7 +650,7 @@ static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
 
 // --- Platform-specific menu (stub on Windows, implemented in runtime_loader.mm on macOS) ---
 
-#ifdef _WIN32
+#if defined(_WIN32)
 #include <win32_menu.h>
 
 static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
@@ -673,8 +673,8 @@ static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
       },
       browser, menu_template, api, on_click, on_click_data));
 }
-#else
-// Defined in runtime_loader.mm
+#elif defined(__APPLE__)
+// Defined in runtime_loader_mac.mm
 extern void Backend_SetApplicationMenu_Mac(void* data, wef_value_t* menu_template,
                                            wef_menu_click_fn on_click,
                                            void* on_click_data);
@@ -826,10 +826,13 @@ void RuntimeLoader::InitializeBackendApi() {
     loader->SetJsCallNotify(notify_fn, notify_data);
   };
 
-#ifdef _WIN32
+#if defined(_WIN32)
   backend_api_.set_application_menu = Backend_SetApplicationMenu;
-#else
+#elif defined(__APPLE__)
   backend_api_.set_application_menu = Backend_SetApplicationMenu_Mac;
+#else
+  // Linux: application menus not yet implemented
+  backend_api_.set_application_menu = [](void*, wef_value_t*, wef_menu_click_fn, void*) {};
 #endif
 }
 

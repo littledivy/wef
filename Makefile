@@ -1,20 +1,53 @@
 SHELL := /bin/bash
 
-# Detect architecture
+# ─── Platform Detection ─────────────────────────────────────────────
+
+UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
-ifeq ($(UNAME_M),arm64)
-  CEF_ARCH := macosarm64
-  PROJ_ARCH := arm64
+
+ifeq ($(UNAME_S),Darwin)
+  HOST_OS := macos
+else ifeq ($(UNAME_S),Linux)
+  HOST_OS := linux
 else
-  CEF_ARCH := macosx64
+  # MSYS2, MINGW, Git Bash on Windows
+  HOST_OS := windows
+endif
+
+ifeq ($(filter arm64 aarch64,$(UNAME_M)),)
+  HOST_ARCH := x86_64
+else
+  HOST_ARCH := aarch64
+endif
+
+# ─── CEF Configuration ──────────────────────────────────────────────
+
+ifeq ($(HOST_OS),macos)
+  ifeq ($(HOST_ARCH),aarch64)
+    CEF_ARCH := macosarm64
+    PROJ_ARCH := arm64
+  else
+    CEF_ARCH := macosx64
+    PROJ_ARCH := x86_64
+  endif
+else ifeq ($(HOST_OS),linux)
+  ifeq ($(HOST_ARCH),aarch64)
+    CEF_ARCH := linuxarm64
+  else
+    CEF_ARCH := linux64
+  endif
+  PROJ_ARCH := $(HOST_ARCH)
+else ifeq ($(HOST_OS),windows)
+  CEF_ARCH := windows64
   PROJ_ARCH := x86_64
 endif
 
-# Homebrew prefix
-BREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
-LLVM_PREFIX := $(BREW_PREFIX)/opt/llvm
+ifeq ($(HOST_OS),windows)
+  LIB_EXT := .lib
+else
+  LIB_EXT := .a
+endif
 
-# CEF configuration
 CEF_VERSION := 144.0.11
 CEF_FULL_VERSION := 144.0.11+ge135be2+chromium-144.0.7559.97
 CEF_URL_VERSION := $(subst +,%2B,$(CEF_FULL_VERSION))
@@ -25,8 +58,13 @@ CEF_SRC := $(CEF_DIR)/src
 CEF_BUILD := $(CEF_DIR)/build
 CEF_ROOT := $(CEF_DIR)/install
 
-# Environment for Rust builds that need bindgen/clang
-export LIBCLANG_PATH := $(LLVM_PREFIX)/lib
+# ─── Environment ────────────────────────────────────────────────────
+
+ifeq ($(HOST_OS),macos)
+  BREW_PREFIX := $(shell brew --prefix 2>/dev/null || echo /opt/homebrew)
+  LLVM_PREFIX := $(BREW_PREFIX)/opt/llvm
+  export LIBCLANG_PATH := $(LLVM_PREFIX)/lib
+endif
 
 # Output directories
 BUILD_DIR := $(CURDIR)/build
@@ -34,7 +72,7 @@ BUILD_DIR := $(CURDIR)/build
 .PHONY: all clean check-deps help
 .PHONY: runtimes hello-runtime ddcore-runtime
 .PHONY: winit webview cef servo
-.PHONY: cef-deps cef-wrapper
+.PHONY: cef-deps
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -45,19 +83,21 @@ all: runtimes winit webview cef servo ## Build all backends
 check-deps: ## Check that required build tools are installed
 	@echo "Checking build dependencies..."
 	@command -v cargo >/dev/null || (echo "ERROR: cargo not found. Install Rust: https://rustup.rs" && exit 1)
-	@command -v cmake >/dev/null || (echo "ERROR: cmake not found. Run: brew install cmake" && exit 1)
-	@command -v ninja >/dev/null || (echo "ERROR: ninja not found. Run: brew install ninja" && exit 1)
+	@command -v cmake >/dev/null || (echo "ERROR: cmake not found" && exit 1)
+	@command -v ninja >/dev/null || (echo "ERROR: ninja not found" && exit 1)
+ifeq ($(HOST_OS),macos)
 	@test -d "$(LLVM_PREFIX)" || (echo "ERROR: llvm not found. Run: brew install llvm" && exit 1)
+endif
 	@echo "All base dependencies OK."
 
 # ─── Runtimes ────────────────────────────────────────────────────────
 
 runtimes: hello-runtime ddcore-runtime ## Build all example runtimes
 
-hello-runtime: check-deps ## Build hello_runtime.dylib
+hello-runtime: check-deps ## Build hello_runtime
 	cargo build --release -p hello_runtime
 
-ddcore-runtime: check-deps ## Build ddcore_runtime.dylib
+ddcore-runtime: check-deps ## Build ddcore_runtime
 	cargo build --release -p ddcore_runtime
 
 # ─── Winit Backend ───────────────────────────────────────────────────
@@ -67,10 +107,10 @@ winit: check-deps ## Build the winit backend
 
 # ─── WebView Backend ─────────────────────────────────────────────────
 
-webview: check-deps ## Build the webview backend (Cocoa + WebKit)
-	cmake -G Ninja -B webview/build -S webview -DCMAKE_BUILD_TYPE=Release
+webview: check-deps ## Build the webview backend
+	cmake -G Ninja -B webview/build -S webview -DCMAKE_BUILD_TYPE=Release \
+		$(if $(WEBVIEW2_ROOT),-DWEBVIEW2_ROOT=$(WEBVIEW2_ROOT))
 	ninja -C webview/build
-	@echo "Built: webview/build/wef_webview.app"
 
 # ─── CEF Backend ─────────────────────────────────────────────────────
 
@@ -84,7 +124,7 @@ $(CEF_SRC)/CMakeLists.txt: $(CEF_TARBALL)
 	@mkdir -p $(CEF_SRC)
 	tar xf $(CEF_TARBALL) --strip-components=1 -C $(CEF_SRC)
 
-$(CEF_ROOT)/libcef_dll_wrapper/libcef_dll_wrapper.a: $(CEF_SRC)/CMakeLists.txt
+$(CEF_ROOT)/libcef_dll_wrapper/libcef_dll_wrapper$(LIB_EXT): $(CEF_SRC)/CMakeLists.txt
 	@echo "Building CEF dll_wrapper..."
 	cmake -G Ninja -B $(CEF_BUILD) -S $(CEF_SRC) \
 		-DCMAKE_BUILD_TYPE=Release \
@@ -96,16 +136,19 @@ $(CEF_ROOT)/libcef_dll_wrapper/libcef_dll_wrapper.a: $(CEF_SRC)/CMakeLists.txt
 	cp -r $(CEF_SRC)/include/* $(CEF_ROOT)/include/
 	cp -r $(CEF_SRC)/cmake/* $(CEF_ROOT)/cmake/
 	cp -r $(CEF_SRC)/Release/* $(CEF_ROOT)/Release/
-	cp $(CEF_BUILD)/libcef_dll_wrapper/libcef_dll_wrapper.a $(CEF_ROOT)/libcef_dll_wrapper/
+	@if [ -d "$(CEF_SRC)/Resources" ]; then \
+		mkdir -p $(CEF_ROOT)/Resources && \
+		cp -r $(CEF_SRC)/Resources/* $(CEF_ROOT)/Resources/; \
+	fi
+	cp $(CEF_BUILD)/libcef_dll_wrapper/libcef_dll_wrapper$(LIB_EXT) $(CEF_ROOT)/libcef_dll_wrapper/
 
-cef-deps: $(CEF_ROOT)/libcef_dll_wrapper/libcef_dll_wrapper.a ## Download and build CEF dependencies
+cef-deps: $(CEF_ROOT)/libcef_dll_wrapper/libcef_dll_wrapper$(LIB_EXT) ## Download and build CEF dependencies
 
 cef: check-deps cef-deps ## Build the CEF backend
 	cmake -G Ninja -B cef/build -S cef \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCEF_ROOT=$(CEF_ROOT)
 	ninja -C cef/build
-	@echo "Built: cef/build/Release/wef.app"
 
 # ─── Servo Backend ──────────────────────────────────────────────────
 
