@@ -269,7 +269,7 @@ static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer use
 // WebKitGTK Backend
 // ============================================================================
 
-class WebKitGTKBackend : public WebviewBackend {
+class WebKitGTKBackend : public WefBackend {
  public:
   WebKitGTKBackend(int width, int height, const std::string& title);
   ~WebKitGTKBackend() override;
@@ -299,6 +299,13 @@ class WebKitGTKBackend : public WebviewBackend {
   void Run() override;
 
   void HandleJsMessage(const char* json);
+
+  void SetApplicationMenu(wef_value_t* menu_template,
+                          const wef_backend_api_t* api,
+                          wef_menu_click_fn on_click,
+                          void* on_click_data) override {
+    // Linux GTK menus not yet implemented
+  }
 
  private:
   GtkWidget* window_;
@@ -704,6 +711,6 @@ void WebKitGTKBackend::HandleJsMessage(const char* jsonStr) {
 // Factory Function
 // ============================================================================
 
-WebviewBackend* CreateWebviewBackend(int width, int height, const std::string& title) {
+WefBackend* CreateWefBackend(int width, int height, const std::string& title) {
   return new WebKitGTKBackend(width, height, title);
 }

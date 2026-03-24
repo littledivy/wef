@@ -16,37 +16,28 @@ std::string g_runtime_path;
 
 namespace {
 WefHandler* g_handler = nullptr;
+}
 
-class WefWindowDelegate : public CefWindowDelegate {
- public:
-  explicit WefWindowDelegate(CefRefPtr<CefBrowserView> browser_view)
-      : browser_view_(browser_view) {}
+// WefWindowDelegate implementation
 
-  void OnWindowCreated(CefRefPtr<CefWindow> window) override {
-    window->AddChildView(browser_view_);
-    window->Show();
-    InstallNativeMouseMonitor();
-  }
+void WefWindowDelegate::OnWindowCreated(CefRefPtr<CefWindow> window) {
+  window->AddChildView(browser_view_);
+  window->Show();
+  InstallNativeMouseMonitor();
+}
 
-  void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
-    RemoveNativeMouseMonitor();
-    browser_view_ = nullptr;
-  }
+void WefWindowDelegate::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
+  RemoveNativeMouseMonitor();
+  browser_view_ = nullptr;
+}
 
-  bool CanClose(CefRefPtr<CefWindow> window) override {
-    CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
-    return browser ? browser->GetHost()->TryCloseBrowser() : true;
-  }
+bool WefWindowDelegate::CanClose(CefRefPtr<CefWindow> window) {
+  CefRefPtr<CefBrowser> browser = browser_view_->GetBrowser();
+  return browser ? browser->GetHost()->TryCloseBrowser() : true;
+}
 
-  CefSize GetPreferredSize(CefRefPtr<CefView> view) override {
-    return CefSize(800, 600);
-  }
-
- private:
-  CefRefPtr<CefBrowserView> browser_view_;
-  IMPLEMENT_REFCOUNTING(WefWindowDelegate);
-};
-
+CefSize WefWindowDelegate::GetPreferredSize(CefRefPtr<CefView> view) {
+  return CefSize(800, 600);
 }
 
 WefHandler::WefHandler() {

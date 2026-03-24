@@ -4,3 +4,5 @@ result
 vendor/
 build/
 */build/
+*/build*/
+webview/packages/

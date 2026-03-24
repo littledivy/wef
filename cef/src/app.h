@@ -8,8 +8,29 @@
 
 #include "include/cef_app.h"
 #include "include/cef_client.h"
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_window.h"
 
 extern std::string g_runtime_path;
+
+// Forward declarations for platform-specific mouse monitoring
+void InstallNativeMouseMonitor();
+void RemoveNativeMouseMonitor();
+
+class WefWindowDelegate : public CefWindowDelegate {
+ public:
+  explicit WefWindowDelegate(CefRefPtr<CefBrowserView> browser_view)
+      : browser_view_(browser_view) {}
+
+  void OnWindowCreated(CefRefPtr<CefWindow> window) override;
+  void OnWindowDestroyed(CefRefPtr<CefWindow> window) override;
+  bool CanClose(CefRefPtr<CefWindow> window) override;
+  CefSize GetPreferredSize(CefRefPtr<CefView> view) override;
+
+ private:
+  CefRefPtr<CefBrowserView> browser_view_;
+  IMPLEMENT_REFCOUNTING(WefWindowDelegate);
+};
 
 class WefHandler : public CefClient,
                    public CefLifeSpanHandler,

@@ -7,11 +7,28 @@ fn main() {
   let header = "include/wef.h";
   println!("cargo:rerun-if-changed={}", header);
 
-  let bindings = bindgen::Builder::default()
+  let mut builder = bindgen::Builder::default()
     .header(header)
     .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
     .allowlist_type("wef_.*")
-    .allowlist_var("WEF_.*")
+    .allowlist_var("WEF_.*");
+
+  // MSVC's bundled clang headers conflict with the system LLVM clang headers.
+  // Add compatibility flags to resolve wchar_t typedef redefinition and
+  // __declspec attribute errors.
+  if cfg!(target_os = "windows") {
+    builder = builder
+      .clang_arg("-fms-extensions")
+      .clang_arg("-fms-compatibility")
+      .clang_arg("-fdelayed-template-parsing")
+      .clang_arg("-fmsc-version=1950")
+      .clang_arg("-Wno-everything")
+      .clang_arg("--target=x86_64-pc-windows-msvc")
+      .clang_arg("-D_WCHAR_T_DEFINED")
+      .clang_arg("-D_NATIVE_WCHAR_T_DEFINED");
+  }
+
+  let bindings = builder
     .generate()
     .expect("Unable to generate bindings");
 

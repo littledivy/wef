@@ -1,0 +1,247 @@
+// Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
+
+#include <windows.h>
+#include <shellapi.h>
+
+#include <iostream>
+#include <string>
+#include <cstring>
+
+#include "include/cef_app.h"
+#include "include/cef_sandbox_win.h"
+#include "include/wrapper/cef_helpers.h"
+
+#include "app.h"
+#include "renderer_app.h"
+#include "runtime_loader.h"
+
+// Windows mouse/input monitor for CEF Views windows.
+// CEF Views creates its own HWND; we hook into it after window creation.
+
+static HHOOK g_mouse_hook = nullptr;
+
+static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
+  if (nCode >= 0) {
+    MOUSEHOOKSTRUCT* mhs = reinterpret_cast<MOUSEHOOKSTRUCT*>(lParam);
+    RuntimeLoader* loader = RuntimeLoader::GetInstance();
+
+    POINT pt = mhs->pt;
+    if (mhs->hwnd) {
+      ScreenToClient(mhs->hwnd, &pt);
+    }
+    double x = static_cast<double>(pt.x);
+    double y = static_cast<double>(pt.y);
+
+    uint32_t modifiers = 0;
+    if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= WEF_MOD_SHIFT;
+    if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= WEF_MOD_CONTROL;
+    if (GetKeyState(VK_MENU) & 0x8000) modifiers |= WEF_MOD_ALT;
+    if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) modifiers |= WEF_MOD_META;
+
+    switch (wParam) {
+      case WM_LBUTTONDOWN:
+        loader->DispatchMouseClickEvent(
+            WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
+        break;
+      case WM_LBUTTONUP:
+        loader->DispatchMouseClickEvent(
+            WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
+        break;
+      case WM_RBUTTONDOWN:
+        loader->DispatchMouseClickEvent(
+            WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
+        break;
+      case WM_RBUTTONUP:
+        loader->DispatchMouseClickEvent(
+            WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
+        break;
+      case WM_MBUTTONDOWN:
+        loader->DispatchMouseClickEvent(
+            WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
+        break;
+      case WM_MBUTTONUP:
+        loader->DispatchMouseClickEvent(
+            WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
+        break;
+      case WM_MOUSEMOVE:
+        loader->DispatchMouseMoveEvent(x, y, modifiers);
+        break;
+      case WM_MOUSEWHEEL: {
+        // In WH_MOUSE hook, wheel data is in MOUSEHOOKSTRUCTEX::mouseData
+        MOUSEHOOKSTRUCTEX* mhsx = reinterpret_cast<MOUSEHOOKSTRUCTEX*>(lParam);
+        short delta = HIWORD(mhsx->mouseData);
+        double delta_y = static_cast<double>(delta) / WHEEL_DELTA;
+        loader->DispatchWheelEvent(
+            0.0, delta_y, x, y, modifiers, WEF_WHEEL_DELTA_LINE);
+        break;
+      }
+    }
+  }
+  return CallNextHookEx(g_mouse_hook, nCode, wParam, lParam);
+}
+
+void InstallNativeMouseMonitor() {
+  if (g_mouse_hook) return;
+  g_mouse_hook = SetWindowsHookExW(WH_MOUSE, MouseProc, nullptr, GetCurrentThreadId());
+}
+
+void RemoveNativeMouseMonitor() {
+  if (g_mouse_hook) {
+    UnhookWindowsHookEx(g_mouse_hook);
+    g_mouse_hook = nullptr;
+  }
+}
+
+// --- Headless / forked worker support ---
+
+static int run_headless(const std::string& runtimePath) {
+  RuntimeLoader* loader = RuntimeLoader::GetInstance();
+  loader->SetBrowser(nullptr);
+
+  if (runtimePath.empty()) {
+    std::cerr << "No runtime library found for headless worker." << std::endl;
+    return 1;
+  }
+
+  if (!loader->Load(runtimePath)) {
+    std::cerr << "Failed to load runtime for headless worker." << std::endl;
+    return 1;
+  }
+
+  if (!loader->Start()) {
+    std::cerr << "Failed to start headless worker runtime." << std::endl;
+    return 1;
+  }
+
+  loader->Shutdown();
+  return 0;
+}
+
+static bool is_forked_worker() {
+  // Windows equivalent of checking NODE_CHANNEL_FD / NEXT_PRIVATE_WORKER
+  char buf[2];
+  return GetEnvironmentVariableA("NODE_CHANNEL_FD", buf, sizeof(buf)) > 0
+      || GetEnvironmentVariableA("NEXT_PRIVATE_WORKER", buf, sizeof(buf)) > 0;
+}
+
+static bool is_cli_worker_command(int argc, LPWSTR* argv) {
+  if (argc < 3 || wcscmp(argv[1], L"run") != 0) {
+    return false;
+  }
+  for (int i = 2; i < argc; ++i) {
+    if (argv[i][0] == L'-') {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+// Combined app that handles both browser and renderer processes (single-exe model)
+class WefCombinedApp : public CefApp,
+                       public CefBrowserProcessHandler {
+ public:
+  WefCombinedApp() : renderer_app_(new WefRendererApp()) {}
+
+  CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override {
+    return this;
+  }
+
+  CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override {
+    return renderer_app_->GetRenderProcessHandler();
+  }
+
+  void OnBeforeCommandLineProcessing(
+      const CefString& process_type,
+      CefRefPtr<CefCommandLine> command_line) override {
+    // No macOS-specific flags needed on Windows
+  }
+
+  void OnContextInitialized() override {
+    CEF_REQUIRE_UI_THREAD();
+
+    if (!g_runtime_path.empty()) {
+      if (!RuntimeLoader::GetInstance()->Load(g_runtime_path)) {
+        std::cerr << "Failed to load runtime, exiting" << std::endl;
+        CefQuitMessageLoop();
+        return;
+      }
+    }
+
+    CefRefPtr<WefHandler> handler(new WefHandler());
+    CefBrowserSettings browser_settings;
+
+    std::string initial_url = g_runtime_path.empty() ? "https://example.com" : "about:blank";
+
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+        handler, initial_url, browser_settings, nullptr, nullptr, nullptr);
+
+    CefWindow::CreateTopLevelWindow(
+        new WefWindowDelegate(browser_view));
+  }
+
+ private:
+  CefRefPtr<WefRendererApp> renderer_app_;
+  IMPLEMENT_REFCOUNTING(WefCombinedApp);
+};
+
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+                   LPSTR lpCmdLine, int nCmdShow) {
+  CefMainArgs main_args(hInstance);
+
+  // Single-exe model: check if we are a subprocess first
+  CefRefPtr<WefCombinedApp> app(new WefCombinedApp());
+  int exit_code = CefExecuteProcess(main_args, app, nullptr);
+  if (exit_code >= 0) {
+    return exit_code;
+  }
+
+  // Parse --runtime argument
+  int argc;
+  LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+  if (argv) {
+    for (int i = 1; i < argc; ++i) {
+      if (wcscmp(argv[i], L"--runtime") == 0 && i + 1 < argc) {
+        ++i;
+        int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);
+        g_runtime_path.resize(size - 1);
+        WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, &g_runtime_path[0], size, nullptr, nullptr);
+      }
+    }
+  }
+
+  if (g_runtime_path.empty()) {
+    char envPath[MAX_PATH];
+    if (GetEnvironmentVariableA("WEF_RUNTIME_PATH", envPath, MAX_PATH) > 0) {
+      g_runtime_path = envPath;
+    }
+  }
+
+  // Check for headless / forked worker mode (skip CEF entirely)
+  if (is_forked_worker() || (argv && is_cli_worker_command(argc, argv))) {
+    if (argv) LocalFree(argv);
+    return run_headless(g_runtime_path);
+  }
+  if (argv) LocalFree(argv);
+
+  CefSettings settings;
+  settings.no_sandbox = true;
+
+  // Set cache path
+  char tempPath[MAX_PATH];
+  GetTempPathA(MAX_PATH, tempPath);
+  std::string cache_path = std::string(tempPath) + "wef_cef_" + std::to_string(GetCurrentProcessId());
+  CefString(&settings.root_cache_path) = cache_path;
+
+  if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
+    return 1;
+  }
+
+  CefRunMessageLoop();
+
+  RuntimeLoader::GetInstance()->Shutdown();
+
+  CefShutdown();
+
+  return 0;
+}
