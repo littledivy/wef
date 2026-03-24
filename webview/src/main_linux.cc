@@ -49,7 +49,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  WefBackend* backend = CreateWefBackend(800, 600, "WEF Webview");
+  WefBackend* backend = CreateWefBackend();
 
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
   loader->SetBackend(backend);

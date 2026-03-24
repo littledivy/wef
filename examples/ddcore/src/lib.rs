@@ -4,9 +4,12 @@ use deno_core::GarbageCollected;
 use deno_core::OpState;
 use serde::Serialize;
 use sysinfo::{ProcessesToUpdate, System};
-use wef::{navigate, quit, set_title, set_window_size};
+use wef::Window;
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
+
+static WINDOW_ID: AtomicU32 = AtomicU32::new(0);
 
 struct SendPtr<T>(*mut T);
 unsafe impl<T> Send for SendPtr<T> {}
@@ -36,18 +39,23 @@ unsafe impl GarbageCollected for BrowserWindow {
   }
 }
 
+fn wef_window() -> Window {
+  Window::from_id(WINDOW_ID.load(Ordering::SeqCst))
+}
+
 #[op2]
 impl BrowserWindow {
   #[constructor]
   #[cppgc]
   fn new(#[smi] width: i32, #[smi] height: i32) -> BrowserWindow {
-    set_window_size(width, height);
-    BrowserWindow {}
+    let window = Window::new(width, height);
+    WINDOW_ID.store(window.id(), Ordering::SeqCst);
+    BrowserWindow
   }
 
   #[fast]
   fn load(&self, #[string] url: &str) {
-    navigate(url);
+    wef_window().navigate(url);
   }
 
   #[fast]
@@ -58,27 +66,27 @@ impl BrowserWindow {
     } else {
       std::env::current_dir().unwrap().join(path)
     };
-    navigate(&format!("file://{}", abs.display()));
+    wef_window().navigate(&format!("file://{}", abs.display()));
   }
 
   #[fast]
   fn set_title(&self, #[string] title: &str) {
-    set_title(title);
+    wef_window().set_title(title);
   }
 
   #[fast]
   fn set_size(&self, #[smi] width: i32, #[smi] height: i32) {
-    set_window_size(width, height);
+    wef_window().set_size(width, height);
   }
 
   #[fast]
   fn execute_js(&self, #[string] script: &str) {
-    wef::execute_js::<fn(Result<wef::Value, wef::Value>)>(script, None);
+    wef_window().execute_js::<fn(Result<wef::Value, wef::Value>)>(script, None);
   }
 
   #[fast]
   fn quit(&self) {
-    quit();
+    wef::quit();
   }
 
   fn bind(
@@ -92,7 +100,7 @@ impl BrowserWindow {
 
 fn register_wef_binding(name: &str, callback: v8::Global<v8::Function>) {
   let cb = SendGlobal(callback);
-  wef::bind(&name.to_string(), move |call| {
+  wef_window().add_binding(name, move |call| {
     // SAFETY: poll_js_calls() dispatches to the runtime thread,
     // so this closure runs on the same thread that owns the v8 isolate.
     let result = unsafe {

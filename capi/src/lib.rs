@@ -22,7 +22,7 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
-pub const WEF_API_VERSION: u32 = 11;
+pub const WEF_API_VERSION: u32 = 12;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -37,8 +37,9 @@ unsafe impl Sync for WefBackendApi {}
 
 static BACKEND_API: OnceLock<&'static WefBackendApi> = OnceLock::new();
 static SHUTDOWN_FLAG: AtomicBool = AtomicBool::new(false);
-static BINDINGS: OnceLock<Mutex<HashMap<String, BindingHandler>>> =
-  OnceLock::new();
+static BINDINGS: OnceLock<
+  Mutex<HashMap<u32, HashMap<String, BindingHandler>>>,
+> = OnceLock::new();
 static JS_CALL_NOTIFY: OnceLock<Notify> = OnceLock::new();
 static MENU_CLICK_HANDLER: OnceLock<
   Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
@@ -59,7 +60,7 @@ fn api() -> &'static WefBackendApi {
   BACKEND_API.get().expect("Backend API not initialized")
 }
 
-fn bindings() -> &'static Mutex<HashMap<String, BindingHandler>> {
+fn bindings() -> &'static Mutex<HashMap<u32, HashMap<String, BindingHandler>>> {
   BINDINGS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -87,7 +88,6 @@ pub fn init_api(api: *const WefBackendApi) -> c_int {
 
 pub fn shutdown() {
   SHUTDOWN_FLAG.store(true, Ordering::SeqCst);
-  // Wake up run() so it can exit
   if let Some(notify) = JS_CALL_NOTIFY.get() {
     notify.notify_one();
   }
@@ -304,6 +304,7 @@ impl Value {
 }
 
 pub struct JsCall {
+  pub window_id: u32,
   pub call_id: u64,
   pub method: String,
   pub args: Vec<Value>,
@@ -333,6 +334,7 @@ impl JsCall {
 
 unsafe extern "C" fn js_call_handler(
   _user_data: *mut c_void,
+  window_id: u32,
   call_id: u64,
   method_path: *const c_char,
   args: *mut WefValue,
@@ -353,24 +355,27 @@ unsafe extern "C" fn js_call_handler(
   };
 
   let call = JsCall {
+    window_id,
     call_id,
     method: method.clone(),
     args: args_vec,
   };
 
   let bindings = bindings().lock().unwrap();
-  if let Some(handler) = bindings.get(&method) {
-    match handler {
-      BindingHandler::Sync(f) => f(call),
-      BindingHandler::Async(f) => {
-        let fut = f(call);
-        tokio::spawn(fut);
+  if let Some(window_bindings) = bindings.get(&window_id) {
+    if let Some(handler) = window_bindings.get(&method) {
+      match handler {
+        BindingHandler::Sync(f) => f(call),
+        BindingHandler::Async(f) => {
+          let fut = f(call);
+          tokio::spawn(fut);
+        }
       }
+      return;
     }
-  } else {
-    drop(bindings);
-    call.reject(Value::String(format!("No binding for '{}'", method)));
   }
+  drop(bindings);
+  call.reject(Value::String(format!("No binding for '{}'", method)));
 }
 
 fn register_js_handler() {
@@ -411,6 +416,13 @@ fn ensure_js_handler() {
   }
 }
 
+fn poll_js_calls() {
+  let api = api();
+  if let Some(f) = api.poll_js_calls {
+    unsafe { f(api.backend_data) };
+  }
+}
+
 /// Async event loop that dispatches JS calls as they arrive.
 /// Blocks until `should_shutdown()` returns true.
 pub async fn run() {
@@ -424,107 +436,281 @@ pub async fn run() {
   }
 }
 
-pub struct Window;
+pub fn quit() {
+  let api = api();
+  if let Some(f) = api.quit {
+    unsafe { f(api.backend_data) };
+  }
+}
+
+// --- Window ---
+
+pub struct Window {
+  id: u32,
+}
 
 impl Window {
   pub fn new(width: i32, height: i32) -> Self {
     let api = api();
+    let id = if let Some(f) = api.create_window {
+      unsafe { f(api.backend_data) }
+    } else {
+      0
+    };
+    let win = Window { id };
     if let Some(f) = api.set_window_size {
-      unsafe { f(api.backend_data, width, height) };
+      unsafe { f(api.backend_data, id, width, height) };
     }
-    Window
+    win
+  }
+
+  /// Wrap an existing window by its ID (does not create a new OS window).
+  pub fn from_id(id: u32) -> Self {
+    Window { id }
+  }
+
+  pub fn id(&self) -> u32 {
+    self.id
   }
 
   pub fn title(self, title: &str) -> Self {
+    self.set_title(title);
+    self
+  }
+
+  pub fn set_title(&self, title: &str) {
     let api = api();
     if let Some(f) = api.set_title {
       let c_title = CString::new(title).expect("Invalid title");
-      unsafe { f(api.backend_data, c_title.as_ptr()) };
+      unsafe { f(api.backend_data, self.id, c_title.as_ptr()) };
     }
-    self
   }
 
   pub fn load(self, path: &str) -> Self {
+    self.navigate(path);
+    self
+  }
+
+  pub fn navigate(&self, url: &str) {
     let api = api();
     if let Some(f) = api.navigate {
-      let c_path = CString::new(path).expect("Invalid path");
-      unsafe { f(api.backend_data, c_path.as_ptr()) };
+      let c_url = CString::new(url).expect("Invalid URL");
+      unsafe { f(api.backend_data, self.id, c_url.as_ptr()) };
     }
-    self
   }
 
   pub fn size(self, width: i32, height: i32) -> Self {
+    self.set_size(width, height);
+    self
+  }
+
+  pub fn set_size(&self, width: i32, height: i32) {
     let api = api();
     if let Some(f) = api.set_window_size {
-      unsafe { f(api.backend_data, width, height) };
+      unsafe { f(api.backend_data, self.id, width, height) };
     }
-    self
   }
 
   pub fn get_size(&self) -> (i32, i32) {
-    get_window_size()
+    let api = api();
+    let mut width: c_int = 0;
+    let mut height: c_int = 0;
+    if let Some(f) = api.get_window_size {
+      unsafe { f(api.backend_data, self.id, &mut width, &mut height) };
+    }
+    (width, height)
   }
 
   pub fn position(self, x: i32, y: i32) -> Self {
-    set_window_position(x, y);
+    self.set_position(x, y);
     self
+  }
+
+  pub fn set_position(&self, x: i32, y: i32) {
+    let api = api();
+    if let Some(f) = api.set_window_position {
+      unsafe { f(api.backend_data, self.id, x, y) };
+    }
   }
 
   pub fn get_position(&self) -> (i32, i32) {
-    get_window_position()
+    let api = api();
+    let mut x: c_int = 0;
+    let mut y: c_int = 0;
+    if let Some(f) = api.get_window_position {
+      unsafe { f(api.backend_data, self.id, &mut x, &mut y) };
+    }
+    (x, y)
   }
 
   pub fn resizable(self, resizable: bool) -> Self {
-    set_resizable(resizable);
+    self.set_resizable(resizable);
     self
+  }
+
+  pub fn set_resizable(&self, resizable: bool) {
+    let api = api();
+    if let Some(f) = api.set_resizable {
+      unsafe { f(api.backend_data, self.id, resizable) };
+    }
   }
 
   pub fn get_resizable(&self) -> bool {
-    is_resizable()
+    let api = api();
+    if let Some(f) = api.is_resizable {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      true
+    }
   }
 
   pub fn always_on_top(self, always_on_top: bool) -> Self {
-    set_always_on_top(always_on_top);
+    self.set_always_on_top(always_on_top);
     self
   }
 
+  pub fn set_always_on_top(&self, always_on_top: bool) {
+    let api = api();
+    if let Some(f) = api.set_always_on_top {
+      unsafe { f(api.backend_data, self.id, always_on_top) };
+    }
+  }
+
   pub fn get_always_on_top(&self) -> bool {
-    is_always_on_top()
+    let api = api();
+    if let Some(f) = api.is_always_on_top {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      false
+    }
   }
 
   pub fn get_visible(&self) -> bool {
-    is_visible()
+    let api = api();
+    if let Some(f) = api.is_visible {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      true
+    }
   }
 
   pub fn show(&self) {
-    show();
+    let api = api();
+    if let Some(f) = api.show {
+      unsafe { f(api.backend_data, self.id) };
+    }
   }
 
   pub fn hide(&self) {
-    hide();
+    let api = api();
+    if let Some(f) = api.hide {
+      unsafe { f(api.backend_data, self.id) };
+    }
   }
 
   pub fn focus(&self) {
-    focus();
+    let api = api();
+    if let Some(f) = api.focus {
+      unsafe { f(api.backend_data, self.id) };
+    }
+  }
+
+  pub fn close(&self) {
+    let api = api();
+    if let Some(f) = api.close_window {
+      unsafe { f(api.backend_data, self.id) };
+    }
+  }
+
+  pub fn execute_js<F>(&self, script: &str, callback: Option<F>)
+  where
+    F: FnOnce(Result<Value, Value>) + Send + 'static,
+  {
+    let api = api();
+    if let Some(f) = api.execute_js {
+      let c_script = CString::new(script).expect("Invalid script");
+
+      match callback {
+        Some(cb_fn) => {
+          unsafe extern "C" fn trampoline(
+            result: *mut WefValue,
+            error: *mut WefValue,
+            user_data: *mut c_void,
+          ) {
+            let cb = Box::from_raw(
+              user_data as *mut Box<dyn FnOnce(Result<Value, Value>) + Send>,
+            );
+            if !error.is_null() {
+              if let Some(e) = Value::from_raw(error) {
+                cb(Err(e));
+                return;
+              }
+            }
+            let val = Value::from_raw(result).unwrap_or(Value::Null);
+            cb(Ok(val));
+          }
+
+          let cb: Box<Box<dyn FnOnce(Result<Value, Value>) + Send>> =
+            Box::new(Box::new(cb_fn));
+          let user_data = Box::into_raw(cb) as *mut c_void;
+
+          unsafe {
+            f(
+              api.backend_data,
+              self.id,
+              c_script.as_ptr(),
+              Some(trampoline),
+              user_data,
+            )
+          };
+        }
+        None => {
+          unsafe {
+            f(
+              api.backend_data,
+              self.id,
+              c_script.as_ptr(),
+              None,
+              std::ptr::null_mut(),
+            )
+          };
+        }
+      }
+    }
   }
 
   pub fn get_window_handle(&self) -> *mut c_void {
-    get_window_handle()
+    let api = api();
+    if let Some(f) = api.get_window_handle {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      std::ptr::null_mut()
+    }
   }
 
   pub fn get_display_handle(&self) -> *mut c_void {
-    get_display_handle()
+    let api = api();
+    if let Some(f) = api.get_display_handle {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      std::ptr::null_mut()
+    }
   }
 
   pub fn get_window_handle_type(&self) -> i32 {
-    get_window_handle_type()
+    let api = api();
+    if let Some(f) = api.get_window_handle_type {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      WEF_WINDOW_HANDLE_UNKNOWN
+    }
   }
 
   pub fn on_keyboard_event<F>(self, handler: F) -> Self
   where
     F: Fn(KeyboardEvent) + Send + Sync + 'static,
   {
-    on_keyboard_event(handler);
+    on_keyboard_event(self.id, handler);
     self
   }
 
@@ -532,7 +718,7 @@ impl Window {
   where
     F: Fn(MouseClickEvent) + Send + Sync + 'static,
   {
-    on_mouse_click(handler);
+    on_mouse_click(self.id, handler);
     self
   }
 
@@ -540,7 +726,7 @@ impl Window {
   where
     F: Fn(MouseMoveEvent) + Send + Sync + 'static,
   {
-    on_mouse_move(handler);
+    on_mouse_move(self.id, handler);
     self
   }
 
@@ -548,7 +734,7 @@ impl Window {
   where
     F: Fn(WheelEvent) + Send + Sync + 'static,
   {
-    on_wheel(handler);
+    on_wheel(self.id, handler);
     self
   }
 
@@ -556,7 +742,7 @@ impl Window {
   where
     F: Fn(CursorEnterLeaveEvent) + Send + Sync + 'static,
   {
-    on_cursor_enter_leave(handler);
+    on_cursor_enter_leave(self.id, handler);
     self
   }
 
@@ -564,7 +750,7 @@ impl Window {
   where
     F: Fn(FocusedEvent) + Send + Sync + 'static,
   {
-    on_focused(handler);
+    on_focused(self.id, handler);
     self
   }
 
@@ -572,7 +758,7 @@ impl Window {
   where
     F: Fn(ResizeEvent) + Send + Sync + 'static,
   {
-    on_resize(handler);
+    on_resize(self.id, handler);
     self
   }
 
@@ -580,17 +766,53 @@ impl Window {
   where
     F: Fn(MoveEvent) + Send + Sync + 'static,
   {
-    on_move(handler);
+    on_move(self.id, handler);
     self
+  }
+
+  pub fn on_close_requested<F>(self, handler: F) -> Self
+  where
+    F: Fn(CloseRequestedEvent) + Send + Sync + 'static,
+  {
+    on_close_requested(self.id, handler);
+    self
+  }
+
+  pub fn add_binding<F>(&self, name: &str, handler: F)
+  where
+    F: Fn(JsCall) + Send + Sync + 'static,
+  {
+    ensure_js_handler();
+    bindings()
+      .lock()
+      .unwrap()
+      .entry(self.id)
+      .or_default()
+      .insert(name.to_string(), BindingHandler::Sync(Box::new(handler)));
+  }
+
+  pub fn add_binding_async<F, Fut>(&self, name: &str, handler: F)
+  where
+    F: Fn(JsCall) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+  {
+    ensure_js_handler();
+    bindings()
+      .lock()
+      .unwrap()
+      .entry(self.id)
+      .or_default()
+      .insert(
+        name.to_string(),
+        BindingHandler::Async(Box::new(move |call| Box::pin(handler(call)))),
+      );
   }
 
   pub fn bind<F>(self, name: &str, handler: F) -> Self
   where
     F: Fn(JsCall) + Send + Sync + 'static,
   {
-    ensure_js_handler();
-    let mut bindings = bindings().lock().unwrap();
-    bindings.insert(name.to_string(), BindingHandler::Sync(Box::new(handler)));
+    self.add_binding(name, handler);
     self
   }
 
@@ -599,217 +821,16 @@ impl Window {
     F: Fn(JsCall) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
   {
-    ensure_js_handler();
-    let mut bindings = bindings().lock().unwrap();
-    bindings.insert(
-      name.to_string(),
-      BindingHandler::Async(Box::new(move |call| Box::pin(handler(call)))),
-    );
+    self.add_binding_async(name, handler);
     self
   }
-}
 
-pub fn navigate(url: &str) {
-  let api = api();
-  if let Some(f) = api.navigate {
-    let c_url = CString::new(url).expect("Invalid URL");
-    unsafe { f(api.backend_data, c_url.as_ptr()) };
-  }
-}
-
-pub fn set_title(title: &str) {
-  let api = api();
-  if let Some(f) = api.set_title {
-    let c_title = CString::new(title).expect("Invalid title");
-    unsafe { f(api.backend_data, c_title.as_ptr()) };
-  }
-}
-
-pub fn execute_js<F>(script: &str, callback: Option<F>)
-where
-  F: FnOnce(Result<Value, Value>) + Send + 'static,
-{
-  let api = api();
-  if let Some(f) = api.execute_js {
-    let c_script = CString::new(script).expect("Invalid script");
-
-    match callback {
-      Some(cb_fn) => {
-        unsafe extern "C" fn trampoline(
-          result: *mut WefValue,
-          error: *mut WefValue,
-          user_data: *mut c_void,
-        ) {
-          let cb = Box::from_raw(
-            user_data as *mut Box<dyn FnOnce(Result<Value, Value>) + Send>,
-          );
-          if !error.is_null() {
-            if let Some(e) = Value::from_raw(error) {
-              cb(Err(e));
-              return;
-            }
-          }
-          let val = Value::from_raw(result).unwrap_or(Value::Null);
-          cb(Ok(val));
-        }
-
-        let cb: Box<Box<dyn FnOnce(Result<Value, Value>) + Send>> =
-          Box::new(Box::new(cb_fn));
-        let user_data = Box::into_raw(cb) as *mut c_void;
-
-        unsafe {
-          f(
-            api.backend_data,
-            c_script.as_ptr(),
-            Some(trampoline),
-            user_data,
-          )
-        };
-      }
-      None => {
-        unsafe {
-          f(
-            api.backend_data,
-            c_script.as_ptr(),
-            None,
-            std::ptr::null_mut(),
-          )
-        };
-      }
+  pub fn unbind(&self, name: &str) {
+    let mut bindings = bindings().lock().unwrap();
+    if let Some(window_bindings) = bindings.get_mut(&self.id) {
+      window_bindings.remove(name);
     }
   }
-}
-
-pub fn quit() {
-  let api = api();
-  if let Some(f) = api.quit {
-    unsafe { f(api.backend_data) };
-  }
-}
-
-pub fn set_window_size(width: i32, height: i32) {
-  let api = api();
-  if let Some(f) = api.set_window_size {
-    unsafe { f(api.backend_data, width, height) };
-  }
-}
-
-pub fn get_window_size() -> (i32, i32) {
-  let api = api();
-  let mut width: c_int = 0;
-  let mut height: c_int = 0;
-  if let Some(f) = api.get_window_size {
-    unsafe { f(api.backend_data, &mut width, &mut height) };
-  }
-  (width, height)
-}
-
-pub fn set_window_position(x: i32, y: i32) {
-  let api = api();
-  if let Some(f) = api.set_window_position {
-    unsafe { f(api.backend_data, x, y) };
-  }
-}
-
-pub fn get_window_position() -> (i32, i32) {
-  let api = api();
-  let mut x: c_int = 0;
-  let mut y: c_int = 0;
-  if let Some(f) = api.get_window_position {
-    unsafe { f(api.backend_data, &mut x, &mut y) };
-  }
-  (x, y)
-}
-
-pub fn set_resizable(resizable: bool) {
-  let api = api();
-  if let Some(f) = api.set_resizable {
-    unsafe { f(api.backend_data, resizable) };
-  }
-}
-
-pub fn is_resizable() -> bool {
-  let api = api();
-  if let Some(f) = api.is_resizable {
-    unsafe { f(api.backend_data) }
-  } else {
-    true
-  }
-}
-
-pub fn set_always_on_top(always_on_top: bool) {
-  let api = api();
-  if let Some(f) = api.set_always_on_top {
-    unsafe { f(api.backend_data, always_on_top) };
-  }
-}
-
-pub fn is_always_on_top() -> bool {
-  let api = api();
-  if let Some(f) = api.is_always_on_top {
-    unsafe { f(api.backend_data) }
-  } else {
-    false
-  }
-}
-
-pub fn is_visible() -> bool {
-  let api = api();
-  if let Some(f) = api.is_visible {
-    unsafe { f(api.backend_data) }
-  } else {
-    true
-  }
-}
-
-pub fn show() {
-  let api = api();
-  if let Some(f) = api.show {
-    unsafe { f(api.backend_data) };
-  }
-}
-
-pub fn hide() {
-  let api = api();
-  if let Some(f) = api.hide {
-    unsafe { f(api.backend_data) };
-  }
-}
-
-pub fn focus() {
-  let api = api();
-  if let Some(f) = api.focus {
-    unsafe { f(api.backend_data) };
-  }
-}
-
-pub fn poll_js_calls() {
-  let api = api();
-  if let Some(f) = api.poll_js_calls {
-    unsafe { f(api.backend_data) };
-  }
-}
-
-pub fn bind<F>(name: &str, handler: F)
-where
-  F: Fn(JsCall) + Send + Sync + 'static,
-{
-  ensure_js_handler();
-  let mut bindings = bindings().lock().unwrap();
-  bindings.insert(name.to_string(), BindingHandler::Sync(Box::new(handler)));
-}
-
-pub fn bind_async<F, Fut>(name: &str, handler: F)
-where
-  F: Fn(JsCall) -> Fut + Send + Sync + 'static,
-  Fut: Future<Output = ()> + Send + 'static,
-{
-  ensure_js_handler();
-  let mut bindings = bindings().lock().unwrap();
-  bindings.insert(
-    name.to_string(),
-    BindingHandler::Async(Box::new(move |call| Box::pin(handler(call)))),
-  );
 }
 
 /// A menu item in an application menu template.
@@ -945,38 +966,6 @@ pub fn set_application_menu_raw(template: Value) {
   }
 }
 
-/// Returns the raw platform-specific window handle (e.g. NSView*, HWND, X11 Window, wl_surface*).
-/// Returns null if the backend does not support this.
-pub fn get_window_handle() -> *mut c_void {
-  let api = api();
-  if let Some(f) = api.get_window_handle {
-    unsafe { f(api.backend_data) }
-  } else {
-    std::ptr::null_mut()
-  }
-}
-
-/// Returns the raw platform-specific display handle (e.g. X11 Display*, wl_display*).
-/// Returns null on platforms that don't need one (macOS, Windows).
-pub fn get_display_handle() -> *mut c_void {
-  let api = api();
-  if let Some(f) = api.get_display_handle {
-    unsafe { f(api.backend_data) }
-  } else {
-    std::ptr::null_mut()
-  }
-}
-
-/// Returns the window handle type as a `WEF_WINDOW_HANDLE_*` constant.
-pub fn get_window_handle_type() -> i32 {
-  let api = api();
-  if let Some(f) = api.get_window_handle_type {
-    unsafe { f(api.backend_data) }
-  } else {
-    WEF_WINDOW_HANDLE_UNKNOWN
-  }
-}
-
 pub const WEF_KEY_PRESSED: i32 = 0;
 pub const WEF_KEY_RELEASED: i32 = 1;
 
@@ -1002,16 +991,6 @@ impl KeyModifiers {
       meta: flags & WEF_MOD_META != 0,
     }
   }
-}
-
-pub fn unbind(name: &str) {
-  static HANDLER_REGISTERED: AtomicBool = AtomicBool::new(false);
-  if !HANDLER_REGISTERED.swap(true, Ordering::SeqCst) {
-    register_js_handler();
-  }
-
-  let mut bindings = bindings().lock().unwrap();
-  bindings.remove(&name.to_string());
 }
 
 #[macro_export]

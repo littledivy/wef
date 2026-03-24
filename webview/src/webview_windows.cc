@@ -14,6 +14,8 @@
 
 #include <iostream>
 #include <string>
+#include <map>
+#include <mutex>
 
 using namespace Microsoft::WRL;
 
@@ -161,57 +163,26 @@ static std::string WideToUtf8(const std::wstring& wstr) {
   return result;
 }
 
-// ============================================================================
-// WebView2 Backend
-// ============================================================================
+// HWND → wef_id mapping
+static std::map<HWND, uint32_t> g_hwnd_to_wef_id;
+static std::mutex g_hwnd_mutex;
 
-class WebView2Backend : public WebviewBackend {
- public:
-  WebView2Backend(int width, int height, const std::string& title);
-  ~WebView2Backend() override;
+static uint32_t WefIdForHwnd(HWND hwnd) {
+  if (!hwnd) return 0;
+  std::lock_guard<std::mutex> lock(g_hwnd_mutex);
+  auto it = g_hwnd_to_wef_id.find(hwnd);
+  return it != g_hwnd_to_wef_id.end() ? it->second : 0;
+}
 
-  void Navigate(const std::string& url) override;
-  void SetTitle(const std::string& title) override;
-  void ExecuteJs(const std::string& script) override;
-  void Quit() override;
-  void SetWindowSize(int width, int height) override;
-  void GetWindowSize(int* width, int* height) override;
-  void SetWindowPosition(int x, int y) override;
-  void GetWindowPosition(int* x, int* y) override;
-  void SetResizable(bool resizable) override;
-  bool IsResizable() override;
-  void SetAlwaysOnTop(bool always_on_top) override;
-  bool IsAlwaysOnTop() override;
-  bool IsVisible() override;
-  void Show() override;
-  void Hide() override;
-  void Focus() override;
-  void PostUiTask(void (*task)(void*), void* data) override;
-
-  void InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) override;
-  void ReleaseJsCallback(uint64_t callback_id) override;
-  void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
-
-  void Run() override;
-
-  void HandleJsMessage(const std::wstring& json);
-
- private:
-  bool InitializeWebView();
-  static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-
-  HWND hwnd_;
-  ComPtr<ICoreWebView2Controller> controller_;
-  ComPtr<ICoreWebView2> webview_;
-  std::wstring pending_url_;
-  std::wstring pending_title_;
-  bool webview_ready_ = false;
-
-
-
-  int initial_width_;
-  int initial_height_;
-  std::string initial_title_;
+// Per-window state
+struct WinWindowState {
+  uint32_t window_id;
+  HWND hwnd;
+  ComPtr<ICoreWebView2Controller> controller;
+  ComPtr<ICoreWebView2> webview;
+  bool webview_ready = false;
+  std::wstring pending_url;
+  std::wstring pending_title;
 };
 
 // Custom window message for UI tasks
@@ -222,21 +193,92 @@ struct UiTaskData {
   void* data;
 };
 
+// ============================================================================
+// WebView2 Backend
+// ============================================================================
+
+class WebView2Backend;
+static WebView2Backend* g_win_backend = nullptr;
+
+class WebView2Backend : public WefBackend {
+ public:
+  WebView2Backend();
+  ~WebView2Backend() override;
+
+  void CreateWindow(uint32_t window_id, int width, int height) override;
+  void CloseWindow(uint32_t window_id) override;
+
+  void Navigate(uint32_t window_id, const std::string& url) override;
+  void SetTitle(uint32_t window_id, const std::string& title) override;
+  void ExecuteJs(uint32_t window_id, const std::string& script) override;
+  void Quit() override;
+  void SetWindowSize(uint32_t window_id, int width, int height) override;
+  void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void SetWindowPosition(uint32_t window_id, int x, int y) override;
+  void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
+  void SetResizable(uint32_t window_id, bool resizable) override;
+  bool IsResizable(uint32_t window_id) override;
+  void SetAlwaysOnTop(uint32_t window_id, bool always_on_top) override;
+  bool IsAlwaysOnTop(uint32_t window_id) override;
+  bool IsVisible(uint32_t window_id) override;
+  void Show(uint32_t window_id) override;
+  void Hide(uint32_t window_id) override;
+  void Focus(uint32_t window_id) override;
+  void PostUiTask(void (*task)(void*), void* data) override;
+
+  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) override;
+  void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) override;
+  void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
+
+  void Run() override;
+
+  void SetApplicationMenu(wef_value_t*, const wef_backend_api_t*, wef_menu_click_fn, void*) override {}
+
+  void HandleJsMessage(uint32_t window_id, const std::wstring& json);
+
+ private:
+  WinWindowState* GetWindow(uint32_t window_id);
+  void InitializeWebViewForWindow(uint32_t window_id, HWND hwnd);
+  static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+  std::map<uint32_t, WinWindowState> windows_;
+  std::mutex windows_mutex_;
+  bool class_registered_ = false;
+};
+
 LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-  WebView2Backend* backend = reinterpret_cast<WebView2Backend*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
+  uint32_t wid = WefIdForHwnd(hwnd);
 
   switch (msg) {
-    case WM_CREATE: {
-      CREATESTRUCT* cs = reinterpret_cast<CREATESTRUCT*>(lParam);
-      SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
+    case WM_SIZE: {
+      if (g_win_backend && wid > 0) {
+        std::lock_guard<std::mutex> lock(g_win_backend->windows_mutex_);
+        auto* state = g_win_backend->GetWindow(wid);
+        if (state && state->controller) {
+          RECT bounds;
+          GetClientRect(hwnd, &bounds);
+          state->controller->put_Bounds(bounds);
+        }
+      }
+      if (wid > 0) {
+        RECT rect;
+        GetClientRect(hwnd, &rect);
+        RuntimeLoader::GetInstance()->DispatchResizeEvent(
+            wid, rect.right - rect.left, rect.bottom - rect.top);
+      }
       return 0;
     }
-    case WM_SIZE:
-      if (backend && backend->controller_) {
-        RECT bounds;
-        GetClientRect(hwnd, &bounds);
-        backend->controller_->put_Bounds(bounds);
+    case WM_MOVE:
+      if (wid > 0) {
+        RuntimeLoader::GetInstance()->DispatchMoveEvent(
+            wid, (int)(short)LOWORD(lParam), (int)(short)HIWORD(lParam));
       }
+      return 0;
+    case WM_SETFOCUS:
+      if (wid > 0) RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
+      return 0;
+    case WM_KILLFOCUS:
+      if (wid > 0) RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
       return 0;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP:
@@ -246,6 +288,7 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
     case WM_MBUTTONUP:
     case WM_XBUTTONDOWN:
     case WM_XBUTTONUP: {
+      if (wid == 0) break;
       int state = (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
                    msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN)
                       ? WEF_MOUSE_PRESSED : WEF_MOUSE_RELEASED;
@@ -265,32 +308,47 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
       double x = static_cast<double>(GET_X_LPARAM(lParam));
       double y = static_cast<double>(GET_Y_LPARAM(lParam));
       uint32_t modifiers = keyboard::GetWefModifiers();
-      // TODO: track click_count for double-click support on Windows
       RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-          state, button, x, y, modifiers, 1);
+          wid, state, button, x, y, modifiers, 1);
       break;
     }
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
+      if (wid == 0) break;
       std::string key = keyboard::VirtualKeyToKey(wParam, lParam);
       std::string code = keyboard::VirtualKeyToCode(wParam, lParam);
       uint32_t modifiers = keyboard::GetWefModifiers();
       bool repeat = (lParam & (1 << 30)) != 0;
       RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
-          WEF_KEY_PRESSED, key.c_str(), code.c_str(), modifiers, repeat);
+          wid, WEF_KEY_PRESSED, key.c_str(), code.c_str(), modifiers, repeat);
       break;
     }
     case WM_KEYUP:
     case WM_SYSKEYUP: {
+      if (wid == 0) break;
       std::string key = keyboard::VirtualKeyToKey(wParam, lParam);
       std::string code = keyboard::VirtualKeyToCode(wParam, lParam);
       uint32_t modifiers = keyboard::GetWefModifiers();
       RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
-          WEF_KEY_RELEASED, key.c_str(), code.c_str(), modifiers, false);
+          wid, WEF_KEY_RELEASED, key.c_str(), code.c_str(), modifiers, false);
       break;
     }
+    case WM_CLOSE:
+      if (wid > 0) {
+        RuntimeLoader::GetInstance()->DispatchCloseRequestedEvent(wid);
+      }
+      // Check if any windows remain
+      {
+        std::lock_guard<std::mutex> lock(g_hwnd_mutex);
+        // Remove this window from map
+        g_hwnd_to_wef_id.erase(hwnd);
+        if (g_hwnd_to_wef_id.empty()) {
+          PostQuitMessage(0);
+        }
+      }
+      DestroyWindow(hwnd);
+      return 0;
     case WM_DESTROY:
-      PostQuitMessage(0);
       return 0;
     case WM_UI_TASK: {
       UiTaskData* taskData = reinterpret_cast<UiTaskData*>(lParam);
@@ -305,8 +363,8 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
   return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
-WebView2Backend::WebView2Backend(int width, int height, const std::string& title)
-    : initial_width_(width), initial_height_(height), initial_title_(title) {
+WebView2Backend::WebView2Backend() {
+  g_win_backend = this;
 
   // Register window class
   WNDCLASSEXW wc = {};
@@ -317,66 +375,91 @@ WebView2Backend::WebView2Backend(int width, int height, const std::string& title
   wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
   wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
   RegisterClassExW(&wc);
-
-  // Create window
-  std::wstring wtitle = Utf8ToWide(title);
-  hwnd_ = CreateWindowExW(
-      0,
-      L"WefWebView2",
-      wtitle.c_str(),
-      WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, CW_USEDEFAULT,
-      width, height,
-      nullptr,
-      nullptr,
-      GetModuleHandle(nullptr),
-      this
-  );
-
-  // Initialize WebView2
-  InitializeWebView();
+  class_registered_ = true;
 }
 
 WebView2Backend::~WebView2Backend() {
-  if (controller_) {
-    controller_->Close();
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  for (auto& [wid, state] : windows_) {
+    if (state.controller) state.controller->Close();
+    {
+      std::lock_guard<std::mutex> hlock(g_hwnd_mutex);
+      g_hwnd_to_wef_id.erase(state.hwnd);
+    }
   }
-  if (hwnd_) {
-    DestroyWindow(hwnd_);
-  }
+  windows_.clear();
+  g_win_backend = nullptr;
 }
 
-bool WebView2Backend::InitializeWebView() {
-  // Create WebView2 environment
-  HRESULT hr = CreateCoreWebView2EnvironmentWithOptions(
+WinWindowState* WebView2Backend::GetWindow(uint32_t window_id) {
+  auto it = windows_.find(window_id);
+  return it != windows_.end() ? &it->second : nullptr;
+}
+
+void WebView2Backend::CreateWindow(uint32_t window_id, int width, int height) {
+  HWND hwnd = CreateWindowExW(
+      0,
+      L"WefWebView2",
+      L"",
+      WS_OVERLAPPEDWINDOW,
+      CW_USEDEFAULT, CW_USEDEFAULT,
+      width, height,
+      nullptr, nullptr,
+      GetModuleHandle(nullptr),
+      nullptr
+  );
+
+  {
+    std::lock_guard<std::mutex> lock(g_hwnd_mutex);
+    g_hwnd_to_wef_id[hwnd] = window_id;
+  }
+
+  WinWindowState state;
+  state.window_id = window_id;
+  state.hwnd = hwnd;
+
+  {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    windows_[window_id] = state;
+  }
+
+  InitializeWebViewForWindow(window_id, hwnd);
+
+  ShowWindow(hwnd, SW_SHOW);
+  UpdateWindow(hwnd);
+}
+
+void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) {
+  CreateCoreWebView2EnvironmentWithOptions(
       nullptr, nullptr, nullptr,
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-          [this](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+          [this, window_id, hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
             if (FAILED(result)) {
               std::cerr << "Failed to create WebView2 environment" << std::endl;
               return result;
             }
 
-            // Create the WebView2 controller
             env->CreateCoreWebView2Controller(
-                hwnd_,
+                hwnd,
                 Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                    [this](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                    [this, window_id, hwnd](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
                       if (FAILED(result) || !controller) {
                         std::cerr << "Failed to create WebView2 controller" << std::endl;
                         return result;
                       }
 
-                      controller_ = controller;
-                      controller_->get_CoreWebView2(&webview_);
+                      std::lock_guard<std::mutex> lock(windows_mutex_);
+                      auto* state = GetWindow(window_id);
+                      if (!state) return S_OK;
 
-                      // Set bounds
+                      state->controller = controller;
+                      controller->get_CoreWebView2(&state->webview);
+
                       RECT bounds;
-                      GetClientRect(hwnd_, &bounds);
-                      controller_->put_Bounds(bounds);
+                      GetClientRect(hwnd, &bounds);
+                      controller->put_Bounds(bounds);
 
-                      // Add script message handler
-                      webview_->AddScriptToExecuteOnDocumentCreated(
+                      state->webview->AddScriptToExecuteOnDocumentCreated(
                           LR"JS(
 (function() {
   const pendingCalls = new Map();
@@ -478,30 +561,29 @@ bool WebView2Backend::InitializeWebView() {
 )JS",
                           nullptr);
 
-                      // Set up web message handler
-                      webview_->add_WebMessageReceived(
+                      uint32_t wid = window_id;
+                      state->webview->add_WebMessageReceived(
                           Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-                              [this](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                              [this, wid](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
                                 LPWSTR messageRaw;
                                 args->TryGetWebMessageAsString(&messageRaw);
                                 if (messageRaw) {
-                                  HandleJsMessage(messageRaw);
+                                  HandleJsMessage(wid, messageRaw);
                                   CoTaskMemFree(messageRaw);
                                 }
                                 return S_OK;
                               }).Get(),
                           nullptr);
 
-                      webview_ready_ = true;
+                      state->webview_ready = true;
 
-                      // Apply pending operations
-                      if (!pending_url_.empty()) {
-                        webview_->Navigate(pending_url_.c_str());
-                        pending_url_.clear();
+                      if (!state->pending_url.empty()) {
+                        state->webview->Navigate(state->pending_url.c_str());
+                        state->pending_url.clear();
                       }
-                      if (!pending_title_.empty()) {
-                        SetWindowTextW(hwnd_, pending_title_.c_str());
-                        pending_title_.clear();
+                      if (!state->pending_title.empty()) {
+                        SetWindowTextW(hwnd, state->pending_title.c_str());
+                        state->pending_title.clear();
                       }
 
                       return S_OK;
@@ -509,206 +591,212 @@ bool WebView2Backend::InitializeWebView() {
 
             return S_OK;
           }).Get());
-
-  return SUCCEEDED(hr);
 }
 
-void WebView2Backend::Navigate(const std::string& url) {
+void WebView2Backend::CloseWindow(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    if (state->controller) state->controller->Close();
+    {
+      std::lock_guard<std::mutex> hlock(g_hwnd_mutex);
+      g_hwnd_to_wef_id.erase(state->hwnd);
+    }
+    DestroyWindow(state->hwnd);
+    windows_.erase(window_id);
+  }
+}
+
+void WebView2Backend::Navigate(uint32_t window_id, const std::string& url) {
   std::wstring wurl = Utf8ToWide(url);
-  if (webview_ready_ && webview_) {
-    PostMessage(hwnd_, WM_UI_TASK, 0,
-        reinterpret_cast<LPARAM>(new UiTaskData{
-            [](void* data) {
-              auto* pair = static_cast<std::pair<WebView2Backend*, std::wstring>*>(data);
-              pair->first->webview_->Navigate(pair->second.c_str());
-              delete pair;
-            },
-            new std::pair<WebView2Backend*, std::wstring>(this, wurl)
-        }));
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (!state) return;
+  if (state->webview_ready && state->webview) {
+    state->webview->Navigate(wurl.c_str());
   } else {
-    pending_url_ = wurl;
+    state->pending_url = wurl;
   }
 }
 
-void WebView2Backend::SetTitle(const std::string& title) {
+void WebView2Backend::SetTitle(uint32_t window_id, const std::string& title) {
   std::wstring wtitle = Utf8ToWide(title);
-  if (webview_ready_) {
-    PostMessage(hwnd_, WM_UI_TASK, 0,
-        reinterpret_cast<LPARAM>(new UiTaskData{
-            [](void* data) {
-              auto* pair = static_cast<std::pair<HWND, std::wstring>*>(data);
-              SetWindowTextW(pair->first, pair->second.c_str());
-              delete pair;
-            },
-            new std::pair<HWND, std::wstring>(hwnd_, wtitle)
-        }));
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (!state) return;
+  if (state->webview_ready) {
+    SetWindowTextW(state->hwnd, wtitle.c_str());
   } else {
-    pending_title_ = wtitle;
+    state->pending_title = wtitle;
   }
 }
 
-void WebView2Backend::ExecuteJs(const std::string& script) {
-  if (!webview_ready_ || !webview_) return;
+void WebView2Backend::ExecuteJs(uint32_t window_id, const std::string& script) {
   std::wstring wscript = Utf8ToWide(script);
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            auto* pair = static_cast<std::pair<WebView2Backend*, std::wstring>*>(data);
-            pair->first->webview_->ExecuteScript(pair->second.c_str(), nullptr);
-            delete pair;
-          },
-          new std::pair<WebView2Backend*, std::wstring>(this, wscript)
-      }));
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state && state->webview_ready && state->webview) {
+    state->webview->ExecuteScript(wscript.c_str(), nullptr);
+  }
 }
 
 void WebView2Backend::Quit() {
-  PostMessage(hwnd_, WM_CLOSE, 0, 0);
+  PostQuitMessage(0);
 }
 
-void WebView2Backend::SetWindowSize(int width, int height) {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            auto* tuple = static_cast<std::tuple<HWND, int, int>*>(data);
-            SetWindowPos(std::get<0>(*tuple), nullptr, 0, 0,
-                         std::get<1>(*tuple), std::get<2>(*tuple),
-                         SWP_NOMOVE | SWP_NOZORDER);
-            delete tuple;
-          },
-          new std::tuple<HWND, int, int>(hwnd_, width, height)
-      }));
-}
-
-void WebView2Backend::GetWindowSize(int* width, int* height) {
-  RECT rect;
-  if (GetWindowRect(hwnd_, &rect)) {
-    if (width) *width = rect.right - rect.left;
-    if (height) *height = rect.bottom - rect.top;
+void WebView2Backend::SetWindowSize(uint32_t window_id, int width, int height) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    SetWindowPos(state->hwnd, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
   }
 }
 
-void WebView2Backend::SetWindowPosition(int x, int y) {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            auto* tuple = static_cast<std::tuple<HWND, int, int>*>(data);
-            SetWindowPos(std::get<0>(*tuple), nullptr,
-                         std::get<1>(*tuple), std::get<2>(*tuple),
-                         0, 0, SWP_NOSIZE | SWP_NOZORDER);
-            delete tuple;
-          },
-          new std::tuple<HWND, int, int>(hwnd_, x, y)
-      }));
-}
-
-void WebView2Backend::GetWindowPosition(int* x, int* y) {
-  RECT rect;
-  if (GetWindowRect(hwnd_, &rect)) {
-    if (x) *x = rect.left;
-    if (y) *y = rect.top;
+void WebView2Backend::GetWindowSize(uint32_t window_id, int* width, int* height) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    RECT rect;
+    if (GetWindowRect(state->hwnd, &rect)) {
+      if (width) *width = rect.right - rect.left;
+      if (height) *height = rect.bottom - rect.top;
+    }
   }
 }
 
-void WebView2Backend::SetResizable(bool resizable) {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            auto* tuple = static_cast<std::tuple<HWND, bool>*>(data);
-            HWND h = std::get<0>(*tuple);
-            bool r = std::get<1>(*tuple);
-            LONG style = GetWindowLong(h, GWL_STYLE);
-            if (r) {
-              style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
-            } else {
-              style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
-            }
-            SetWindowLong(h, GWL_STYLE, style);
-            delete tuple;
-          },
-          new std::tuple<HWND, bool>(hwnd_, resizable)
-      }));
+void WebView2Backend::SetWindowPosition(uint32_t window_id, int x, int y) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    SetWindowPos(state->hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+  }
 }
 
-bool WebView2Backend::IsResizable() {
-  LONG style = GetWindowLong(hwnd_, GWL_STYLE);
-  return (style & WS_THICKFRAME) != 0;
+void WebView2Backend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    RECT rect;
+    if (GetWindowRect(state->hwnd, &rect)) {
+      if (x) *x = rect.left;
+      if (y) *y = rect.top;
+    }
+  }
 }
 
-void WebView2Backend::SetAlwaysOnTop(bool always_on_top) {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            auto* tuple = static_cast<std::tuple<HWND, bool>*>(data);
-            SetWindowPos(std::get<0>(*tuple),
-                         std::get<1>(*tuple) ? HWND_TOPMOST : HWND_NOTOPMOST,
-                         0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
-            delete tuple;
-          },
-          new std::tuple<HWND, bool>(hwnd_, always_on_top)
-      }));
+void WebView2Backend::SetResizable(uint32_t window_id, bool resizable) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    LONG style = GetWindowLong(state->hwnd, GWL_STYLE);
+    if (resizable) {
+      style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
+    } else {
+      style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
+    }
+    SetWindowLong(state->hwnd, GWL_STYLE, style);
+  }
 }
 
-bool WebView2Backend::IsAlwaysOnTop() {
-  LONG ex_style = GetWindowLong(hwnd_, GWL_EXSTYLE);
-  return (ex_style & WS_EX_TOPMOST) != 0;
+bool WebView2Backend::IsResizable(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  return state ? (GetWindowLong(state->hwnd, GWL_STYLE) & WS_THICKFRAME) != 0 : false;
 }
 
-bool WebView2Backend::IsVisible() {
-  return IsWindowVisible(hwnd_) != FALSE;
+void WebView2Backend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    SetWindowPos(state->hwnd, always_on_top ? HWND_TOPMOST : HWND_NOTOPMOST,
+                 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+  }
 }
 
-void WebView2Backend::Show() {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            ShowWindow(static_cast<HWND>(data), SW_SHOW);
-          },
-          hwnd_
-      }));
+bool WebView2Backend::IsAlwaysOnTop(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  return state ? (GetWindowLong(state->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0 : false;
 }
 
-void WebView2Backend::Hide() {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            ShowWindow(static_cast<HWND>(data), SW_HIDE);
-          },
-          hwnd_
-      }));
+bool WebView2Backend::IsVisible(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  return state ? IsWindowVisible(state->hwnd) != FALSE : false;
 }
 
-void WebView2Backend::Focus() {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{
-          [](void* data) {
-            HWND h = static_cast<HWND>(data);
-            ShowWindow(h, SW_SHOW);
-            SetForegroundWindow(h);
-            SetFocus(h);
-          },
-          hwnd_
-      }));
+void WebView2Backend::Show(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) ShowWindow(state->hwnd, SW_SHOW);
+}
+
+void WebView2Backend::Hide(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) ShowWindow(state->hwnd, SW_HIDE);
+}
+
+void WebView2Backend::Focus(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    ShowWindow(state->hwnd, SW_SHOW);
+    SetForegroundWindow(state->hwnd);
+    SetFocus(state->hwnd);
+  }
 }
 
 void WebView2Backend::PostUiTask(void (*task)(void*), void* data) {
-  PostMessage(hwnd_, WM_UI_TASK, 0,
-      reinterpret_cast<LPARAM>(new UiTaskData{task, data}));
+  // Post to the first available window, or use a message-only window
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  if (!windows_.empty()) {
+    PostMessage(windows_.begin()->second.hwnd, WM_UI_TASK, 0,
+                reinterpret_cast<LPARAM>(new UiTaskData{task, data}));
+  }
 }
 
-void WebView2Backend::InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) {
+void WebView2Backend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) {
   std::string argsJson = json::Serialize(args);
   std::string script = "window.__wefInvokeCallback(" +
                        std::to_string(callback_id) + ", " + argsJson + ");";
-  ExecuteJs(script);
+  std::wstring wscript = Utf8ToWide(script);
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  if (window_id == 0) {
+    for (auto& [wid, state] : windows_) {
+      if (state.webview_ready && state.webview) {
+        state.webview->ExecuteScript(wscript.c_str(), nullptr);
+      }
+    }
+  } else {
+    auto* state = GetWindow(window_id);
+    if (state && state->webview_ready && state->webview) {
+      state->webview->ExecuteScript(wscript.c_str(), nullptr);
+    }
+  }
 }
 
-void WebView2Backend::ReleaseJsCallback(uint64_t callback_id) {
+void WebView2Backend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) {
   std::string script = "window.__wefReleaseCallback(" +
                        std::to_string(callback_id) + ");";
-  ExecuteJs(script);
+  std::wstring wscript = Utf8ToWide(script);
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  if (window_id == 0) {
+    for (auto& [wid, state] : windows_) {
+      if (state.webview_ready && state.webview) {
+        state.webview->ExecuteScript(wscript.c_str(), nullptr);
+      }
+    }
+  } else {
+    auto* state = GetWindow(window_id);
+    if (state && state->webview_ready && state->webview) {
+      state->webview->ExecuteScript(wscript.c_str(), nullptr);
+    }
+  }
 }
 
-void WebView2Backend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) {
+void WebView2Backend::RespondToJsCall(uint32_t window_id, uint64_t call_id,
+                                       wef::ValuePtr result, wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
   std::string script;
   if (error) {
@@ -719,13 +807,15 @@ void WebView2Backend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, we
     script = "window.__wefRespond(" + std::to_string(call_id) + ", " +
              resultJson + ", null);";
   }
-  ExecuteJs(script);
+  std::wstring wscript = Utf8ToWide(script);
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state && state->webview_ready && state->webview) {
+    state->webview->ExecuteScript(wscript.c_str(), nullptr);
+  }
 }
 
 void WebView2Backend::Run() {
-  ShowWindow(hwnd_, SW_SHOW);
-  UpdateWindow(hwnd_);
-
   MSG msg;
   while (GetMessage(&msg, nullptr, 0, 0)) {
     TranslateMessage(&msg);
@@ -733,7 +823,7 @@ void WebView2Backend::Run() {
   }
 }
 
-void WebView2Backend::HandleJsMessage(const std::wstring& json) {
+void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& json) {
   std::string jsonStr = WideToUtf8(json);
   wef::ValuePtr msg = json::ParseJson(jsonStr);
   if (!msg || !msg->IsDict()) return;
@@ -755,13 +845,13 @@ void WebView2Backend::HandleJsMessage(const std::wstring& json) {
   std::string method = methodIt->second->IsString() ? methodIt->second->GetString() : "";
   wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
-  RuntimeLoader::GetInstance()->OnJsCall(call_id, method, args);
+  RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
 }
 
 // ============================================================================
 // Factory Function
 // ============================================================================
 
-WebviewBackend* CreateWebviewBackend(int width, int height, const std::string& title) {
-  return new WebView2Backend(width, height, title);
+WefBackend* CreateWefBackend() {
+  return new WebView2Backend();
 }

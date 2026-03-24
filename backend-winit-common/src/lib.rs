@@ -2,10 +2,11 @@
 
 pub use winit;
 
+use std::collections::HashMap;
 use std::env;
 use std::ffi::{c_char, c_int, c_void};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicI32, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::thread;
 
@@ -20,7 +21,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 11;
+pub const WEF_API_VERSION: u32 = 12;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -40,12 +41,18 @@ pub struct WefValue {
   _opaque: [u8; 0],
 }
 
-pub type WefJsCallFn =
-  unsafe extern "C" fn(*mut c_void, u64, *const c_char, *mut WefValue);
+pub type WefJsCallFn = unsafe extern "C" fn(
+  *mut c_void,   // user_data
+  u32,           // window_id
+  u64,           // call_id
+  *const c_char, // method_path
+  *mut WefValue, // args
+);
 pub type WefJsResultFn =
   unsafe extern "C" fn(*mut WefValue, *mut WefValue, *mut c_void);
 pub type WefKeyboardEventFn = unsafe extern "C" fn(
   *mut c_void,   // user_data
+  u32,           // window_id
   c_int,         // state (0=pressed, 1=released)
   *const c_char, // key
   *const c_char, // code
@@ -54,12 +61,14 @@ pub type WefKeyboardEventFn = unsafe extern "C" fn(
 );
 pub type WefMouseMoveFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   f64,         // x
   f64,         // y
   u32,         // modifiers
 );
 pub type WefMouseClickFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   c_int,       // state (0=pressed, 1=released)
   c_int,       // button
   f64,         // x
@@ -69,6 +78,7 @@ pub type WefMouseClickFn = unsafe extern "C" fn(
 );
 pub type WefWheelFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   f64,         // delta_x
   f64,         // delta_y
   f64,         // x
@@ -78,6 +88,7 @@ pub type WefWheelFn = unsafe extern "C" fn(
 );
 pub type WefCursorEnterLeaveFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   c_int,       // entered (1=entered, 0=left)
   f64,         // x
   f64,         // y
@@ -85,17 +96,24 @@ pub type WefCursorEnterLeaveFn = unsafe extern "C" fn(
 );
 pub type WefFocusedFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   c_int,       // focused (1=gained, 0=lost)
 );
 pub type WefResizeFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   c_int,       // width
   c_int,       // height
 );
 pub type WefMoveFn = unsafe extern "C" fn(
   *mut c_void, // user_data
+  u32,         // window_id
   c_int,       // x
   c_int,       // y
+);
+pub type WefCloseRequestedFn = unsafe extern "C" fn(
+  *mut c_void, // user_data
+  u32,         // window_id
 );
 
 pub const WEF_WHEEL_DELTA_PIXEL: i32 = 0;
@@ -105,32 +123,36 @@ pub const WEF_WHEEL_DELTA_LINE: i32 = 1;
 pub struct WefBackendApi {
   pub version: u32,
   pub backend_data: *mut c_void,
-  pub navigate: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
-  pub set_title: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+  pub create_window: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
+  pub close_window: Option<unsafe extern "C" fn(*mut c_void, u32)>,
+  pub navigate: Option<unsafe extern "C" fn(*mut c_void, u32, *const c_char)>,
+  pub set_title: Option<unsafe extern "C" fn(*mut c_void, u32, *const c_char)>,
   pub execute_js: Option<
     unsafe extern "C" fn(
       *mut c_void,
+      u32,
       *const c_char,
       Option<WefJsResultFn>,
       *mut c_void,
     ),
   >,
   pub quit: Option<unsafe extern "C" fn(*mut c_void)>,
-  pub set_window_size: Option<unsafe extern "C" fn(*mut c_void, c_int, c_int)>,
+  pub set_window_size:
+    Option<unsafe extern "C" fn(*mut c_void, u32, c_int, c_int)>,
   pub get_window_size:
-    Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int)>,
+    Option<unsafe extern "C" fn(*mut c_void, u32, *mut c_int, *mut c_int)>,
   pub set_window_position:
-    Option<unsafe extern "C" fn(*mut c_void, c_int, c_int)>,
+    Option<unsafe extern "C" fn(*mut c_void, u32, c_int, c_int)>,
   pub get_window_position:
-    Option<unsafe extern "C" fn(*mut c_void, *mut c_int, *mut c_int)>,
-  pub set_resizable: Option<unsafe extern "C" fn(*mut c_void, bool)>,
-  pub is_resizable: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
-  pub set_always_on_top: Option<unsafe extern "C" fn(*mut c_void, bool)>,
-  pub is_always_on_top: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
-  pub is_visible: Option<unsafe extern "C" fn(*mut c_void) -> bool>,
-  pub show: Option<unsafe extern "C" fn(*mut c_void)>,
-  pub hide: Option<unsafe extern "C" fn(*mut c_void)>,
-  pub focus: Option<unsafe extern "C" fn(*mut c_void)>,
+    Option<unsafe extern "C" fn(*mut c_void, u32, *mut c_int, *mut c_int)>,
+  pub set_resizable: Option<unsafe extern "C" fn(*mut c_void, u32, bool)>,
+  pub is_resizable: Option<unsafe extern "C" fn(*mut c_void, u32) -> bool>,
+  pub set_always_on_top: Option<unsafe extern "C" fn(*mut c_void, u32, bool)>,
+  pub is_always_on_top: Option<unsafe extern "C" fn(*mut c_void, u32) -> bool>,
+  pub is_visible: Option<unsafe extern "C" fn(*mut c_void, u32) -> bool>,
+  pub show: Option<unsafe extern "C" fn(*mut c_void, u32)>,
+  pub hide: Option<unsafe extern "C" fn(*mut c_void, u32)>,
+  pub focus: Option<unsafe extern "C" fn(*mut c_void, u32)>,
   pub post_ui_task: Option<
     unsafe extern "C" fn(
       *mut c_void,
@@ -198,11 +220,11 @@ pub struct WefBackendApi {
     Option<unsafe extern "C" fn(*mut c_void, u64, *mut WefValue)>,
   pub release_js_callback: Option<unsafe extern "C" fn(*mut c_void, u64)>,
   pub get_window_handle:
-    Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
+    Option<unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void>,
   pub get_display_handle:
-    Option<unsafe extern "C" fn(*mut c_void) -> *mut c_void>,
+    Option<unsafe extern "C" fn(*mut c_void, u32) -> *mut c_void>,
   pub get_window_handle_type:
-    Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+    Option<unsafe extern "C" fn(*mut c_void, u32) -> c_int>,
   pub set_keyboard_event_handler: Option<
     unsafe extern "C" fn(*mut c_void, Option<WefKeyboardEventFn>, *mut c_void),
   >,
@@ -224,11 +246,12 @@ pub struct WefBackendApi {
   pub set_focused_handler: Option<
     unsafe extern "C" fn(*mut c_void, Option<WefFocusedFn>, *mut c_void),
   >,
-  pub set_resize_handler: Option<
-    unsafe extern "C" fn(*mut c_void, Option<WefResizeFn>, *mut c_void),
-  >,
-  pub set_move_handler: Option<
-    unsafe extern "C" fn(*mut c_void, Option<WefMoveFn>, *mut c_void),
+  pub set_resize_handler:
+    Option<unsafe extern "C" fn(*mut c_void, Option<WefResizeFn>, *mut c_void)>,
+  pub set_move_handler:
+    Option<unsafe extern "C" fn(*mut c_void, Option<WefMoveFn>, *mut c_void)>,
+  pub set_close_requested_handler: Option<
+    unsafe extern "C" fn(*mut c_void, Option<WefCloseRequestedFn>, *mut c_void),
   >,
   pub poll_js_calls: Option<unsafe extern "C" fn(*mut c_void)>,
   pub set_js_call_notify: Option<
@@ -442,6 +465,8 @@ pub fn create_api_base() -> WefBackendApi {
   WefBackendApi {
     version: WEF_API_VERSION,
     backend_data: std::ptr::null_mut(),
+    create_window: None,
+    close_window: None,
     navigate: None,
     set_title: None,
     execute_js: None,
@@ -509,64 +534,93 @@ pub fn create_api_base() -> WefBackendApi {
     set_focused_handler: None,
     set_resize_handler: None,
     set_move_handler: None,
+    set_close_requested_handler: None,
     poll_js_calls: None,
     set_js_call_notify: None,
     set_application_menu: None,
   }
 }
 
-// --- Window handle statics ---
+// --- Window ID counter ---
 
-static WINDOW_HANDLE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static NEXT_WINDOW_ID: AtomicU32 = AtomicU32::new(1);
+
+pub fn allocate_window_id() -> u32 {
+  NEXT_WINDOW_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+// --- Per-window handle storage ---
+
+static WINDOW_HANDLES: Mutex<Option<HashMap<u32, WindowHandleInfo>>> =
+  Mutex::new(None);
 static DISPLAY_HANDLE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static WINDOW_HANDLE_TYPE: AtomicI32 = AtomicI32::new(0);
 
+struct WindowHandleInfo {
+  handle: *mut c_void,
+}
+
+unsafe impl Send for WindowHandleInfo {}
+
 pub unsafe extern "C" fn backend_get_window_handle(
   _data: *mut c_void,
+  window_id: u32,
 ) -> *mut c_void {
-  WINDOW_HANDLE.load(Ordering::Acquire)
+  let map = WINDOW_HANDLES.lock().unwrap();
+  map
+    .as_ref()
+    .and_then(|m| m.get(&window_id))
+    .map(|info| info.handle)
+    .unwrap_or(std::ptr::null_mut())
 }
 
 pub unsafe extern "C" fn backend_get_display_handle(
   _data: *mut c_void,
+  _window_id: u32,
 ) -> *mut c_void {
   DISPLAY_HANDLE.load(Ordering::Acquire)
 }
 
 pub unsafe extern "C" fn backend_get_window_handle_type(
   _data: *mut c_void,
+  _window_id: u32,
 ) -> c_int {
   WINDOW_HANDLE_TYPE.load(Ordering::Acquire)
 }
 
-pub fn store_window_handles(window: &Window) {
+pub fn store_window_handles(window_id: u32, window: &Window) {
+  let mut handle_ptr = std::ptr::null_mut();
+
   if let Ok(wh) = window.window_handle() {
     match wh.as_raw() {
       #[cfg(target_os = "macos")]
       RawWindowHandle::AppKit(handle) => {
-        WINDOW_HANDLE
-          .store(handle.ns_view.as_ptr() as *mut c_void, Ordering::Release);
+        handle_ptr = handle.ns_view.as_ptr() as *mut c_void;
         WINDOW_HANDLE_TYPE.store(WEF_WINDOW_HANDLE_APPKIT, Ordering::Release);
       }
       #[cfg(target_os = "windows")]
       RawWindowHandle::Win32(handle) => {
-        WINDOW_HANDLE
-          .store(handle.hwnd.get() as *mut c_void, Ordering::Release);
+        handle_ptr = handle.hwnd.get() as *mut c_void;
         WINDOW_HANDLE_TYPE.store(WEF_WINDOW_HANDLE_WIN32, Ordering::Release);
       }
       #[cfg(target_os = "linux")]
       RawWindowHandle::Xlib(handle) => {
-        WINDOW_HANDLE.store(handle.window as *mut c_void, Ordering::Release);
+        handle_ptr = handle.window as *mut c_void;
         WINDOW_HANDLE_TYPE.store(WEF_WINDOW_HANDLE_X11, Ordering::Release);
       }
       #[cfg(target_os = "linux")]
       RawWindowHandle::Wayland(handle) => {
-        WINDOW_HANDLE
-          .store(handle.surface.as_ptr() as *mut c_void, Ordering::Release);
+        handle_ptr = handle.surface.as_ptr() as *mut c_void;
         WINDOW_HANDLE_TYPE.store(WEF_WINDOW_HANDLE_WAYLAND, Ordering::Release);
       }
       _ => {}
     }
+  }
+
+  {
+    let mut map = WINDOW_HANDLES.lock().unwrap();
+    let map = map.get_or_insert_with(HashMap::new);
+    map.insert(window_id, WindowHandleInfo { handle: handle_ptr });
   }
 
   if let Ok(dh) = window.display_handle() {
@@ -588,32 +642,29 @@ pub fn store_window_handles(window: &Window) {
   }
 }
 
-// --- Common backend state ---
+pub fn remove_window_handles(window_id: u32) {
+  let mut map = WINDOW_HANDLES.lock().unwrap();
+  if let Some(m) = map.as_mut() {
+    m.remove(&window_id);
+  }
+}
 
-pub struct CommonState {
+// --- Per-window common state ---
+
+pub struct WindowState {
   pub pending_title: Mutex<Option<String>>,
   pub pending_size: Mutex<Option<(i32, i32)>>,
   pub pending_position: Mutex<Option<(i32, i32)>>,
   pub pending_resizable: Mutex<Option<bool>>,
   pub pending_always_on_top: Mutex<Option<bool>>,
   pub pending_visible: Mutex<Option<bool>>,
-  pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
-  pub mouse_click_handler: Mutex<Option<(WefMouseClickFn, usize)>>,
-  pub mouse_move_handler: Mutex<Option<(WefMouseMoveFn, usize)>>,
-  pub wheel_handler: Mutex<Option<(WefWheelFn, usize)>>,
-  pub cursor_enter_leave_handler:
-    Mutex<Option<(WefCursorEnterLeaveFn, usize)>>,
-  pub focused_handler: Mutex<Option<(WefFocusedFn, usize)>>,
-  pub resize_handler: Mutex<Option<(WefResizeFn, usize)>>,
-  pub move_handler: Mutex<Option<(WefMoveFn, usize)>>,
   pub cursor_position: Mutex<(f64, f64)>,
-  // Double-click tracking for winit (which doesn't provide click_count natively)
   pub last_press_time: Mutex<Option<std::time::Instant>>,
   pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
   pub click_count: Mutex<i32>,
 }
 
-impl CommonState {
+impl WindowState {
   pub fn new() -> Self {
     Self {
       pending_title: Mutex::new(None),
@@ -622,6 +673,37 @@ impl CommonState {
       pending_resizable: Mutex::new(None),
       pending_always_on_top: Mutex::new(None),
       pending_visible: Mutex::new(None),
+      cursor_position: Mutex::new((0.0, 0.0)),
+      last_press_time: Mutex::new(None),
+      last_press_button: Mutex::new(None),
+      click_count: Mutex::new(0),
+    }
+  }
+}
+
+impl Default for WindowState {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+// --- Global event handler state (registered once, dispatches for all windows) ---
+
+pub struct EventHandlers {
+  pub keyboard_handler: Mutex<Option<(WefKeyboardEventFn, usize)>>,
+  pub mouse_click_handler: Mutex<Option<(WefMouseClickFn, usize)>>,
+  pub mouse_move_handler: Mutex<Option<(WefMouseMoveFn, usize)>>,
+  pub wheel_handler: Mutex<Option<(WefWheelFn, usize)>>,
+  pub cursor_enter_leave_handler: Mutex<Option<(WefCursorEnterLeaveFn, usize)>>,
+  pub focused_handler: Mutex<Option<(WefFocusedFn, usize)>>,
+  pub resize_handler: Mutex<Option<(WefResizeFn, usize)>>,
+  pub move_handler: Mutex<Option<(WefMoveFn, usize)>>,
+  pub close_requested_handler: Mutex<Option<(WefCloseRequestedFn, usize)>>,
+}
+
+impl EventHandlers {
+  pub fn new() -> Self {
+    Self {
       keyboard_handler: Mutex::new(None),
       mouse_click_handler: Mutex::new(None),
       mouse_move_handler: Mutex::new(None),
@@ -630,11 +712,48 @@ impl CommonState {
       focused_handler: Mutex::new(None),
       resize_handler: Mutex::new(None),
       move_handler: Mutex::new(None),
-      cursor_position: Mutex::new((0.0, 0.0)),
-      last_press_time: Mutex::new(None),
-      last_press_button: Mutex::new(None),
-      click_count: Mutex::new(0),
+      close_requested_handler: Mutex::new(None),
     }
+  }
+}
+
+impl Default for EventHandlers {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+// --- Common backend state holding per-window state + global handlers ---
+
+pub struct CommonState {
+  pub windows: Mutex<HashMap<u32, WindowState>>,
+  pub handlers: EventHandlers,
+}
+
+impl CommonState {
+  pub fn new() -> Self {
+    Self {
+      windows: Mutex::new(HashMap::new()),
+      handlers: EventHandlers::new(),
+    }
+  }
+
+  pub fn add_window(&self, window_id: u32) {
+    let mut windows = self.windows.lock().unwrap();
+    windows.insert(window_id, WindowState::new());
+  }
+
+  pub fn remove_window(&self, window_id: u32) {
+    let mut windows = self.windows.lock().unwrap();
+    windows.remove(&window_id);
+  }
+
+  pub fn with_window<F, R>(&self, window_id: u32, f: F) -> Option<R>
+  where
+    F: FnOnce(&WindowState) -> R,
+  {
+    let windows = self.windows.lock().unwrap();
+    windows.get(&window_id).map(f)
   }
 }
 
@@ -648,14 +767,36 @@ impl Default for CommonState {
 
 #[derive(Debug)]
 pub enum CommonEvent {
-  SetTitle,
-  SetWindowSize,
-  SetWindowPosition,
-  SetResizable,
-  SetAlwaysOnTop,
-  Show,
-  Hide,
-  Focus,
+  CreateWindow {
+    window_id: u32,
+  },
+  CloseWindow {
+    window_id: u32,
+  },
+  SetTitle {
+    window_id: u32,
+  },
+  SetWindowSize {
+    window_id: u32,
+  },
+  SetWindowPosition {
+    window_id: u32,
+  },
+  SetResizable {
+    window_id: u32,
+  },
+  SetAlwaysOnTop {
+    window_id: u32,
+  },
+  Show {
+    window_id: u32,
+  },
+  Hide {
+    window_id: u32,
+  },
+  Focus {
+    window_id: u32,
+  },
   Quit,
   UiTask {
     task: unsafe extern "C" fn(*mut c_void),
@@ -679,8 +820,37 @@ pub trait BackendAccess: Sized + 'static {
 #[macro_export]
 macro_rules! define_common_backend_fns {
   ($B:ty) => {
+    unsafe extern "C" fn backend_create_window(
+      _data: *mut ::std::ffi::c_void,
+    ) -> u32 {
+      let window_id = $crate::allocate_window_id();
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        state.common().add_window(window_id);
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::CreateWindow { window_id },
+          ),
+        );
+      }
+      window_id
+    }
+
+    unsafe extern "C" fn backend_close_window(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+    ) {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::CloseWindow { window_id },
+          ),
+        );
+      }
+    }
+
     unsafe extern "C" fn backend_set_title(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       title: *const ::std::ffi::c_char,
     ) {
       if title.is_null() {
@@ -690,10 +860,12 @@ macro_rules! define_common_backend_fns {
         .to_string_lossy()
         .into_owned();
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_title.lock().unwrap() = Some(title_str);
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_title.lock().unwrap() = Some(title_str);
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::SetTitle,
+            $crate::CommonEvent::SetTitle { window_id },
           ),
         );
       }
@@ -711,14 +883,17 @@ macro_rules! define_common_backend_fns {
 
     unsafe extern "C" fn backend_set_window_size(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       width: ::std::ffi::c_int,
       height: ::std::ffi::c_int,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_size.lock().unwrap() = Some((width, height));
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_size.lock().unwrap() = Some((width, height));
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::SetWindowSize,
+            $crate::CommonEvent::SetWindowSize { window_id },
           ),
         );
       }
@@ -726,38 +901,48 @@ macro_rules! define_common_backend_fns {
 
     unsafe extern "C" fn backend_get_window_size(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       width: *mut ::std::ffi::c_int,
       height: *mut ::std::ffi::c_int,
     ) {
+      let mut found = false;
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        if let Some((w, h)) = *state.common().pending_size.lock().unwrap() {
-          if !width.is_null() {
-            *width = w;
+        if let Some(()) = state.common().with_window(window_id, |ws| {
+          if let Some((w, h)) = *ws.pending_size.lock().unwrap() {
+            if !width.is_null() {
+              *width = w;
+            }
+            if !height.is_null() {
+              *height = h;
+            }
           }
-          if !height.is_null() {
-            *height = h;
-          }
-          return;
+        }) {
+          found = true;
         }
       }
-      if !width.is_null() {
-        *width = 0;
-      }
-      if !height.is_null() {
-        *height = 0;
+      if !found {
+        if !width.is_null() {
+          *width = 0;
+        }
+        if !height.is_null() {
+          *height = 0;
+        }
       }
     }
 
     unsafe extern "C" fn backend_set_window_position(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       x: ::std::ffi::c_int,
       y: ::std::ffi::c_int,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_position.lock().unwrap() = Some((x, y));
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_position.lock().unwrap() = Some((x, y));
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::SetWindowPosition,
+            $crate::CommonEvent::SetWindowPosition { window_id },
           ),
         );
       }
@@ -765,38 +950,47 @@ macro_rules! define_common_backend_fns {
 
     unsafe extern "C" fn backend_get_window_position(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       x: *mut ::std::ffi::c_int,
       y: *mut ::std::ffi::c_int,
     ) {
+      let mut found = false;
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        if let Some((px, py)) = *state.common().pending_position.lock().unwrap()
-        {
-          if !x.is_null() {
-            *x = px;
+        if let Some(()) = state.common().with_window(window_id, |ws| {
+          if let Some((px, py)) = *ws.pending_position.lock().unwrap() {
+            if !x.is_null() {
+              *x = px;
+            }
+            if !y.is_null() {
+              *y = py;
+            }
           }
-          if !y.is_null() {
-            *y = py;
-          }
-          return;
+        }) {
+          found = true;
         }
       }
-      if !x.is_null() {
-        *x = 0;
-      }
-      if !y.is_null() {
-        *y = 0;
+      if !found {
+        if !x.is_null() {
+          *x = 0;
+        }
+        if !y.is_null() {
+          *y = 0;
+        }
       }
     }
 
     unsafe extern "C" fn backend_set_resizable(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       resizable: bool,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_resizable.lock().unwrap() = Some(resizable);
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_resizable.lock().unwrap() = Some(resizable);
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::SetResizable,
+            $crate::CommonEvent::SetResizable { window_id },
           ),
         );
       }
@@ -804,22 +998,29 @@ macro_rules! define_common_backend_fns {
 
     unsafe extern "C" fn backend_is_resizable(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
     ) -> bool {
       <$B as $crate::BackendAccess>::get()
-        .and_then(|s| *s.common().pending_resizable.lock().unwrap())
+        .and_then(|s| {
+          s.common()
+            .with_window(window_id, |ws| *ws.pending_resizable.lock().unwrap())
+            .flatten()
+        })
         .unwrap_or(true)
     }
 
     unsafe extern "C" fn backend_set_always_on_top(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
       always_on_top: bool,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_always_on_top.lock().unwrap() =
-          Some(always_on_top);
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_always_on_top.lock().unwrap() = Some(always_on_top);
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::SetAlwaysOnTop,
+            $crate::CommonEvent::SetAlwaysOnTop { window_id },
           ),
         );
       }
@@ -827,47 +1028,72 @@ macro_rules! define_common_backend_fns {
 
     unsafe extern "C" fn backend_is_always_on_top(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
     ) -> bool {
       <$B as $crate::BackendAccess>::get()
-        .and_then(|s| *s.common().pending_always_on_top.lock().unwrap())
+        .and_then(|s| {
+          s.common()
+            .with_window(window_id, |ws| {
+              *ws.pending_always_on_top.lock().unwrap()
+            })
+            .flatten()
+        })
         .unwrap_or(false)
     }
 
     unsafe extern "C" fn backend_is_visible(
       _data: *mut ::std::ffi::c_void,
+      window_id: u32,
     ) -> bool {
       <$B as $crate::BackendAccess>::get()
-        .and_then(|s| *s.common().pending_visible.lock().unwrap())
+        .and_then(|s| {
+          s.common()
+            .with_window(window_id, |ws| *ws.pending_visible.lock().unwrap())
+            .flatten()
+        })
         .unwrap_or(true)
     }
 
-    unsafe extern "C" fn backend_show(_data: *mut ::std::ffi::c_void) {
+    unsafe extern "C" fn backend_show(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+    ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_visible.lock().unwrap() = Some(true);
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_visible.lock().unwrap() = Some(true);
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::Show,
+            $crate::CommonEvent::Show { window_id },
           ),
         );
       }
     }
 
-    unsafe extern "C" fn backend_hide(_data: *mut ::std::ffi::c_void) {
+    unsafe extern "C" fn backend_hide(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+    ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().pending_visible.lock().unwrap() = Some(false);
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_visible.lock().unwrap() = Some(false);
+        });
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::Hide,
+            $crate::CommonEvent::Hide { window_id },
           ),
         );
       }
     }
 
-    unsafe extern "C" fn backend_focus(_data: *mut ::std::ffi::c_void) {
+    unsafe extern "C" fn backend_focus(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+    ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(
-            $crate::CommonEvent::Focus,
+            $crate::CommonEvent::Focus { window_id },
           ),
         );
       }
@@ -898,7 +1124,7 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().keyboard_handler.lock().unwrap() =
+        *state.common().handlers.keyboard_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
       }
     }
@@ -909,7 +1135,7 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().mouse_click_handler.lock().unwrap() =
+        *state.common().handlers.mouse_click_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
       }
     }
@@ -920,7 +1146,7 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().mouse_move_handler.lock().unwrap() =
+        *state.common().handlers.mouse_move_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
       }
     }
@@ -931,7 +1157,7 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().wheel_handler.lock().unwrap() =
+        *state.common().handlers.wheel_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
       }
     }
@@ -942,8 +1168,12 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().cursor_enter_leave_handler.lock().unwrap() =
-          handler.map(|h| (h, user_data as usize));
+        *state
+          .common()
+          .handlers
+          .cursor_enter_leave_handler
+          .lock()
+          .unwrap() = handler.map(|h| (h, user_data as usize));
       }
     }
 
@@ -953,7 +1183,7 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().focused_handler.lock().unwrap() =
+        *state.common().handlers.focused_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
       }
     }
@@ -964,7 +1194,7 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().resize_handler.lock().unwrap() =
+        *state.common().handlers.resize_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
       }
     }
@@ -975,20 +1205,34 @@ macro_rules! define_common_backend_fns {
       user_data: *mut ::std::ffi::c_void,
     ) {
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
-        *state.common().move_handler.lock().unwrap() =
+        *state.common().handlers.move_handler.lock().unwrap() =
           handler.map(|h| (h, user_data as usize));
+      }
+    }
+
+    unsafe extern "C" fn backend_set_close_requested_handler(
+      _data: *mut ::std::ffi::c_void,
+      handler: Option<$crate::WefCloseRequestedFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        *state
+          .common()
+          .handlers
+          .close_requested_handler
+          .lock()
+          .unwrap() = handler.map(|h| (h, user_data as usize));
       }
     }
   };
 }
 
 /// Fill the common (window management) backend function pointers into an API struct.
-/// Call this after `create_api_base()`.
-///
-/// The function pointer names must match those generated by `define_common_backend_fns!`.
 #[macro_export]
 macro_rules! fill_common_api {
   ($api:expr) => {
+    $api.create_window = Some(backend_create_window);
+    $api.close_window = Some(backend_close_window);
     $api.set_title = Some(backend_set_title);
     $api.quit = Some(backend_quit);
     $api.set_window_size = Some(backend_set_window_size);
@@ -1016,112 +1260,120 @@ macro_rules! fill_common_api {
     $api.set_focused_handler = Some(backend_set_focused_handler);
     $api.set_resize_handler = Some(backend_set_resize_handler);
     $api.set_move_handler = Some(backend_set_move_handler);
+    $api.set_close_requested_handler =
+      Some(backend_set_close_requested_handler);
   };
 }
 
 // --- Common event handling ---
 
-/// Handle common window management events. Returns true if the event was handled.
+/// Handle common window management events on a specific window.
 pub fn handle_common_event<B: BackendAccess>(
   event: &CommonEvent,
+  window_id: u32,
   window: &Window,
 ) -> bool {
   match event {
-    CommonEvent::SetTitle => {
+    CommonEvent::SetTitle { window_id: eid, .. } if *eid == window_id => {
       if let Some(state) = B::get() {
-        if let Some(title) = state.common().pending_title.lock().unwrap().take()
-        {
-          window.set_title(&title);
-        }
+        state.common().with_window(window_id, |ws| {
+          if let Some(title) = ws.pending_title.lock().unwrap().take() {
+            window.set_title(&title);
+          }
+        });
       }
       true
     }
-    CommonEvent::SetWindowSize => {
+    CommonEvent::SetWindowSize { window_id: eid, .. } if *eid == window_id => {
       if let Some(state) = B::get() {
-        if let Some((w, h)) = state.common().pending_size.lock().unwrap().take()
-        {
-          let _ = window.request_inner_size(LogicalSize::new(w, h));
-        }
+        state.common().with_window(window_id, |ws| {
+          if let Some((w, h)) = ws.pending_size.lock().unwrap().take() {
+            let _ = window.request_inner_size(LogicalSize::new(w, h));
+          }
+        });
       }
       true
     }
-    CommonEvent::SetWindowPosition => {
+    CommonEvent::SetWindowPosition { window_id: eid, .. }
+      if *eid == window_id =>
+    {
       if let Some(state) = B::get() {
-        if let Some((x, y)) =
-          state.common().pending_position.lock().unwrap().take()
-        {
-          window.set_outer_position(LogicalPosition::new(x, y));
-        }
+        state.common().with_window(window_id, |ws| {
+          if let Some((x, y)) = ws.pending_position.lock().unwrap().take() {
+            window.set_outer_position(LogicalPosition::new(x, y));
+          }
+        });
       }
       true
     }
-    CommonEvent::SetResizable => {
+    CommonEvent::SetResizable { window_id: eid, .. } if *eid == window_id => {
       if let Some(state) = B::get() {
-        if let Some(resizable) =
-          *state.common().pending_resizable.lock().unwrap()
-        {
-          window.set_resizable(resizable);
-        }
+        state.common().with_window(window_id, |ws| {
+          if let Some(resizable) = *ws.pending_resizable.lock().unwrap() {
+            window.set_resizable(resizable);
+          }
+        });
       }
       true
     }
-    CommonEvent::SetAlwaysOnTop => {
+    CommonEvent::SetAlwaysOnTop { window_id: eid, .. } if *eid == window_id => {
       if let Some(state) = B::get() {
-        if let Some(on_top) =
-          *state.common().pending_always_on_top.lock().unwrap()
-        {
-          window.set_window_level(if on_top {
-            WindowLevel::AlwaysOnTop
-          } else {
-            WindowLevel::Normal
-          });
-        }
+        state.common().with_window(window_id, |ws| {
+          if let Some(on_top) = *ws.pending_always_on_top.lock().unwrap() {
+            window.set_window_level(if on_top {
+              WindowLevel::AlwaysOnTop
+            } else {
+              WindowLevel::Normal
+            });
+          }
+        });
       }
       true
     }
-    CommonEvent::Show => {
+    CommonEvent::Show { window_id: eid, .. } if *eid == window_id => {
       window.set_visible(true);
       true
     }
-    CommonEvent::Hide => {
+    CommonEvent::Hide { window_id: eid, .. } if *eid == window_id => {
       window.set_visible(false);
       true
     }
-    CommonEvent::Focus => {
+    CommonEvent::Focus { window_id: eid, .. } if *eid == window_id => {
       window.focus_window();
       true
     }
-    CommonEvent::Quit => false, // caller handles exit
     CommonEvent::UiTask { task, data } => {
       unsafe { task(*data as *mut c_void) };
       true
     }
+    CommonEvent::Quit => false, // caller handles exit
+    _ => false,
   }
 }
 
 /// Apply pending state to window attributes before creation.
 pub fn apply_pending_attrs(
-  common: &CommonState,
+  ws: &WindowState,
   mut attrs: winit::window::WindowAttributes,
 ) -> winit::window::WindowAttributes {
-  if let Some((w, h)) = *common.pending_size.lock().unwrap() {
+  if let Some((w, h)) = *ws.pending_size.lock().unwrap() {
     attrs = attrs.with_inner_size(LogicalSize::new(w, h));
   }
-  if let Some((x, y)) = *common.pending_position.lock().unwrap() {
+  if let Some((x, y)) = *ws.pending_position.lock().unwrap() {
     attrs = attrs.with_position(LogicalPosition::new(x, y));
   }
-  if let Some(resizable) = *common.pending_resizable.lock().unwrap() {
+  if let Some(resizable) = *ws.pending_resizable.lock().unwrap() {
     attrs = attrs.with_resizable(resizable);
   }
-  if let Some(title) = common.pending_title.lock().unwrap().as_ref() {
+  if let Some(title) = ws.pending_title.lock().unwrap().as_ref() {
     attrs = attrs.with_title(title.clone());
   }
   attrs
 }
 
 /// Apply post-creation pending state (e.g. always-on-top).
-pub fn apply_pending_post_create(common: &CommonState, window: &Window) {
-  if let Some(true) = *common.pending_always_on_top.lock().unwrap() {
+pub fn apply_pending_post_create(ws: &WindowState, window: &Window) {
+  if let Some(true) = *ws.pending_always_on_top.lock().unwrap() {
     window.set_window_level(WindowLevel::AlwaysOnTop);
   }
 }
@@ -1187,14 +1439,14 @@ pub fn winit_code_to_string(physical: &winit::keyboard::PhysicalKey) -> String {
   }
 }
 
-/// Dispatch a keyboard event to the registered handler on the CommonState.
-/// Call this from backend `window_event` handlers when processing `WindowEvent::KeyboardInput`.
+/// Dispatch a keyboard event to the registered handler.
 pub fn dispatch_keyboard_event(
-  common: &CommonState,
+  handlers: &EventHandlers,
+  window_id: u32,
   key_event: &winit::event::KeyEvent,
   modifiers: winit::keyboard::ModifiersState,
 ) {
-  let handler = common.keyboard_handler.lock().unwrap();
+  let handler = handlers.keyboard_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     let state = match key_event.state {
       winit::event::ElementState::Pressed => WEF_KEY_PRESSED,
@@ -1210,6 +1462,7 @@ pub fn dispatch_keyboard_event(
     unsafe {
       cb(
         user_data as *mut c_void,
+        window_id,
         state,
         c_key.as_ptr(),
         c_code.as_ptr(),
@@ -1232,18 +1485,20 @@ pub fn winit_button_to_wef(button: winit::event::MouseButton) -> c_int {
   }
 }
 
-/// Dispatch a mouse click event to the registered handler on the CommonState.
+/// Dispatch a mouse click event to the registered handler.
 /// Double-click interval (500ms is the standard across most platforms).
 const DOUBLE_CLICK_INTERVAL: std::time::Duration =
   std::time::Duration::from_millis(500);
 
 pub fn dispatch_mouse_click_event(
-  common: &CommonState,
+  handlers: &EventHandlers,
+  ws: &WindowState,
+  window_id: u32,
   button_state: winit::event::ElementState,
   button: winit::event::MouseButton,
   modifiers: winit::keyboard::ModifiersState,
 ) {
-  let handler = common.mouse_click_handler.lock().unwrap();
+  let handler = handlers.mouse_click_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     let state = match button_state {
       winit::event::ElementState::Pressed => WEF_MOUSE_PRESSED,
@@ -1253,15 +1508,14 @@ pub fn dispatch_mouse_click_event(
     if wef_button < 0 {
       return;
     }
-    let (x, y) = *common.cursor_position.lock().unwrap();
+    let (x, y) = *ws.cursor_position.lock().unwrap();
     let mods = modifiers_to_wef(modifiers);
 
-    // Compute click_count on press events (winit doesn't provide this natively)
     let click_count = if button_state == winit::event::ElementState::Pressed {
       let now = std::time::Instant::now();
-      let mut last_time = common.last_press_time.lock().unwrap();
-      let mut last_btn = common.last_press_button.lock().unwrap();
-      let mut count = common.click_count.lock().unwrap();
+      let mut last_time = ws.last_press_time.lock().unwrap();
+      let mut last_btn = ws.last_press_button.lock().unwrap();
+      let mut count = ws.click_count.lock().unwrap();
 
       if *last_btn == Some(button)
         && *count < 2
@@ -1276,13 +1530,13 @@ pub fn dispatch_mouse_click_event(
       *last_btn = Some(button);
       *count
     } else {
-      // Released: use the click_count from the most recent press
-      *common.click_count.lock().unwrap()
+      *ws.click_count.lock().unwrap()
     };
 
     unsafe {
       cb(
         user_data as *mut c_void,
+        window_id,
         state,
         wef_button,
         x,
@@ -1295,26 +1549,29 @@ pub fn dispatch_mouse_click_event(
 }
 
 pub fn dispatch_mouse_move_event(
-  common: &CommonState,
+  handlers: &EventHandlers,
+  window_id: u32,
   x: f64,
   y: f64,
   modifiers: winit::keyboard::ModifiersState,
 ) {
-  let handler = common.mouse_move_handler.lock().unwrap();
+  let handler = handlers.mouse_move_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     let mods = modifiers_to_wef(modifiers);
     unsafe {
-      cb(user_data as *mut c_void, x, y, mods);
+      cb(user_data as *mut c_void, window_id, x, y, mods);
     }
   }
 }
 
 pub fn dispatch_wheel_event(
-  common: &CommonState,
+  handlers: &EventHandlers,
+  ws: &WindowState,
+  window_id: u32,
   delta: winit::event::MouseScrollDelta,
   modifiers: winit::keyboard::ModifiersState,
 ) {
-  let handler = common.wheel_handler.lock().unwrap();
+  let handler = handlers.wheel_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     let (delta_x, delta_y, delta_mode) = match delta {
       winit::event::MouseScrollDelta::LineDelta(dx, dy) => {
@@ -1324,11 +1581,12 @@ pub fn dispatch_wheel_event(
         (d.x, d.y, WEF_WHEEL_DELTA_PIXEL)
       }
     };
-    let (x, y) = *common.cursor_position.lock().unwrap();
+    let (x, y) = *ws.cursor_position.lock().unwrap();
     let mods = modifiers_to_wef(modifiers);
     unsafe {
       cb(
         user_data as *mut c_void,
+        window_id,
         delta_x,
         delta_y,
         x,
@@ -1341,17 +1599,20 @@ pub fn dispatch_wheel_event(
 }
 
 pub fn dispatch_cursor_enter_leave_event(
-  common: &CommonState,
+  handlers: &EventHandlers,
+  ws: &WindowState,
+  window_id: u32,
   entered: bool,
   modifiers: winit::keyboard::ModifiersState,
 ) {
-  let handler = common.cursor_enter_leave_handler.lock().unwrap();
+  let handler = handlers.cursor_enter_leave_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
-    let (x, y) = *common.cursor_position.lock().unwrap();
+    let (x, y) = *ws.cursor_position.lock().unwrap();
     let mods = modifiers_to_wef(modifiers);
     unsafe {
       cb(
         user_data as *mut c_void,
+        window_id,
         if entered { 1 } else { 0 },
         x,
         y,
@@ -1361,33 +1622,59 @@ pub fn dispatch_cursor_enter_leave_event(
   }
 }
 
-pub fn dispatch_focused_event(common: &CommonState, focused: bool) {
-  let handler = common.focused_handler.lock().unwrap();
+pub fn dispatch_focused_event(
+  handlers: &EventHandlers,
+  window_id: u32,
+  focused: bool,
+) {
+  let handler = handlers.focused_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     unsafe {
-      cb(user_data as *mut c_void, if focused { 1 } else { 0 });
+      cb(
+        user_data as *mut c_void,
+        window_id,
+        if focused { 1 } else { 0 },
+      );
     }
   }
 }
 
 pub fn dispatch_resize_event(
-  common: &CommonState,
+  handlers: &EventHandlers,
+  window_id: u32,
   width: i32,
   height: i32,
 ) {
-  let handler = common.resize_handler.lock().unwrap();
+  let handler = handlers.resize_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     unsafe {
-      cb(user_data as *mut c_void, width, height);
+      cb(user_data as *mut c_void, window_id, width, height);
     }
   }
 }
 
-pub fn dispatch_move_event(common: &CommonState, x: i32, y: i32) {
-  let handler = common.move_handler.lock().unwrap();
+pub fn dispatch_move_event(
+  handlers: &EventHandlers,
+  window_id: u32,
+  x: i32,
+  y: i32,
+) {
+  let handler = handlers.move_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
     unsafe {
-      cb(user_data as *mut c_void, x, y);
+      cb(user_data as *mut c_void, window_id, x, y);
+    }
+  }
+}
+
+pub fn dispatch_close_requested_event(
+  handlers: &EventHandlers,
+  window_id: u32,
+) {
+  let handler = handlers.close_requested_handler.lock().unwrap();
+  if let Some((cb, user_data)) = *handler {
+    unsafe {
+      cb(user_data as *mut c_void, window_id);
     }
   }
 }

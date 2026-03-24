@@ -7,7 +7,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(WEF_SRCS_COMMON
-  src/app.cc
+  src/app.mm
   src/app.h
   src/runtime_loader.mm
   src/runtime_loader.h

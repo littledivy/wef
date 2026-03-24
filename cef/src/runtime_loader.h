@@ -7,7 +7,9 @@
 #include <thread>
 #include <atomic>
 #include <mutex>
+#include <condition_variable>
 #include <queue>
+#include <map>
 
 #include "include/cef_browser.h"
 #include "include/cef_values.h"
@@ -38,13 +40,99 @@ class RuntimeLoader {
 
   void Shutdown();
 
-  void SetBrowser(CefRefPtr<CefBrowser> browser);
-
-  CefRefPtr<CefBrowser> GetBrowser();
-
   const wef_backend_api_t& GetBackendApi() const { return backend_api_; }
 
-  void OnJsCall(uint64_t call_id, const std::string& method_path,
+  uint32_t AllocateWindowId() { return next_window_id_.fetch_add(1); }
+
+  void RegisterBrowser(uint32_t window_id, CefRefPtr<CefBrowser> browser) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    browsers_[window_id] = browser;
+    browser_id_to_wef_id_[browser->GetIdentifier()] = window_id;
+    browser_ready_cv_.notify_all();
+  }
+
+  // Block until the browser for window_id has been registered (with timeout).
+  bool WaitForBrowser(uint32_t window_id, int timeout_ms = 5000) {
+    std::unique_lock<std::mutex> lock(windows_mutex_);
+    return browser_ready_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&]() {
+      return browsers_.find(window_id) != browsers_.end();
+    });
+  }
+
+  void UnregisterBrowser(uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = browsers_.find(window_id);
+    if (it != browsers_.end()) {
+      browser_id_to_wef_id_.erase(it->second->GetIdentifier());
+      browsers_.erase(it);
+    }
+  }
+
+  CefRefPtr<CefBrowser> GetBrowserForWindow(uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = browsers_.find(window_id);
+    return it != browsers_.end() ? it->second : nullptr;
+  }
+
+  uint32_t GetWefIdForBrowser(CefRefPtr<CefBrowser> browser) {
+    if (!browser) return 0;
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = browser_id_to_wef_id_.find(browser->GetIdentifier());
+    return it != browser_id_to_wef_id_.end() ? it->second : 0;
+  }
+
+  uint32_t GetWefIdForBrowserId(int browser_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = browser_id_to_wef_id_.find(browser_id);
+    return it != browser_id_to_wef_id_.end() ? it->second : 0;
+  }
+
+  bool HasWindows() {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    return !browsers_.empty();
+  }
+
+  void StoreCallWindow(uint64_t call_id, uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    call_to_window_[call_id] = window_id;
+  }
+
+  uint32_t ConsumeCallWindow(uint64_t call_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = call_to_window_.find(call_id);
+    if (it != call_to_window_.end()) {
+      uint32_t wid = it->second;
+      call_to_window_.erase(it);
+      return wid;
+    }
+    return 0;
+  }
+
+  void RegisterNSWindow(void* nswindow, uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    nswindow_to_wef_id_[nswindow] = window_id;
+  }
+
+  void UnregisterNSWindow(void* nswindow) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    nswindow_to_wef_id_.erase(nswindow);
+  }
+
+  uint32_t GetWefIdForNSWindow(void* nswindow) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = nswindow_to_wef_id_.find(nswindow);
+    return it != nswindow_to_wef_id_.end() ? it->second : 0;
+  }
+
+  template<typename F>
+  void ForEachBrowser(F&& fn) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    for (auto& [wid, browser] : browsers_) {
+      fn(browser);
+    }
+  }
+
+  void OnJsCall(uint32_t window_id, uint64_t call_id, const std::string& method_path,
                 CefRefPtr<CefListValue> args);
 
   void PollPendingJsCalls();
@@ -61,11 +149,11 @@ class RuntimeLoader {
     keyboard_user_data_ = user_data;
   }
 
-  void DispatchKeyboardEvent(int state, const char* key, const char* code,
+  void DispatchKeyboardEvent(uint32_t window_id, int state, const char* key, const char* code,
                              uint32_t modifiers, bool repeat) {
     std::lock_guard<std::mutex> lock(keyboard_mutex_);
     if (keyboard_handler_) {
-      keyboard_handler_(keyboard_user_data_, state, key, code, modifiers, repeat);
+      keyboard_handler_(keyboard_user_data_, window_id, state, key, code, modifiers, repeat);
     }
   }
 
@@ -75,11 +163,11 @@ class RuntimeLoader {
     mouse_click_user_data_ = user_data;
   }
 
-  void DispatchMouseClickEvent(int state, int button, double x, double y,
+  void DispatchMouseClickEvent(uint32_t window_id, int state, int button, double x, double y,
                                uint32_t modifiers, int32_t click_count) {
     std::lock_guard<std::mutex> lock(mouse_mutex_);
     if (mouse_click_handler_) {
-      mouse_click_handler_(mouse_click_user_data_, state, button, x, y, modifiers, click_count);
+      mouse_click_handler_(mouse_click_user_data_, window_id, state, button, x, y, modifiers, click_count);
     }
   }
 
@@ -89,10 +177,10 @@ class RuntimeLoader {
     mouse_move_user_data_ = user_data;
   }
 
-  void DispatchMouseMoveEvent(double x, double y, uint32_t modifiers) {
+  void DispatchMouseMoveEvent(uint32_t window_id, double x, double y, uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(mouse_move_mutex_);
     if (mouse_move_handler_) {
-      mouse_move_handler_(mouse_move_user_data_, x, y, modifiers);
+      mouse_move_handler_(mouse_move_user_data_, window_id, x, y, modifiers);
     }
   }
 
@@ -102,11 +190,11 @@ class RuntimeLoader {
     wheel_user_data_ = user_data;
   }
 
-  void DispatchWheelEvent(double delta_x, double delta_y, double x, double y,
+  void DispatchWheelEvent(uint32_t window_id, double delta_x, double delta_y, double x, double y,
                           uint32_t modifiers, int32_t delta_mode) {
     std::lock_guard<std::mutex> lock(wheel_mutex_);
     if (wheel_handler_) {
-      wheel_handler_(wheel_user_data_, delta_x, delta_y, x, y, modifiers, delta_mode);
+      wheel_handler_(wheel_user_data_, window_id, delta_x, delta_y, x, y, modifiers, delta_mode);
     }
   }
 
@@ -116,11 +204,11 @@ class RuntimeLoader {
     cursor_enter_leave_user_data_ = user_data;
   }
 
-  void DispatchCursorEnterLeaveEvent(int entered, double x, double y,
+  void DispatchCursorEnterLeaveEvent(uint32_t window_id, int entered, double x, double y,
                                      uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
     if (cursor_enter_leave_handler_) {
-      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, entered, x, y, modifiers);
+      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, window_id, entered, x, y, modifiers);
     }
   }
 
@@ -130,10 +218,10 @@ class RuntimeLoader {
     focused_user_data_ = user_data;
   }
 
-  void DispatchFocusedEvent(int focused) {
+  void DispatchFocusedEvent(uint32_t window_id, int focused) {
     std::lock_guard<std::mutex> lock(focused_mutex_);
     if (focused_handler_) {
-      focused_handler_(focused_user_data_, focused);
+      focused_handler_(focused_user_data_, window_id, focused);
     }
   }
 
@@ -143,10 +231,10 @@ class RuntimeLoader {
     resize_user_data_ = user_data;
   }
 
-  void DispatchResizeEvent(int width, int height) {
+  void DispatchResizeEvent(uint32_t window_id, int width, int height) {
     std::lock_guard<std::mutex> lock(resize_mutex_);
     if (resize_handler_) {
-      resize_handler_(resize_user_data_, width, height);
+      resize_handler_(resize_user_data_, window_id, width, height);
     }
   }
 
@@ -156,10 +244,23 @@ class RuntimeLoader {
     move_user_data_ = user_data;
   }
 
-  void DispatchMoveEvent(int x, int y) {
+  void DispatchMoveEvent(uint32_t window_id, int x, int y) {
     std::lock_guard<std::mutex> lock(move_mutex_);
     if (move_handler_) {
-      move_handler_(move_user_data_, x, y);
+      move_handler_(move_user_data_, window_id, x, y);
+    }
+  }
+
+  void SetCloseRequestedHandler(wef_close_requested_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(close_requested_mutex_);
+    close_requested_handler_ = handler;
+    close_requested_user_data_ = user_data;
+  }
+
+  void DispatchCloseRequestedEvent(uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(close_requested_mutex_);
+    if (close_requested_handler_) {
+      close_requested_handler_(close_requested_user_data_, window_id);
     }
   }
 
@@ -184,7 +285,14 @@ class RuntimeLoader {
   std::thread runtime_thread_;
   std::atomic<bool> running_{false};
 
-  CefRefPtr<CefBrowser> browser_;
+  std::map<uint32_t, CefRefPtr<CefBrowser>> browsers_;
+  std::map<int, uint32_t> browser_id_to_wef_id_;  // CefBrowser::GetIdentifier() -> wef_id
+  std::map<uint64_t, uint32_t> call_to_window_;  // call_id -> window_id for JsCallRespond
+  std::map<void*, uint32_t> nswindow_to_wef_id_;
+  std::mutex windows_mutex_;
+  std::condition_variable browser_ready_cv_;
+  std::atomic<uint32_t> next_window_id_{1};
+
   wef_backend_api_t backend_api_;
 
   wef_js_call_fn js_call_handler_ = nullptr;
@@ -223,11 +331,16 @@ class RuntimeLoader {
   void* move_user_data_ = nullptr;
   std::mutex move_mutex_;
 
+  wef_close_requested_fn close_requested_handler_ = nullptr;
+  void* close_requested_user_data_ = nullptr;
+  std::mutex close_requested_mutex_;
+
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;
   std::mutex notify_mutex_;
 
   struct PendingJsCall {
+    uint32_t window_id;
     uint64_t call_id;
     std::string method_path;
     CefRefPtr<CefListValue> args;

@@ -1,5 +1,6 @@
 // Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
@@ -57,6 +58,7 @@ define_common_backend_fns!(BackendState);
 
 unsafe extern "C" fn backend_navigate(
   _data: *mut c_void,
+  _window_id: u32,
   _url: *const std::ffi::c_char,
 ) {
   // no-op — no web engine
@@ -64,6 +66,7 @@ unsafe extern "C" fn backend_navigate(
 
 unsafe extern "C" fn backend_execute_js(
   _data: *mut c_void,
+  _window_id: u32,
   _script: *const std::ffi::c_char,
   _callback: Option<WefJsResultFn>,
   _callback_data: *mut c_void,
@@ -88,44 +91,80 @@ enum UserEvent {
   Common(CommonEvent),
 }
 
-enum App {
-  Initial,
-  Running {
-    window: Window,
-    modifiers: ModifiersState,
-  },
+struct WindowInfo {
+  window: Window,
+  modifiers: ModifiersState,
+}
+
+struct App {
+  // Map from our window_id to winit WindowId + Window
+  windows: HashMap<u32, WindowInfo>,
+  // Reverse map from winit WindowId to our window_id
+  winit_to_wef: HashMap<winit::window::WindowId, u32>,
 }
 
 impl App {
   fn new() -> Self {
-    Self::Initial
+    Self {
+      windows: HashMap::new(),
+      winit_to_wef: HashMap::new(),
+    }
+  }
+
+  fn create_window(
+    &mut self,
+    event_loop: &winit::event_loop::ActiveEventLoop,
+    window_id: u32,
+  ) {
+    let state = BackendState::get().expect("BackendState not initialized");
+    let attrs = state
+      .common
+      .with_window(window_id, |ws| {
+        wef_backend_winit_common::apply_pending_attrs(
+          ws,
+          Window::default_attributes(),
+        )
+      })
+      .unwrap_or_else(|| Window::default_attributes());
+
+    let window = event_loop
+      .create_window(attrs)
+      .expect("Failed to create winit Window");
+
+    state.common.with_window(window_id, |ws| {
+      wef_backend_winit_common::apply_pending_post_create(ws, &window);
+    });
+    wef_backend_winit_common::store_window_handles(window_id, &window);
+
+    let winit_id = window.id();
+    self.winit_to_wef.insert(winit_id, window_id);
+    self.windows.insert(
+      window_id,
+      WindowInfo {
+        window,
+        modifiers: ModifiersState::default(),
+      },
+    );
+  }
+
+  fn close_window(&mut self, window_id: u32) {
+    if let Some(info) = self.windows.remove(&window_id) {
+      self.winit_to_wef.remove(&info.window.id());
+      wef_backend_winit_common::remove_window_handles(window_id);
+      if let Some(state) = BackendState::get() {
+        state.common.remove_window(window_id);
+      }
+    }
+  }
+
+  fn wef_id(&self, winit_id: winit::window::WindowId) -> Option<u32> {
+    self.winit_to_wef.get(&winit_id).copied()
   }
 }
 
 impl ApplicationHandler<UserEvent> for App {
-  fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-    if let Self::Initial = self {
-      let state = BackendState::get().expect("BackendState not initialized");
-      let attrs = wef_backend_winit_common::apply_pending_attrs(
-        &state.common,
-        Window::default_attributes(),
-      );
-
-      let window = event_loop
-        .create_window(attrs)
-        .expect("Failed to create winit Window");
-
-      wef_backend_winit_common::apply_pending_post_create(
-        &state.common,
-        &window,
-      );
-      wef_backend_winit_common::store_window_handles(&window);
-
-      *self = Self::Running {
-        window,
-        modifiers: ModifiersState::default(),
-      };
-    }
+  fn resumed(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+    // Windows are created on-demand via CreateWindow events
   }
 
   fn user_event(
@@ -133,59 +172,101 @@ impl ApplicationHandler<UserEvent> for App {
     event_loop: &winit::event_loop::ActiveEventLoop,
     event: UserEvent,
   ) {
-    let window = match self {
-      Self::Running { window, .. } => window,
-      Self::Initial => return,
-    };
-
     match event {
-      UserEvent::Common(ref common) => {
-        if let CommonEvent::Quit = common {
+      UserEvent::Common(ref common) => match common {
+        CommonEvent::Quit => {
           event_loop.exit();
-        } else {
-          wef_backend_winit_common::handle_common_event::<BackendState>(
-            common, window,
-          );
         }
-      }
+        CommonEvent::CreateWindow { window_id } => {
+          self.create_window(event_loop, *window_id);
+        }
+        CommonEvent::CloseWindow { window_id } => {
+          self.close_window(*window_id);
+          if self.windows.is_empty() {
+            event_loop.exit();
+          }
+        }
+        CommonEvent::UiTask { task, data } => {
+          unsafe { task(*data as *mut c_void) };
+        }
+        other => {
+          let wid = match other {
+            CommonEvent::SetTitle { window_id }
+            | CommonEvent::SetWindowSize { window_id }
+            | CommonEvent::SetWindowPosition { window_id }
+            | CommonEvent::SetResizable { window_id }
+            | CommonEvent::SetAlwaysOnTop { window_id }
+            | CommonEvent::Show { window_id }
+            | CommonEvent::Hide { window_id }
+            | CommonEvent::Focus { window_id } => *window_id,
+            _ => return,
+          };
+          if let Some(info) = self.windows.get(&wid) {
+            wef_backend_winit_common::handle_common_event::<BackendState>(
+              common,
+              wid,
+              &info.window,
+            );
+          }
+        }
+      },
     }
   }
 
   fn window_event(
     &mut self,
     event_loop: &winit::event_loop::ActiveEventLoop,
-    _window_id: winit::window::WindowId,
+    winit_window_id: winit::window::WindowId,
     event: WindowEvent,
   ) {
-    let modifiers = match self {
-      Self::Running { modifiers, .. } => modifiers,
-      Self::Initial => return,
+    let wef_id = match self.wef_id(winit_window_id) {
+      Some(id) => id,
+      None => return,
+    };
+
+    let state = match BackendState::get() {
+      Some(s) => s,
+      None => return,
+    };
+
+    let modifiers = match self.windows.get_mut(&wef_id) {
+      Some(info) => &mut info.modifiers,
+      None => return,
     };
 
     match event {
       WindowEvent::CloseRequested => {
-        event_loop.exit();
+        wef_backend_winit_common::dispatch_close_requested_event(
+          &state.common.handlers,
+          wef_id,
+        );
+        self.close_window(wef_id);
+        if self.windows.is_empty() {
+          event_loop.exit();
+        }
       }
       WindowEvent::Resized(PhysicalSize { width, height }) => {
-        if let Some(state) = BackendState::get() {
-          *state.common.pending_size.lock().unwrap() =
+        state.common.with_window(wef_id, |ws| {
+          *ws.pending_size.lock().unwrap() =
             Some((width as i32, height as i32));
-          wef_backend_winit_common::dispatch_resize_event(
-            &state.common,
-            width as i32,
-            height as i32,
-          );
-        }
+        });
+        wef_backend_winit_common::dispatch_resize_event(
+          &state.common.handlers,
+          wef_id,
+          width as i32,
+          height as i32,
+        );
       }
       WindowEvent::Moved(PhysicalPosition { x, y }) => {
-        if let Some(state) = BackendState::get() {
-          *state.common.pending_position.lock().unwrap() = Some((x, y));
-          wef_backend_winit_common::dispatch_move_event(
-            &state.common,
-            x,
-            y,
-          );
-        }
+        state.common.with_window(wef_id, |ws| {
+          *ws.pending_position.lock().unwrap() = Some((x, y));
+        });
+        wef_backend_winit_common::dispatch_move_event(
+          &state.common.handlers,
+          wef_id,
+          x,
+          y,
+        );
       }
       WindowEvent::ModifiersChanged(new_modifiers) => {
         *modifiers = new_modifiers.state();
@@ -194,74 +275,80 @@ impl ApplicationHandler<UserEvent> for App {
         event: ref key_event,
         ..
       } => {
-        if let Some(state) = BackendState::get() {
-          wef_backend_winit_common::dispatch_keyboard_event(
-            &state.common,
-            key_event,
-            *modifiers,
-          );
-        }
+        wef_backend_winit_common::dispatch_keyboard_event(
+          &state.common.handlers,
+          wef_id,
+          key_event,
+          *modifiers,
+        );
       }
       WindowEvent::CursorMoved { position, .. } => {
-        if let Some(state) = BackendState::get() {
-          *state.common.cursor_position.lock().unwrap() =
-            (position.x, position.y);
-          wef_backend_winit_common::dispatch_mouse_move_event(
-            &state.common,
-            position.x,
-            position.y,
-            *modifiers,
-          );
-        }
+        state.common.with_window(wef_id, |ws| {
+          *ws.cursor_position.lock().unwrap() = (position.x, position.y);
+        });
+        wef_backend_winit_common::dispatch_mouse_move_event(
+          &state.common.handlers,
+          wef_id,
+          position.x,
+          position.y,
+          *modifiers,
+        );
       }
       WindowEvent::MouseInput {
         state: button_state,
         button,
         ..
       } => {
-        if let Some(state) = BackendState::get() {
+        state.common.with_window(wef_id, |ws| {
           wef_backend_winit_common::dispatch_mouse_click_event(
-            &state.common,
+            &state.common.handlers,
+            ws,
+            wef_id,
             button_state,
             button,
             *modifiers,
           );
-        }
+        });
       }
       WindowEvent::MouseWheel { delta, .. } => {
-        if let Some(state) = BackendState::get() {
+        state.common.with_window(wef_id, |ws| {
           wef_backend_winit_common::dispatch_wheel_event(
-            &state.common,
+            &state.common.handlers,
+            ws,
+            wef_id,
             delta,
             *modifiers,
           );
-        }
+        });
       }
       WindowEvent::CursorEntered { .. } => {
-        if let Some(state) = BackendState::get() {
+        state.common.with_window(wef_id, |ws| {
           wef_backend_winit_common::dispatch_cursor_enter_leave_event(
-            &state.common,
+            &state.common.handlers,
+            ws,
+            wef_id,
             true,
             *modifiers,
           );
-        }
+        });
       }
       WindowEvent::CursorLeft { .. } => {
-        if let Some(state) = BackendState::get() {
+        state.common.with_window(wef_id, |ws| {
           wef_backend_winit_common::dispatch_cursor_enter_leave_event(
-            &state.common,
+            &state.common.handlers,
+            ws,
+            wef_id,
             false,
             *modifiers,
           );
-        }
+        });
       }
       WindowEvent::Focused(focused) => {
-        if let Some(state) = BackendState::get() {
-          wef_backend_winit_common::dispatch_focused_event(
-            &state.common,
-            focused,
-          );
-        }
+        wef_backend_winit_common::dispatch_focused_event(
+          &state.common.handlers,
+          wef_id,
+          focused,
+        );
       }
 
       WindowEvent::ThemeChanged(_) => {}
@@ -271,19 +358,19 @@ impl ApplicationHandler<UserEvent> for App {
       WindowEvent::HoveredFileCancelled => {}
       WindowEvent::Ime(_) => {}
 
-      WindowEvent::Touch(_) |
-      WindowEvent::PinchGesture { .. } |
-      WindowEvent::PanGesture { .. } |
-      WindowEvent::DoubleTapGesture { .. } |
-      WindowEvent::RotationGesture { .. } |
-      WindowEvent::TouchpadPressure { .. } => {
+      WindowEvent::Touch(_)
+      | WindowEvent::PinchGesture { .. }
+      | WindowEvent::PanGesture { .. }
+      | WindowEvent::DoubleTapGesture { .. }
+      | WindowEvent::RotationGesture { .. }
+      | WindowEvent::TouchpadPressure { .. } => {
         // TODO: touch
       }
-      WindowEvent::ActivationTokenDone { .. } |
-      WindowEvent::AxisMotion { .. } |
-      WindowEvent::ScaleFactorChanged { .. } |
-      WindowEvent::Occluded(_) |
-      WindowEvent::RedrawRequested => {
+      WindowEvent::ActivationTokenDone { .. }
+      | WindowEvent::AxisMotion { .. }
+      | WindowEvent::ScaleFactorChanged { .. }
+      | WindowEvent::Occluded(_)
+      | WindowEvent::RedrawRequested => {
         // wont implement
       }
     }

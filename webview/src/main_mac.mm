@@ -15,7 +15,7 @@
 @implementation AppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
-  self.backend = CreateWefBackend(800, 600, "WEF Webview");
+  self.backend = CreateWefBackend();
 
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
   loader->SetBackend(self.backend);

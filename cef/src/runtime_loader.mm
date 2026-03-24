@@ -1,6 +1,7 @@
 // Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
 #include "runtime_loader.h"
+#include "app.h"
 
 #include <dlfcn.h>
 #include <iostream>
@@ -48,6 +49,11 @@ static int NSButtonToWef(NSInteger buttonNumber) {
   }
 }
 
+static uint32_t WefIdForNSWindow(NSWindow* win) {
+  if (!win) return 0;
+  return RuntimeLoader::GetInstance()->GetWefIdForNSWindow((__bridge void*)win);
+}
+
 void InstallNativeMouseMonitor() {
   if (g_mouse_monitor) return;
 
@@ -57,6 +63,10 @@ void InstallNativeMouseMonitor() {
 
   g_mouse_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask
       handler:^NSEvent*(NSEvent* event) {
+        NSWindow* win = [event window];
+        uint32_t wid = WefIdForNSWindow(win);
+        if (wid == 0) return event;
+
         int state;
         switch ([event type]) {
           case NSEventTypeLeftMouseDown:
@@ -75,7 +85,6 @@ void InstallNativeMouseMonitor() {
 
         // Get position in window coordinates
         NSPoint loc = [event locationInWindow];
-        NSWindow* win = [event window];
         double x = loc.x;
         double y = 0;
         if (win) {
@@ -84,7 +93,7 @@ void InstallNativeMouseMonitor() {
         }
 
         RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-            state, button, x, y, modifiers, click_count);
+            wid, state, button, x, y, modifiers, click_count);
 
         return event; // Don't consume
       }];
@@ -93,21 +102,28 @@ void InstallNativeMouseMonitor() {
       (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
        NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
       handler:^NSEvent*(NSEvent* event) {
+        NSWindow* win = [event window];
+        uint32_t wid = WefIdForNSWindow(win);
+        if (wid == 0) return event;
+
         uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
         NSPoint loc = [event locationInWindow];
-        NSWindow* win = [event window];
         double x = loc.x;
         double y = 0;
         if (win) {
           y = [win contentLayoutRect].size.height - loc.y;
         }
 
-        RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(x, y, modifiers);
+        RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(wid, x, y, modifiers);
         return event;
       }];
 
   g_scroll_monitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
       handler:^NSEvent*(NSEvent* event) {
+        NSWindow* win = [event window];
+        uint32_t wid = WefIdForNSWindow(win);
+        if (wid == 0) return event;
+
         double delta_x = [event scrollingDeltaX];
         double delta_y = [event scrollingDeltaY];
         uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
@@ -117,7 +133,6 @@ void InstallNativeMouseMonitor() {
             ? WEF_WHEEL_DELTA_PIXEL : WEF_WHEEL_DELTA_LINE;
 
         NSPoint loc = [event locationInWindow];
-        NSWindow* win = [event window];
         double x = loc.x;
         double y = 0;
         if (win) {
@@ -125,7 +140,7 @@ void InstallNativeMouseMonitor() {
         }
 
         RuntimeLoader::GetInstance()->DispatchWheelEvent(
-            delta_x, delta_y, x, y, modifiers, delta_mode);
+            wid, delta_x, delta_y, x, y, modifiers, delta_mode);
         return event;
       }];
 
@@ -133,16 +148,22 @@ void InstallNativeMouseMonitor() {
       addObserverForName:NSWindowDidBecomeKeyNotification
       object:nil
       queue:nil
-      usingBlock:^(NSNotification*) {
-        RuntimeLoader::GetInstance()->DispatchFocusedEvent(1);
+      usingBlock:^(NSNotification* note) {
+        uint32_t wid = WefIdForNSWindow([note object]);
+        if (wid > 0) {
+          RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
+        }
       }];
 
   g_blur_observer = [[NSNotificationCenter defaultCenter]
       addObserverForName:NSWindowDidResignKeyNotification
       object:nil
       queue:nil
-      usingBlock:^(NSNotification*) {
-        RuntimeLoader::GetInstance()->DispatchFocusedEvent(0);
+      usingBlock:^(NSNotification* note) {
+        uint32_t wid = WefIdForNSWindow([note object]);
+        if (wid > 0) {
+          RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
+        }
       }];
 
   g_resize_observer = [[NSNotificationCenter defaultCenter]
@@ -151,10 +172,11 @@ void InstallNativeMouseMonitor() {
       queue:nil
       usingBlock:^(NSNotification* note) {
         NSWindow* win = [note object];
-        if (win) {
+        uint32_t wid = WefIdForNSWindow(win);
+        if (wid > 0 && win) {
           NSRect frame = [[win contentView] frame];
           RuntimeLoader::GetInstance()->DispatchResizeEvent(
-              (int)frame.size.width, (int)frame.size.height);
+              wid, (int)frame.size.width, (int)frame.size.height);
         }
       }];
 
@@ -164,10 +186,11 @@ void InstallNativeMouseMonitor() {
       queue:nil
       usingBlock:^(NSNotification* note) {
         NSWindow* win = [note object];
-        if (win) {
+        uint32_t wid = WefIdForNSWindow(win);
+        if (wid > 0 && win) {
           NSRect frame = [win frame];
           RuntimeLoader::GetInstance()->DispatchMoveEvent(
-              (int)frame.origin.x, (int)frame.origin.y);
+              wid, (int)frame.origin.x, (int)frame.origin.y);
         }
       }];
 }
@@ -203,9 +226,9 @@ void RemoveNativeMouseMonitor() {
   }
 }
 
-static void Backend_Navigate(void* data, const char* url) {
+static void Backend_Navigate(void* data, uint32_t window_id, const char* url) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser && url) {
     std::string url_str(url);
     CefPostTask(TID_UI, base::BindOnce(
@@ -216,9 +239,9 @@ static void Backend_Navigate(void* data, const char* url) {
   }
 }
 
-static void Backend_SetTitle(void* data, const char* title) {
+static void Backend_SetTitle(void* data, uint32_t window_id, const char* title) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser && title) {
     std::string title_str(title);
     CefPostTask(TID_UI, base::BindOnce(
@@ -235,10 +258,10 @@ static void Backend_SetTitle(void* data, const char* title) {
   }
 }
 
-static void Backend_ExecuteJs(void* data, const char* script,
+static void Backend_ExecuteJs(void* data, uint32_t window_id, const char* script,
                               wef_js_result_fn callback, void* callback_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser && script) {
     std::string script_str(script);
     CefPostTask(TID_UI, base::BindOnce(
@@ -260,9 +283,9 @@ static void Backend_Quit(void* data) {
   }));
 }
 
-static void Backend_SetWindowSize(void* data, int width, int height) {
+static void Backend_SetWindowSize(void* data, uint32_t window_id, int width, int height) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
         [](CefRefPtr<CefBrowser> b, int w, int h) {
@@ -278,9 +301,9 @@ static void Backend_SetWindowSize(void* data, int width, int height) {
   }
 }
 
-static void Backend_GetWindowSize(void* data, int* width, int* height) {
+static void Backend_GetWindowSize(void* data, uint32_t window_id, int* width, int* height) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     auto browser_view = CefBrowserView::GetForBrowser(browser);
     if (browser_view) {
@@ -297,9 +320,9 @@ static void Backend_GetWindowSize(void* data, int* width, int* height) {
   if (height) *height = 0;
 }
 
-static void Backend_SetWindowPosition(void* data, int x, int y) {
+static void Backend_SetWindowPosition(void* data, uint32_t window_id, int x, int y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
         [](CefRefPtr<CefBrowser> b, int px, int py) {
@@ -315,9 +338,9 @@ static void Backend_SetWindowPosition(void* data, int x, int y) {
   }
 }
 
-static void Backend_GetWindowPosition(void* data, int* x, int* y) {
+static void Backend_GetWindowPosition(void* data, uint32_t window_id, int* x, int* y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     auto browser_view = CefBrowserView::GetForBrowser(browser);
     if (browser_view) {
@@ -334,21 +357,23 @@ static void Backend_GetWindowPosition(void* data, int* x, int* y) {
   if (y) *y = 0;
 }
 
-static void Backend_SetResizable(void* data, bool resizable) {
+static void Backend_SetResizable(void* data, uint32_t window_id, bool resizable) {
   // CEF Views framework does not expose a direct resizable toggle
   (void)data;
+  (void)window_id;
   (void)resizable;
 }
 
-static bool Backend_IsResizable(void* data) {
+static bool Backend_IsResizable(void* data, uint32_t window_id) {
   // CEF Views framework does not expose a direct resizable query
   (void)data;
+  (void)window_id;
   return true;
 }
 
-static void Backend_SetAlwaysOnTop(void* data, bool always_on_top) {
+static void Backend_SetAlwaysOnTop(void* data, uint32_t window_id, bool always_on_top) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
         [](CefRefPtr<CefBrowser> b, bool on_top) {
@@ -364,9 +389,9 @@ static void Backend_SetAlwaysOnTop(void* data, bool always_on_top) {
   }
 }
 
-static bool Backend_IsAlwaysOnTop(void* data) {
+static bool Backend_IsAlwaysOnTop(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     auto browser_view = CefBrowserView::GetForBrowser(browser);
     if (browser_view) {
@@ -379,9 +404,9 @@ static bool Backend_IsAlwaysOnTop(void* data) {
   return false;
 }
 
-static bool Backend_IsVisible(void* data) {
+static bool Backend_IsVisible(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     auto browser_view = CefBrowserView::GetForBrowser(browser);
     if (browser_view) {
@@ -394,9 +419,9 @@ static bool Backend_IsVisible(void* data) {
   return false;
 }
 
-static void Backend_Show(void* data) {
+static void Backend_Show(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
         [](CefRefPtr<CefBrowser> b) {
@@ -412,9 +437,9 @@ static void Backend_Show(void* data) {
   }
 }
 
-static void Backend_Hide(void* data) {
+static void Backend_Hide(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
         [](CefRefPtr<CefBrowser> b) {
@@ -430,9 +455,9 @@ static void Backend_Hide(void* data) {
   }
 }
 
-static void Backend_Focus(void* data) {
+static void Backend_Focus(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
         [](CefRefPtr<CefBrowser> b) {
@@ -697,7 +722,8 @@ static void Backend_SetJsCallHandler(void* data, wef_js_call_fn handler, void* u
 static void Backend_JsCallRespond(void* data, uint64_t call_id,
                                   wef_value_t* result, wef_value_t* error) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
+  uint32_t window_id = loader->ConsumeCallWindow(call_id);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
   if (!browser) return;
 
   CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("wef_response");
@@ -729,8 +755,6 @@ static void Backend_JsCallRespond(void* data, uint64_t call_id,
 
 static void Backend_InvokeJsCallback(void* data, uint64_t callback_id, wef_value_t* args) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
-  if (!browser) return;
 
   CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("wef_callback");
   CefRefPtr<CefListValue> msgArgs = msg->GetArgumentList();
@@ -742,11 +766,13 @@ static void Backend_InvokeJsCallback(void* data, uint64_t callback_id, wef_value
     msgArgs->SetList(1, CefListValue::Create());
   }
 
-  CefPostTask(TID_UI, base::BindOnce(
-      [](CefRefPtr<CefBrowser> b, CefRefPtr<CefProcessMessage> m) {
-        b->GetMainFrame()->SendProcessMessage(PID_RENDERER, m);
-      },
-      browser, msg));
+  loader->ForEachBrowser([&msg](CefRefPtr<CefBrowser> browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, CefRefPtr<CefProcessMessage> m) {
+          b->GetMainFrame()->SendProcessMessage(PID_RENDERER, m);
+        },
+        browser, msg));
+  });
 }
 
 static void Backend_SetKeyboardEventHandler(void* data,
@@ -807,18 +833,18 @@ static void Backend_SetMoveHandler(void* data,
 
 static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
-  if (!browser) return;
 
   CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("wef_release_callback");
   CefRefPtr<CefListValue> msgArgs = msg->GetArgumentList();
   msgArgs->SetInt(0, static_cast<int>(callback_id));
 
-  CefPostTask(TID_UI, base::BindOnce(
-      [](CefRefPtr<CefBrowser> b, CefRefPtr<CefProcessMessage> m) {
-        b->GetMainFrame()->SendProcessMessage(PID_RENDERER, m);
-      },
-      browser, msg));
+  loader->ForEachBrowser([&msg](CefRefPtr<CefBrowser> browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, CefRefPtr<CefProcessMessage> m) {
+          b->GetMainFrame()->SendProcessMessage(PID_RENDERER, m);
+        },
+        browser, msg));
+  });
 }
 
 // --- Application Menu ---
@@ -1118,9 +1144,56 @@ static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
   });
 }
 
+static uint32_t Backend_CreateWindow(void* data) {
+  auto* loader = RuntimeLoader::GetInstance();
+  uint32_t window_id = loader->AllocateWindowId();
+
+  CefPostTask(TID_UI, base::BindOnce([](uint32_t wid) {
+    auto* handler = WefHandler::GetInstance();
+    if (!handler) return;
+
+    // Push wef_id before creating the browser so OnAfterCreated can pop it.
+    // Both run on the UI thread so no race.
+    g_pending_wef_ids.push(wid);
+
+    CefBrowserSettings browser_settings;
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+        handler, "about:blank", browser_settings, nullptr, nullptr, nullptr);
+    CefWindow::CreateTopLevelWindow(CreateWefWindowDelegate(browser_view, wid));
+  }, window_id));
+
+  // Block until the browser is registered by OnAfterCreated, so that
+  // subsequent calls (navigate, set_title, etc.) can find it.
+  loader->WaitForBrowser(window_id);
+
+  return window_id;
+}
+
+static void Backend_CloseWindow(void* data, uint32_t window_id) {
+  auto* loader = RuntimeLoader::GetInstance();
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b) {
+          b->GetHost()->CloseBrowser(true);
+        },
+        browser));
+  }
+}
+
+static void Backend_SetCloseRequestedHandler(void* data,
+                                              wef_close_requested_fn handler,
+                                              void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetCloseRequestedHandler(handler, user_data);
+}
+
 void RuntimeLoader::InitializeBackendApi() {
   backend_api_.version = WEF_API_VERSION;
   backend_api_.backend_data = this;
+
+  backend_api_.create_window = Backend_CreateWindow;
+  backend_api_.close_window = Backend_CloseWindow;
 
   backend_api_.navigate = Backend_Navigate;
   backend_api_.set_title = Backend_SetTitle;
@@ -1185,9 +1258,9 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.invoke_js_callback = Backend_InvokeJsCallback;
   backend_api_.release_js_callback = Backend_ReleaseJsCallback;
 
-  backend_api_.get_window_handle = [](void*) -> void* { return nullptr; };
-  backend_api_.get_display_handle = [](void*) -> void* { return nullptr; };
-  backend_api_.get_window_handle_type = [](void*) -> int { return WEF_WINDOW_HANDLE_APPKIT; };
+  backend_api_.get_window_handle = [](void*, uint32_t) -> void* { return nullptr; };
+  backend_api_.get_display_handle = [](void*, uint32_t) -> void* { return nullptr; };
+  backend_api_.get_window_handle_type = [](void*, uint32_t) -> int { return WEF_WINDOW_HANDLE_APPKIT; };
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
@@ -1197,6 +1270,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_focused_handler = Backend_SetFocusedHandler;
   backend_api_.set_resize_handler = Backend_SetResizeHandler;
   backend_api_.set_move_handler = Backend_SetMoveHandler;
+  backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;
 
   backend_api_.poll_js_calls = [](void* data) {
     RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
@@ -1304,20 +1378,13 @@ void RuntimeLoader::Shutdown() {
   }
 }
 
-void RuntimeLoader::SetBrowser(CefRefPtr<CefBrowser> browser) {
-  browser_ = browser;
-}
-
-CefRefPtr<CefBrowser> RuntimeLoader::GetBrowser() {
-  return browser_;
-}
-
-void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
+void RuntimeLoader::OnJsCall(uint32_t window_id, uint64_t call_id, const std::string& method_path,
                              CefRefPtr<CefListValue> args) {
   {
     std::lock_guard<std::mutex> lock(pending_mutex_);
-    pending_js_calls_.push({call_id, method_path, args});
+    pending_js_calls_.push({window_id, call_id, method_path, args});
   }
+  StoreCallWindow(call_id, window_id);
 
   std::lock_guard<std::mutex> lock(notify_mutex_);
   if (js_call_notify_fn_) {
@@ -1350,7 +1417,7 @@ void RuntimeLoader::PollPendingJsCalls() {
       CefRefPtr<CefValue> argsValue = CefValue::Create();
       argsValue->SetList(call.args);
       wef_value_t* argsWrapper = new wef_value(argsValue);
-      handler(user_data, call.call_id, call.method_path.c_str(), argsWrapper);
+      handler(user_data, call.window_id, call.call_id, call.method_path.c_str(), argsWrapper);
     } else {
       CefRefPtr<CefValue> errVal = CefValue::Create();
       errVal->SetString("No JS call handler registered");

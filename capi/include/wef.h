@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 11
+#define WEF_API_VERSION 12
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -35,6 +35,7 @@ typedef struct wef_value wef_value_t;
 
 typedef void (*wef_js_call_fn)(
     void* user_data,
+    uint32_t window_id,
     uint64_t call_id,
     const char* method_path,
     wef_value_t* args
@@ -76,6 +77,7 @@ typedef void (*wef_menu_click_fn)(
 // Callback for mouse click events.
 typedef void (*wef_mouse_click_fn)(
     void* user_data,
+    uint32_t window_id,
     int state,          // WEF_MOUSE_PRESSED or WEF_MOUSE_RELEASED
     int button,         // WEF_MOUSE_BUTTON_*
     double x,           // x position in window coordinates
@@ -87,6 +89,7 @@ typedef void (*wef_mouse_click_fn)(
 // Callback for mouse move events.
 typedef void (*wef_mouse_move_fn)(
     void* user_data,
+    uint32_t window_id,
     double x,           // x position in window coordinates
     double y,           // y position in window coordinates
     uint32_t modifiers  // bitmask of WEF_MOD_* flags
@@ -100,6 +103,7 @@ typedef void (*wef_mouse_move_fn)(
 // Callback for wheel (scroll) events.
 typedef void (*wef_wheel_fn)(
     void* user_data,
+    uint32_t window_id,
     double delta_x,     // horizontal scroll amount
     double delta_y,     // vertical scroll amount
     double x,           // cursor x position in window coordinates
@@ -111,6 +115,7 @@ typedef void (*wef_wheel_fn)(
 // Callback for cursor enter/leave events (mouseenter/mouseleave).
 typedef void (*wef_cursor_enter_leave_fn)(
     void* user_data,
+    uint32_t window_id,
     int entered,        // 1 = cursor entered window, 0 = cursor left window
     double x,           // cursor x position in window coordinates
     double y,           // cursor y position in window coordinates
@@ -120,6 +125,7 @@ typedef void (*wef_cursor_enter_leave_fn)(
 // Callback for window move events.
 typedef void (*wef_move_fn)(
     void* user_data,
+    uint32_t window_id,
     int x,               // new x position
     int y                // new y position
 );
@@ -127,6 +133,7 @@ typedef void (*wef_move_fn)(
 // Callback for window resize events.
 typedef void (*wef_resize_fn)(
     void* user_data,
+    uint32_t window_id,
     int width,           // new width in pixels
     int height           // new height in pixels
 );
@@ -134,12 +141,14 @@ typedef void (*wef_resize_fn)(
 // Callback for window focus/blur events.
 typedef void (*wef_focused_fn)(
     void* user_data,
+    uint32_t window_id,
     int focused          // 1 = window gained focus, 0 = window lost focus
 );
 
 // Callback for keyboard events.
 typedef void (*wef_keyboard_event_fn)(
     void* user_data,
+    uint32_t window_id,
     int state,              // WEF_KEY_PRESSED or WEF_KEY_RELEASED
     const char* key,        // logical key (W3C UI Events key value, e.g. "a", "Enter", "Shift")
     const char* code,       // physical key code (W3C UI Events code, e.g. "KeyA", "Enter")
@@ -147,27 +156,37 @@ typedef void (*wef_keyboard_event_fn)(
     bool repeat
 );
 
+// Callback for window close requested events.
+typedef void (*wef_close_requested_fn)(
+    void* user_data,
+    uint32_t window_id
+);
+
 struct wef_backend_api {
     uint32_t version;
     void* backend_data;
 
-    void (*navigate)(void* backend_data, const char* url);
-    void (*set_title)(void* backend_data, const char* title);
-    void (*execute_js)(void* backend_data, const char* script,
+    // Window lifecycle
+    uint32_t (*create_window)(void* backend_data);
+    void (*close_window)(void* backend_data, uint32_t window_id);
+
+    void (*navigate)(void* backend_data, uint32_t window_id, const char* url);
+    void (*set_title)(void* backend_data, uint32_t window_id, const char* title);
+    void (*execute_js)(void* backend_data, uint32_t window_id, const char* script,
                        wef_js_result_fn callback, void* callback_data);
     void (*quit)(void* backend_data);
-    void (*set_window_size)(void* backend_data, int width, int height);
-    void (*get_window_size)(void* backend_data, int* width, int* height);
-    void (*set_window_position)(void* backend_data, int x, int y);
-    void (*get_window_position)(void* backend_data, int* x, int* y);
-    void (*set_resizable)(void* backend_data, bool resizable);
-    bool (*is_resizable)(void* backend_data);
-    void (*set_always_on_top)(void* backend_data, bool always_on_top);
-    bool (*is_always_on_top)(void* backend_data);
-    bool (*is_visible)(void* backend_data);
-    void (*show)(void* backend_data);
-    void (*hide)(void* backend_data);
-    void (*focus)(void* backend_data);
+    void (*set_window_size)(void* backend_data, uint32_t window_id, int width, int height);
+    void (*get_window_size)(void* backend_data, uint32_t window_id, int* width, int* height);
+    void (*set_window_position)(void* backend_data, uint32_t window_id, int x, int y);
+    void (*get_window_position)(void* backend_data, uint32_t window_id, int* x, int* y);
+    void (*set_resizable)(void* backend_data, uint32_t window_id, bool resizable);
+    bool (*is_resizable)(void* backend_data, uint32_t window_id);
+    void (*set_always_on_top)(void* backend_data, uint32_t window_id, bool always_on_top);
+    bool (*is_always_on_top)(void* backend_data, uint32_t window_id);
+    bool (*is_visible)(void* backend_data, uint32_t window_id);
+    void (*show)(void* backend_data, uint32_t window_id);
+    void (*hide)(void* backend_data, uint32_t window_id);
+    void (*focus)(void* backend_data, uint32_t window_id);
     void (*post_ui_task)(void* backend_data, void (*task)(void* data), void* data);
 
     bool (*value_is_null)(wef_value_t* val);
@@ -241,14 +260,14 @@ struct wef_backend_api {
     // Raw window/display handles for GPU surface creation.
     // Returns platform-specific handle:
     //   AppKit: NSView*, Win32: HWND, X11: Window (cast to void*), Wayland: wl_surface*
-    void* (*get_window_handle)(void* backend_data);
+    void* (*get_window_handle)(void* backend_data, uint32_t window_id);
     // Returns platform-specific display handle:
     //   AppKit: NULL, Win32: NULL (or HINSTANCE), X11: Display*, Wayland: wl_display*
-    void* (*get_display_handle)(void* backend_data);
+    void* (*get_display_handle)(void* backend_data, uint32_t window_id);
     // Returns WEF_WINDOW_HANDLE_* constant identifying the platform
-    int (*get_window_handle_type)(void* backend_data);
+    int (*get_window_handle_type)(void* backend_data, uint32_t window_id);
 
-    // Register a handler for keyboard input events.
+    // Register a handler for keyboard input events (global, receives window_id in callback).
     void (*set_keyboard_event_handler)(
         void* backend_data,
         wef_keyboard_event_fn handler,
@@ -301,6 +320,13 @@ struct wef_backend_api {
     void (*set_move_handler)(
         void* backend_data,
         wef_move_fn handler,
+        void* user_data
+    );
+
+    // Register a handler for window close requested events.
+    void (*set_close_requested_handler)(
+        void* backend_data,
+        wef_close_requested_fn handler,
         void* user_data
     );
 

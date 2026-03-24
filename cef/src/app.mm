@@ -5,6 +5,10 @@
 
 #include <iostream>
 
+#ifdef __APPLE__
+#import <Cocoa/Cocoa.h>
+#endif
+
 #include "include/base/cef_callback.h"
 #include "include/cef_browser.h"
 #include "include/views/cef_browser_view.h"
@@ -13,23 +17,51 @@
 #include "include/wrapper/cef_helpers.h"
 
 std::string g_runtime_path;
+std::queue<uint32_t> g_pending_wef_ids;
 
 namespace {
 WefHandler* g_handler = nullptr;
+}
 
 class WefWindowDelegate : public CefWindowDelegate {
  public:
-  explicit WefWindowDelegate(CefRefPtr<CefBrowserView> browser_view)
-      : browser_view_(browser_view) {}
+  WefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id)
+      : browser_view_(browser_view), wef_id_(wef_id) {
+  }
 
   void OnWindowCreated(CefRefPtr<CefWindow> window) override {
     window->AddChildView(browser_view_);
     window->Show();
     InstallNativeMouseMonitor();
+
+    // Register NSWindow for event routing
+    CefWindowHandle handle = window->GetWindowHandle();
+    if (handle && wef_id_ > 0) {
+#ifdef __APPLE__
+      NSView* view = (__bridge NSView*)handle;
+      NSWindow* nswindow = [view window];
+      if (nswindow) {
+        RuntimeLoader::GetInstance()->RegisterNSWindow((__bridge void*)nswindow, wef_id_);
+      }
+#endif
+    }
   }
 
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
-    RemoveNativeMouseMonitor();
+    // Unregister NSWindow
+    CefWindowHandle handle = window->GetWindowHandle();
+    if (handle) {
+#ifdef __APPLE__
+      NSView* view = (__bridge NSView*)handle;
+      NSWindow* nswindow = [view window];
+      if (nswindow) {
+        RuntimeLoader::GetInstance()->UnregisterNSWindow((__bridge void*)nswindow);
+      }
+#endif
+    }
+    if (wef_id_ > 0) {
+      RuntimeLoader::GetInstance()->UnregisterBrowser(wef_id_);
+    }
     browser_view_ = nullptr;
   }
 
@@ -44,9 +76,12 @@ class WefWindowDelegate : public CefWindowDelegate {
 
  private:
   CefRefPtr<CefBrowserView> browser_view_;
+  uint32_t wef_id_ = 0;
   IMPLEMENT_REFCOUNTING(WefWindowDelegate);
 };
 
+CefRefPtr<CefWindowDelegate> CreateWefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id) {
+  return new WefWindowDelegate(browser_view, wef_id);
 }
 
 WefHandler::WefHandler() {
@@ -65,10 +100,11 @@ void WefHandler::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
   browser_list_.push_back(browser);
 
-  RuntimeLoader::GetInstance()->SetBrowser(browser);
-
-  if (!g_runtime_path.empty()) {
-    RuntimeLoader::GetInstance()->Start();
+  auto* loader = RuntimeLoader::GetInstance();
+  if (!g_pending_wef_ids.empty()) {
+    uint32_t wef_id = g_pending_wef_ids.front();
+    g_pending_wef_ids.pop();
+    loader->RegisterBrowser(wef_id, browser);
   }
 }
 
@@ -82,6 +118,13 @@ bool WefHandler::DoClose(CefRefPtr<CefBrowser> browser) {
 
 void WefHandler::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
+
+  auto* loader = RuntimeLoader::GetInstance();
+  uint32_t wid = loader->GetWefIdForBrowser(browser);
+  if (wid > 0) {
+    loader->DispatchCloseRequestedEvent(wid);
+  }
+
   for (auto it = browser_list_.begin(); it != browser_list_.end(); ++it) {
     if ((*it)->IsSame(browser)) {
       browser_list_.erase(it);
@@ -241,8 +284,9 @@ bool WefHandler::OnKeyEvent(CefRefPtr<CefBrowser> browser,
   std::string key = CefKeyCodeToString(event.windows_key_code, event.character, event.type == KEYEVENT_CHAR);
   std::string code = CefKeyCodeToCode(event.windows_key_code);
 
+  uint32_t wid = RuntimeLoader::GetInstance()->GetWefIdForBrowser(browser);
   RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
-      state, key.c_str(), code.c_str(), modifiers, false);
+      wid, state, key.c_str(), code.c_str(), modifiers, false);
 
   return false; // Don't consume the event — let CEF handle it too
 }
@@ -272,7 +316,8 @@ bool WefHandler::OnProcessMessageReceived(
     std::string method_path = args->GetString(1).ToString();
     CefRefPtr<CefListValue> callArgs = args->GetList(2);
 
-    RuntimeLoader::GetInstance()->OnJsCall(call_id, method_path, callArgs);
+    uint32_t wid = RuntimeLoader::GetInstance()->GetWefIdForBrowser(browser);
+    RuntimeLoader::GetInstance()->OnJsCall(wid, call_id, method_path, callArgs);
     return true;
   }
 
@@ -282,21 +327,32 @@ bool WefHandler::OnProcessMessageReceived(
 void WefApp::OnContextInitialized() {
   CEF_REQUIRE_UI_THREAD();
 
+  // Create the handler and keep it alive for the lifetime of the app.
+  // Backend_CreateWindow uses WefHandler::GetInstance() from the runtime thread,
+  // so the handler must outlive this function scope.
+  static CefRefPtr<WefHandler> handler(new WefHandler());
+
   if (!g_runtime_path.empty()) {
     if (!RuntimeLoader::GetInstance()->Load(g_runtime_path)) {
       std::cerr << "Failed to load runtime, exiting" << std::endl;
       CefQuitMessageLoop();
       return;
     }
+    // Defer Start() to the next message loop iteration. OnContextInitialized
+    // runs during CefInitialize(), before CefRunMessageLoop() has started.
+    // The runtime thread's Backend_CreateWindow posts CefPostTasks to the UI
+    // thread and blocks until they complete — this deadlocks if the message
+    // loop isn't running yet.
+    CefPostTask(TID_UI, base::BindOnce([]() {
+      RuntimeLoader::GetInstance()->Start();
+    }));
+  } else {
+    // No runtime: create a default window for demo
+    uint32_t wef_id = RuntimeLoader::GetInstance()->AllocateWindowId();
+    g_pending_wef_ids.push(wef_id);
+    CefBrowserSettings browser_settings;
+    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
+        handler, "https://example.com", browser_settings, nullptr, nullptr, nullptr);
+    CefWindow::CreateTopLevelWindow(new WefWindowDelegate(browser_view, wef_id));
   }
-
-  CefRefPtr<WefHandler> handler(new WefHandler());
-  CefBrowserSettings browser_settings;
-
-  std::string initial_url = g_runtime_path.empty() ? "https://example.com" : "about:blank";
-
-  CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-      handler, initial_url, browser_settings, nullptr, nullptr, nullptr);
-
-  CefWindow::CreateTopLevelWindow(new WefWindowDelegate(browser_view));
 }

@@ -8,6 +8,7 @@
 #include <atomic>
 #include <mutex>
 #include <queue>
+#include <map>
 
 #include "wef.h"
 #include "webview_value.h"
@@ -28,12 +29,30 @@ class RuntimeLoader {
   WefBackend* GetBackend() { return backend_; }
   const wef_backend_api_t& GetBackendApi() const { return backend_api_; }
 
-  void OnJsCall(uint64_t call_id, const std::string& method_path,
+  uint32_t AllocateWindowId() { return next_window_id_.fetch_add(1); }
+
+  void StoreCallWindow(uint64_t call_id, uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(call_map_mutex_);
+    call_to_window_[call_id] = window_id;
+  }
+
+  uint32_t ConsumeCallWindow(uint64_t call_id) {
+    std::lock_guard<std::mutex> lock(call_map_mutex_);
+    auto it = call_to_window_.find(call_id);
+    if (it != call_to_window_.end()) {
+      uint32_t wid = it->second;
+      call_to_window_.erase(it);
+      return wid;
+    }
+    return 0;
+  }
+
+  void OnJsCall(uint32_t window_id, uint64_t call_id, const std::string& method_path,
                 wef::ValuePtr args);
 
   void PollPendingJsCalls();
 
-  void JsCallRespond(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error);
+  void JsCallRespond(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error);
 
   void SetJsCallHandler(wef_js_call_fn handler, void* user_data) {
     std::lock_guard<std::mutex> lock(handler_mutex_);
@@ -47,11 +66,11 @@ class RuntimeLoader {
     keyboard_user_data_ = user_data;
   }
 
-  void DispatchKeyboardEvent(int state, const char* key, const char* code,
+  void DispatchKeyboardEvent(uint32_t window_id, int state, const char* key, const char* code,
                              uint32_t modifiers, bool repeat) {
     std::lock_guard<std::mutex> lock(keyboard_mutex_);
     if (keyboard_handler_) {
-      keyboard_handler_(keyboard_user_data_, state, key, code, modifiers, repeat);
+      keyboard_handler_(keyboard_user_data_, window_id, state, key, code, modifiers, repeat);
     }
   }
 
@@ -61,11 +80,11 @@ class RuntimeLoader {
     mouse_click_user_data_ = user_data;
   }
 
-  void DispatchMouseClickEvent(int state, int button, double x, double y,
+  void DispatchMouseClickEvent(uint32_t window_id, int state, int button, double x, double y,
                                uint32_t modifiers, int32_t click_count) {
     std::lock_guard<std::mutex> lock(mouse_mutex_);
     if (mouse_click_handler_) {
-      mouse_click_handler_(mouse_click_user_data_, state, button, x, y, modifiers, click_count);
+      mouse_click_handler_(mouse_click_user_data_, window_id, state, button, x, y, modifiers, click_count);
     }
   }
 
@@ -75,10 +94,10 @@ class RuntimeLoader {
     mouse_move_user_data_ = user_data;
   }
 
-  void DispatchMouseMoveEvent(double x, double y, uint32_t modifiers) {
+  void DispatchMouseMoveEvent(uint32_t window_id, double x, double y, uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(mouse_move_mutex_);
     if (mouse_move_handler_) {
-      mouse_move_handler_(mouse_move_user_data_, x, y, modifiers);
+      mouse_move_handler_(mouse_move_user_data_, window_id, x, y, modifiers);
     }
   }
 
@@ -88,11 +107,11 @@ class RuntimeLoader {
     wheel_user_data_ = user_data;
   }
 
-  void DispatchWheelEvent(double delta_x, double delta_y, double x, double y,
+  void DispatchWheelEvent(uint32_t window_id, double delta_x, double delta_y, double x, double y,
                           uint32_t modifiers, int32_t delta_mode) {
     std::lock_guard<std::mutex> lock(wheel_mutex_);
     if (wheel_handler_) {
-      wheel_handler_(wheel_user_data_, delta_x, delta_y, x, y, modifiers, delta_mode);
+      wheel_handler_(wheel_user_data_, window_id, delta_x, delta_y, x, y, modifiers, delta_mode);
     }
   }
 
@@ -102,11 +121,11 @@ class RuntimeLoader {
     cursor_enter_leave_user_data_ = user_data;
   }
 
-  void DispatchCursorEnterLeaveEvent(int entered, double x, double y,
+  void DispatchCursorEnterLeaveEvent(uint32_t window_id, int entered, double x, double y,
                                      uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
     if (cursor_enter_leave_handler_) {
-      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, entered, x, y, modifiers);
+      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, window_id, entered, x, y, modifiers);
     }
   }
 
@@ -116,10 +135,10 @@ class RuntimeLoader {
     focused_user_data_ = user_data;
   }
 
-  void DispatchFocusedEvent(int focused) {
+  void DispatchFocusedEvent(uint32_t window_id, int focused) {
     std::lock_guard<std::mutex> lock(focused_mutex_);
     if (focused_handler_) {
-      focused_handler_(focused_user_data_, focused);
+      focused_handler_(focused_user_data_, window_id, focused);
     }
   }
 
@@ -129,10 +148,10 @@ class RuntimeLoader {
     resize_user_data_ = user_data;
   }
 
-  void DispatchResizeEvent(int width, int height) {
+  void DispatchResizeEvent(uint32_t window_id, int width, int height) {
     std::lock_guard<std::mutex> lock(resize_mutex_);
     if (resize_handler_) {
-      resize_handler_(resize_user_data_, width, height);
+      resize_handler_(resize_user_data_, window_id, width, height);
     }
   }
 
@@ -142,10 +161,23 @@ class RuntimeLoader {
     move_user_data_ = user_data;
   }
 
-  void DispatchMoveEvent(int x, int y) {
+  void DispatchMoveEvent(uint32_t window_id, int x, int y) {
     std::lock_guard<std::mutex> lock(move_mutex_);
     if (move_handler_) {
-      move_handler_(move_user_data_, x, y);
+      move_handler_(move_user_data_, window_id, x, y);
+    }
+  }
+
+  void SetCloseRequestedHandler(wef_close_requested_fn handler, void* user_data) {
+    std::lock_guard<std::mutex> lock(close_requested_mutex_);
+    close_requested_handler_ = handler;
+    close_requested_user_data_ = user_data;
+  }
+
+  void DispatchCloseRequestedEvent(uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(close_requested_mutex_);
+    if (close_requested_handler_) {
+      close_requested_handler_(close_requested_user_data_, window_id);
     }
   }
 
@@ -209,11 +241,20 @@ class RuntimeLoader {
   void* move_user_data_ = nullptr;
   std::mutex move_mutex_;
 
+  wef_close_requested_fn close_requested_handler_ = nullptr;
+  void* close_requested_user_data_ = nullptr;
+  std::mutex close_requested_mutex_;
+
+  std::atomic<uint32_t> next_window_id_{1};
+  std::map<uint64_t, uint32_t> call_to_window_;
+  std::mutex call_map_mutex_;
+
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;
   std::mutex notify_mutex_;
 
   struct PendingJsCall {
+    uint32_t window_id;
     uint64_t call_id;
     std::string method_path;
     wef::ValuePtr args;
@@ -228,30 +269,36 @@ class WefBackend {
  public:
   virtual ~WefBackend() = default;
 
-  virtual void Navigate(const std::string& url) = 0;
-  virtual void SetTitle(const std::string& title) = 0;
-  virtual void ExecuteJs(const std::string& script) = 0;
+  // Window lifecycle
+  virtual void CreateWindow(uint32_t window_id, int width, int height) = 0;
+  virtual void CloseWindow(uint32_t window_id) = 0;
+
+  // Per-window operations
+  virtual void Navigate(uint32_t window_id, const std::string& url) = 0;
+  virtual void SetTitle(uint32_t window_id, const std::string& title) = 0;
+  virtual void ExecuteJs(uint32_t window_id, const std::string& script) = 0;
+  virtual void SetWindowSize(uint32_t window_id, int width, int height) = 0;
+  virtual void GetWindowSize(uint32_t window_id, int* width, int* height) = 0;
+  virtual void SetWindowPosition(uint32_t window_id, int x, int y) = 0;
+  virtual void GetWindowPosition(uint32_t window_id, int* x, int* y) = 0;
+  virtual void SetResizable(uint32_t window_id, bool resizable) = 0;
+  virtual bool IsResizable(uint32_t window_id) = 0;
+  virtual void SetAlwaysOnTop(uint32_t window_id, bool always_on_top) = 0;
+  virtual bool IsAlwaysOnTop(uint32_t window_id) = 0;
+  virtual bool IsVisible(uint32_t window_id) = 0;
+  virtual void Show(uint32_t window_id) = 0;
+  virtual void Hide(uint32_t window_id) = 0;
+  virtual void Focus(uint32_t window_id) = 0;
+
+  // Global operations
   virtual void Quit() = 0;
-  virtual void SetWindowSize(int width, int height) = 0;
-  virtual void GetWindowSize(int* width, int* height) = 0;
-  virtual void SetWindowPosition(int x, int y) = 0;
-  virtual void GetWindowPosition(int* x, int* y) = 0;
-  virtual void SetResizable(bool resizable) = 0;
-  virtual bool IsResizable() = 0;
-  virtual void SetAlwaysOnTop(bool always_on_top) = 0;
-  virtual bool IsAlwaysOnTop() = 0;
-  virtual bool IsVisible() = 0;
-  virtual void Show() = 0;
-  virtual void Hide() = 0;
-  virtual void Focus() = 0;
   virtual void PostUiTask(void (*task)(void*), void* data) = 0;
-
-  virtual void InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) = 0;
-  virtual void ReleaseJsCallback(uint64_t callback_id) = 0;
-
-  virtual void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) = 0;
-
   virtual void Run() = 0;
+
+  // JS interop (broadcast to all windows for callback operations)
+  virtual void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) = 0;
+  virtual void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) = 0;
+  virtual void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) = 0;
 
   virtual void SetApplicationMenu(wef_value_t* menu_template,
                                   const wef_backend_api_t* api,
@@ -259,6 +306,6 @@ class WefBackend {
                                   void* on_click_data) = 0;
 };
 
-WefBackend* CreateWefBackend(int width, int height, const std::string& title);
+WefBackend* CreateWefBackend();
 
 #endif // WEF_RUNTIME_LOADER_H_

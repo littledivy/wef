@@ -4,12 +4,24 @@
 #define WEF_APP_H_
 
 #include <list>
+#include <map>
+#include <queue>
 #include <string>
 
 #include "include/cef_app.h"
 #include "include/cef_client.h"
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_window.h"
 
 extern std::string g_runtime_path;
+
+// Queue of wef window IDs waiting for OnAfterCreated to fire.
+// Push before CreateBrowserView, pop in OnAfterCreated.
+// Both happen on the UI thread so no synchronization needed.
+extern std::queue<uint32_t> g_pending_wef_ids;
+
+// Factory function to create a WefWindowDelegate (defined in app.mm)
+CefRefPtr<CefWindowDelegate> CreateWefWindowDelegate(CefRefPtr<CefBrowserView> browser_view, uint32_t wef_id);
 
 class WefHandler : public CefClient,
                    public CefLifeSpanHandler,

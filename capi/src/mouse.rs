@@ -1,5 +1,6 @@
 // Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
+use std::collections::HashMap;
 use std::ffi::c_int;
 use std::ffi::c_void;
 use std::sync::{Mutex, OnceLock};
@@ -19,26 +20,26 @@ pub const WEF_WHEEL_DELTA_PIXEL: i32 = 0;
 pub const WEF_WHEEL_DELTA_LINE: i32 = 1;
 pub const WEF_WHEEL_DELTA_PAGE: i32 = 2;
 
+// --- Mouse click ---
+
 #[derive(Debug, Clone)]
 pub struct MouseClickEvent {
+  pub window_id: u32,
   pub state: MouseButtonState,
   pub button: MouseButton,
   pub x: f64,
   pub y: f64,
   pub modifiers: KeyModifiers,
-  /// 1 = single click, 2 = double click.
   pub click_count: i32,
 }
 
 impl MouseClickEvent {
-  /// True when this is a "click" event (primary button released).
   pub fn is_click(&self) -> bool {
     self.state == MouseButtonState::Released
       && self.button == MouseButton::Left
       && self.click_count >= 1
   }
 
-  /// True when this is a "dblclick" event (primary button released, double click).
   pub fn is_double_click(&self) -> bool {
     self.state == MouseButtonState::Released
       && self.button == MouseButton::Left
@@ -75,17 +76,77 @@ impl MouseButton {
   }
 }
 
-static MOUSE_CLICK_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(MouseClickEvent) + Send + Sync>>>,
-> = OnceLock::new();
+type HandlerMap<T> = Mutex<HashMap<u32, Box<dyn Fn(T) + Send + Sync>>>;
 
-fn mouse_click_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(MouseClickEvent) + Send + Sync>>> {
-  MOUSE_CLICK_HANDLER.get_or_init(|| Mutex::new(None))
+macro_rules! handler_store {
+  ($fn_name:ident, $event_type:ty) => {
+    fn $fn_name() -> &'static HandlerMap<$event_type> {
+      static STORE: OnceLock<HandlerMap<$event_type>> = OnceLock::new();
+      STORE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+  };
 }
+
+handler_store!(mouse_click_handlers, MouseClickEvent);
+handler_store!(mouse_move_handlers, MouseMoveEvent);
+handler_store!(wheel_handlers, WheelEvent);
+handler_store!(cursor_enter_leave_handlers, CursorEnterLeaveEvent);
+handler_store!(focused_handlers, FocusedEvent);
+handler_store!(resize_handlers, ResizeEvent);
+handler_store!(move_handlers, MoveEvent);
+handler_store!(close_requested_handlers, CloseRequestedEvent);
+
+macro_rules! ensure_handler {
+  ($fn_name:ident, $api_field:ident, $trampoline:ident) => {
+    fn $fn_name() {
+      static FLAG: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+      if !FLAG.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let api = api();
+        if let Some(set_handler) = api.$api_field {
+          unsafe {
+            set_handler(
+              api.backend_data,
+              Some($trampoline),
+              std::ptr::null_mut(),
+            );
+          }
+        }
+      }
+    }
+  };
+}
+
+ensure_handler!(
+  ensure_mouse_click,
+  set_mouse_click_handler,
+  mouse_click_trampoline
+);
+ensure_handler!(
+  ensure_mouse_move,
+  set_mouse_move_handler,
+  mouse_move_trampoline
+);
+ensure_handler!(ensure_wheel, set_wheel_handler, wheel_trampoline);
+ensure_handler!(
+  ensure_cursor_enter_leave,
+  set_cursor_enter_leave_handler,
+  cursor_enter_leave_trampoline
+);
+ensure_handler!(ensure_focused, set_focused_handler, focused_trampoline);
+ensure_handler!(ensure_resize, set_resize_handler, resize_trampoline);
+ensure_handler!(ensure_move, set_move_handler, move_trampoline);
+ensure_handler!(
+  ensure_close_requested,
+  set_close_requested_handler,
+  close_requested_trampoline
+);
+
+// --- Trampolines ---
 
 unsafe extern "C" fn mouse_click_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   state: c_int,
   button: c_int,
   x: f64,
@@ -94,6 +155,7 @@ unsafe extern "C" fn mouse_click_trampoline(
   click_count: i32,
 ) {
   let event = MouseClickEvent {
+    window_id,
     state: if state == WEF_MOUSE_PRESSED {
       MouseButtonState::Pressed
     } else {
@@ -106,82 +168,62 @@ unsafe extern "C" fn mouse_click_trampoline(
     click_count,
   };
 
-  let guard = mouse_click_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = mouse_click_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for mouse click events.
-pub fn on_mouse_click<F>(handler: F)
+pub fn on_mouse_click<F>(window_id: u32, handler: F)
 where
   F: Fn(MouseClickEvent) + Send + Sync + 'static,
 {
-  *mouse_click_handler_store().lock().unwrap() = Some(Box::new(handler));
-
-  let api = api();
-  if let Some(set_handler) = api.set_mouse_click_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(mouse_click_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+  ensure_mouse_click();
+  mouse_click_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }
+
+// --- Mouse move ---
 
 #[derive(Debug, Clone, Copy)]
 pub struct MouseMoveEvent {
+  pub window_id: u32,
   pub x: f64,
   pub y: f64,
   pub modifiers: KeyModifiers,
 }
 
-static MOUSE_MOVE_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(MouseMoveEvent) + Send + Sync>>>,
-> = OnceLock::new();
-
-fn mouse_move_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(MouseMoveEvent) + Send + Sync>>> {
-  MOUSE_MOVE_HANDLER.get_or_init(|| Mutex::new(None))
-}
-
 unsafe extern "C" fn mouse_move_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   x: f64,
   y: f64,
   modifiers: u32,
 ) {
   let event = MouseMoveEvent {
+    window_id,
     x,
     y,
     modifiers: KeyModifiers::from_raw(modifiers),
   };
 
-  let guard = mouse_move_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = mouse_move_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for mouse move events.
-pub fn on_mouse_move<F>(handler: F)
+pub fn on_mouse_move<F>(window_id: u32, handler: F)
 where
   F: Fn(MouseMoveEvent) + Send + Sync + 'static,
 {
-  *mouse_move_handler_store().lock().unwrap() = Some(Box::new(handler));
-
-  let api = api();
-  if let Some(set_handler) = api.set_mouse_move_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(mouse_move_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+  ensure_mouse_move();
+  mouse_move_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }
 
 // --- Wheel events ---
@@ -195,6 +237,7 @@ pub enum WheelDeltaMode {
 
 #[derive(Debug, Clone, Copy)]
 pub struct WheelEvent {
+  pub window_id: u32,
   pub delta_x: f64,
   pub delta_y: f64,
   pub x: f64,
@@ -203,17 +246,9 @@ pub struct WheelEvent {
   pub delta_mode: WheelDeltaMode,
 }
 
-static WHEEL_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(WheelEvent) + Send + Sync>>>,
-> = OnceLock::new();
-
-fn wheel_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(WheelEvent) + Send + Sync>>> {
-  WHEEL_HANDLER.get_or_init(|| Mutex::new(None))
-}
-
 unsafe extern "C" fn wheel_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   delta_x: f64,
   delta_y: f64,
   x: f64,
@@ -222,6 +257,7 @@ unsafe extern "C" fn wheel_trampoline(
   delta_mode: i32,
 ) {
   let event = WheelEvent {
+    window_id,
     delta_x,
     delta_y,
     x,
@@ -234,236 +270,200 @@ unsafe extern "C" fn wheel_trampoline(
     },
   };
 
-  let guard = wheel_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = wheel_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for wheel (scroll) events.
-pub fn on_wheel<F>(handler: F)
+pub fn on_wheel<F>(window_id: u32, handler: F)
 where
   F: Fn(WheelEvent) + Send + Sync + 'static,
 {
-  *wheel_handler_store().lock().unwrap() = Some(Box::new(handler));
-
-  let api = api();
-  if let Some(set_handler) = api.set_wheel_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(wheel_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+  ensure_wheel();
+  wheel_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }
 
 // --- Cursor enter/leave events ---
 
 #[derive(Debug, Clone, Copy)]
 pub struct CursorEnterLeaveEvent {
-  /// True when the cursor entered the window, false when it left.
+  pub window_id: u32,
   pub entered: bool,
   pub x: f64,
   pub y: f64,
   pub modifiers: KeyModifiers,
 }
 
-static CURSOR_ENTER_LEAVE_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(CursorEnterLeaveEvent) + Send + Sync>>>,
-> = OnceLock::new();
-
-fn cursor_enter_leave_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(CursorEnterLeaveEvent) + Send + Sync>>>
-{
-  CURSOR_ENTER_LEAVE_HANDLER.get_or_init(|| Mutex::new(None))
-}
-
 unsafe extern "C" fn cursor_enter_leave_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   entered: c_int,
   x: f64,
   y: f64,
   modifiers: u32,
 ) {
   let event = CursorEnterLeaveEvent {
+    window_id,
     entered: entered != 0,
     x,
     y,
     modifiers: KeyModifiers::from_raw(modifiers),
   };
 
-  let guard = cursor_enter_leave_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = cursor_enter_leave_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for cursor enter/leave events.
-pub fn on_cursor_enter_leave<F>(handler: F)
+pub fn on_cursor_enter_leave<F>(window_id: u32, handler: F)
 where
   F: Fn(CursorEnterLeaveEvent) + Send + Sync + 'static,
 {
-  *cursor_enter_leave_handler_store().lock().unwrap() =
-    Some(Box::new(handler));
-
-  let api = api();
-  if let Some(set_handler) = api.set_cursor_enter_leave_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(cursor_enter_leave_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+  ensure_cursor_enter_leave();
+  cursor_enter_leave_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }
 
 // --- Focused events ---
 
 #[derive(Debug, Clone, Copy)]
 pub struct FocusedEvent {
-  /// True when the window gained focus, false when it lost focus.
+  pub window_id: u32,
   pub focused: bool,
-}
-
-static FOCUSED_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(FocusedEvent) + Send + Sync>>>,
-> = OnceLock::new();
-
-fn focused_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(FocusedEvent) + Send + Sync>>> {
-  FOCUSED_HANDLER.get_or_init(|| Mutex::new(None))
 }
 
 unsafe extern "C" fn focused_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   focused: c_int,
 ) {
   let event = FocusedEvent {
+    window_id,
     focused: focused != 0,
   };
 
-  let guard = focused_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = focused_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for window focus/blur events.
-pub fn on_focused<F>(handler: F)
+pub fn on_focused<F>(window_id: u32, handler: F)
 where
   F: Fn(FocusedEvent) + Send + Sync + 'static,
 {
-  *focused_handler_store().lock().unwrap() = Some(Box::new(handler));
-
-  let api = api();
-  if let Some(set_handler) = api.set_focused_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(focused_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+  ensure_focused();
+  focused_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }
 
 // --- Resize events ---
 
 #[derive(Debug, Clone, Copy)]
 pub struct ResizeEvent {
+  pub window_id: u32,
   pub width: i32,
   pub height: i32,
 }
 
-static RESIZE_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(ResizeEvent) + Send + Sync>>>,
-> = OnceLock::new();
-
-fn resize_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(ResizeEvent) + Send + Sync>>> {
-  RESIZE_HANDLER.get_or_init(|| Mutex::new(None))
-}
-
 unsafe extern "C" fn resize_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   width: c_int,
   height: c_int,
 ) {
-  let event = ResizeEvent { width, height };
+  let event = ResizeEvent {
+    window_id,
+    width,
+    height,
+  };
 
-  let guard = resize_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = resize_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for window resize events.
-pub fn on_resize<F>(handler: F)
+pub fn on_resize<F>(window_id: u32, handler: F)
 where
   F: Fn(ResizeEvent) + Send + Sync + 'static,
 {
-  *resize_handler_store().lock().unwrap() = Some(Box::new(handler));
-
-  let api = api();
-  if let Some(set_handler) = api.set_resize_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(resize_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+  ensure_resize();
+  resize_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }
 
 // --- Move events ---
 
 #[derive(Debug, Clone, Copy)]
 pub struct MoveEvent {
+  pub window_id: u32,
   pub x: i32,
   pub y: i32,
 }
 
-static MOVE_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(MoveEvent) + Send + Sync>>>,
-> = OnceLock::new();
-
-fn move_handler_store(
-) -> &'static Mutex<Option<Box<dyn Fn(MoveEvent) + Send + Sync>>> {
-  MOVE_HANDLER.get_or_init(|| Mutex::new(None))
-}
-
 unsafe extern "C" fn move_trampoline(
   _user_data: *mut c_void,
+  window_id: u32,
   x: c_int,
   y: c_int,
 ) {
-  let event = MoveEvent { x, y };
+  let event = MoveEvent { window_id, x, y };
 
-  let guard = move_handler_store().lock().unwrap();
-  if let Some(handler) = guard.as_ref() {
+  let guard = move_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
     handler(event);
   }
 }
 
-/// Register a handler for window move events.
-pub fn on_move<F>(handler: F)
+pub fn on_move<F>(window_id: u32, handler: F)
 where
   F: Fn(MoveEvent) + Send + Sync + 'static,
 {
-  *move_handler_store().lock().unwrap() = Some(Box::new(handler));
+  ensure_move();
+  move_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
+}
 
-  let api = api();
-  if let Some(set_handler) = api.set_move_handler {
-    unsafe {
-      set_handler(
-        api.backend_data,
-        Some(move_trampoline),
-        std::ptr::null_mut(),
-      );
-    }
+// --- Close requested events ---
+
+#[derive(Debug, Clone, Copy)]
+pub struct CloseRequestedEvent {
+  pub window_id: u32,
+}
+
+unsafe extern "C" fn close_requested_trampoline(
+  _user_data: *mut c_void,
+  window_id: u32,
+) {
+  let event = CloseRequestedEvent { window_id };
+
+  let guard = close_requested_handlers().lock().unwrap();
+  if let Some(handler) = guard.get(&window_id) {
+    handler(event);
   }
+}
+
+pub fn on_close_requested<F>(window_id: u32, handler: F)
+where
+  F: Fn(CloseRequestedEvent) + Send + Sync + 'static,
+{
+  ensure_close_requested();
+  close_requested_handlers()
+    .lock()
+    .unwrap()
+    .insert(window_id, Box::new(handler));
 }

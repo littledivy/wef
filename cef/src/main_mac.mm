@@ -56,7 +56,6 @@
 
 static int run_headless(const char* runtimePath) {
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
-  loader->SetBrowser(nullptr);
 
   std::string path;
   if (runtimePath) {

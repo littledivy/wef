@@ -9,6 +9,8 @@
 #include <JavaScriptCore/JavaScript.h>
 
 #include <iostream>
+#include <map>
+#include <mutex>
 
 namespace keyboard {
 
@@ -64,7 +66,6 @@ std::string GdkKeyvalToKey(guint keyval) {
 }
 
 std::string GdkKeycodeToCode(guint16 hardware_keycode) {
-  // Linux evdev keycodes (hardware_keycode - 8 = evdev code)
   switch (hardware_keycode) {
     case 9: return "Escape";
     case 10: return "Digit1";
@@ -164,10 +165,44 @@ uint32_t GdkModifiersToWef(guint state) {
 
 } // namespace keyboard
 
+// GtkWidget → wef_id mapping for event routing
+static std::map<GtkWidget*, uint32_t> g_widget_to_wef_id;
+static std::mutex g_widget_mutex;
+
+static uint32_t WefIdForWidget(GtkWidget* widget) {
+  if (!widget) return 0;
+  // Walk up to find the toplevel window
+  GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
+  std::lock_guard<std::mutex> lock(g_widget_mutex);
+  auto it = g_widget_to_wef_id.find(toplevel);
+  return it != g_widget_to_wef_id.end() ? it->second : 0;
+}
+
+static void RegisterWidget(GtkWidget* widget, uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(g_widget_mutex);
+  g_widget_to_wef_id[widget] = window_id;
+}
+
+static void UnregisterWidget(GtkWidget* widget) {
+  std::lock_guard<std::mutex> lock(g_widget_mutex);
+  g_widget_to_wef_id.erase(widget);
+}
+
+// Per-window state
+struct LinuxWindowState {
+  uint32_t window_id;
+  GtkWidget* window;
+  WebKitWebView* webview;
+  WebKitUserContentManager* content_manager;
+};
+
 // Track the click_count from press events for use in the corresponding release.
 static int32_t g_last_click_count = 1;
 
 static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
+
   int state;
   int32_t click_count;
 
@@ -181,7 +216,6 @@ static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpoint
       click_count = 2;
       break;
     case GDK_3BUTTON_PRESS:
-      // No triple-click in web APIs; treat as double click
       state = WEF_MOUSE_PRESSED;
       click_count = 2;
       break;
@@ -209,18 +243,23 @@ static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpoint
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
 
   RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-      state, button, event->x, event->y, modifiers, click_count);
+      wid, state, button, event->x, event->y, modifiers, click_count);
 
-  return FALSE; // Don't consume the event
+  return FALSE;
 }
 
 static gboolean on_motion_event(GtkWidget* widget, GdkEventMotion* event, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
-  RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(event->x, event->y, modifiers);
+  RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(wid, event->x, event->y, modifiers);
   return FALSE;
 }
 
 static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
+
   double delta_x = 0, delta_y = 0;
   int32_t delta_mode = WEF_WHEEL_DELTA_LINE;
 
@@ -237,141 +276,124 @@ static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpoint
 
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
   RuntimeLoader::GetInstance()->DispatchWheelEvent(
-      delta_x, delta_y, event->x, event->y, modifiers, delta_mode);
+      wid, delta_x, delta_y, event->x, event->y, modifiers, delta_mode);
   return FALSE;
 }
 
 static gboolean on_enter_notify_event(GtkWidget* widget, GdkEventCrossing* event, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
-  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(1, event->x, event->y, modifiers);
+  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(wid, 1, event->x, event->y, modifiers);
   return FALSE;
 }
 
 static gboolean on_leave_notify_event(GtkWidget* widget, GdkEventCrossing* event, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
-  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(0, event->x, event->y, modifiers);
+  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(wid, 0, event->x, event->y, modifiers);
   return FALSE;
 }
 
 static gboolean on_focus_in_event(GtkWidget* widget, GdkEventFocus* event, gpointer user_data) {
-  RuntimeLoader::GetInstance()->DispatchFocusedEvent(1);
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
+  RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
   return FALSE;
 }
 
 static gboolean on_focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer user_data) {
-  RuntimeLoader::GetInstance()->DispatchFocusedEvent(0);
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
+  RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
   return FALSE;
 }
 
 static gboolean on_configure_event(GtkWidget* widget, GdkEventConfigure* event, gpointer user_data) {
-  RuntimeLoader::GetInstance()->DispatchResizeEvent(event->width, event->height);
-  RuntimeLoader::GetInstance()->DispatchMoveEvent(event->x, event->y);
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
+  RuntimeLoader::GetInstance()->DispatchResizeEvent(wid, event->width, event->height);
+  RuntimeLoader::GetInstance()->DispatchMoveEvent(wid, event->x, event->y);
   return FALSE;
 }
 
 static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid == 0) return FALSE;
+
   int state = (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
   std::string key = keyboard::GdkKeyvalToKey(event->keyval);
   std::string code = keyboard::GdkKeycodeToCode(event->hardware_keycode);
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
 
   RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
-      state, key.c_str(), code.c_str(), modifiers, false);
+      wid, state, key.c_str(), code.c_str(), modifiers, false);
 
-  return FALSE; // Don't consume the event
+  return FALSE;
 }
 
 // ============================================================================
 // WebKitGTK Backend
 // ============================================================================
 
-class WebKitGTKBackend : public WebviewBackend {
+class WebKitGTKBackend;
+
+// Forward declaration for message handler
+static void on_script_message(WebKitUserContentManager* manager,
+                              WebKitJavascriptResult* js_result,
+                              gpointer user_data);
+
+class WebKitGTKBackend : public WefBackend {
  public:
-  WebKitGTKBackend(int width, int height, const std::string& title);
+  WebKitGTKBackend();
   ~WebKitGTKBackend() override;
 
-  void Navigate(const std::string& url) override;
-  void SetTitle(const std::string& title) override;
-  void ExecuteJs(const std::string& script) override;
+  void CreateWindow(uint32_t window_id, int width, int height) override;
+  void CloseWindow(uint32_t window_id) override;
+
+  void Navigate(uint32_t window_id, const std::string& url) override;
+  void SetTitle(uint32_t window_id, const std::string& title) override;
+  void ExecuteJs(uint32_t window_id, const std::string& script) override;
   void Quit() override;
-  void SetWindowSize(int width, int height) override;
-  void GetWindowSize(int* width, int* height) override;
-  void SetWindowPosition(int x, int y) override;
-  void GetWindowPosition(int* x, int* y) override;
-  void SetResizable(bool resizable) override;
-  bool IsResizable() override;
-  void SetAlwaysOnTop(bool always_on_top) override;
-  bool IsAlwaysOnTop() override;
-  bool IsVisible() override;
-  void Show() override;
-  void Hide() override;
-  void Focus() override;
+  void SetWindowSize(uint32_t window_id, int width, int height) override;
+  void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void SetWindowPosition(uint32_t window_id, int x, int y) override;
+  void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
+  void SetResizable(uint32_t window_id, bool resizable) override;
+  bool IsResizable(uint32_t window_id) override;
+  void SetAlwaysOnTop(uint32_t window_id, bool always_on_top) override;
+  bool IsAlwaysOnTop(uint32_t window_id) override;
+  bool IsVisible(uint32_t window_id) override;
+  void Show(uint32_t window_id) override;
+  void Hide(uint32_t window_id) override;
+  void Focus(uint32_t window_id) override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
-  void InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) override;
-  void ReleaseJsCallback(uint64_t callback_id) override;
-  void RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
+  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) override;
+  void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) override;
+  void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
 
   void Run() override;
 
-  void HandleJsMessage(const char* json);
+  void SetApplicationMenu(wef_value_t*, const wef_backend_api_t*, wef_menu_click_fn, void*) override {}
+
+  void HandleJsMessage(uint32_t window_id, const char* json);
 
  private:
-  GtkWidget* window_;
-  WebKitWebView* webview_;
-  WebKitUserContentManager* content_manager_;
+  LinuxWindowState* GetWindow(uint32_t window_id);
 
+  std::map<uint32_t, LinuxWindowState> windows_;
+  std::mutex windows_mutex_;
 };
 
-// Callback for script messages from JavaScript
-static void on_script_message(WebKitUserContentManager* manager,
-                              WebKitJavascriptResult* js_result,
-                              gpointer user_data) {
-  WebKitGTKBackend* backend = static_cast<WebKitGTKBackend*>(user_data);
+// Static instance pointer for GTK callbacks
+static WebKitGTKBackend* g_gtk_backend = nullptr;
 
-  JSCValue* value = webkit_javascript_result_get_js_value(js_result);
-  if (jsc_value_is_string(value)) {
-    gchar* str = jsc_value_to_string(value);
-    backend->HandleJsMessage(str);
-    g_free(str);
-  }
-}
+// GtkWidget → window_id mapping for script message routing
+static std::map<WebKitUserContentManager*, uint32_t> g_content_manager_to_wef_id;
 
-// Callback for window destroy
-static void on_window_destroy(GtkWidget* widget, gpointer user_data) {
-  gtk_main_quit();
-}
-
-WebKitGTKBackend::WebKitGTKBackend(int width, int height, const std::string& title) {
-  // Create window
-  window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-  gtk_window_set_title(GTK_WINDOW(window_), title.c_str());
-  gtk_window_set_default_size(GTK_WINDOW(window_), width, height);
-  g_signal_connect(window_, "destroy", G_CALLBACK(on_window_destroy), this);
-  g_signal_connect(window_, "key-press-event", G_CALLBACK(on_key_event), this);
-  g_signal_connect(window_, "key-release-event", G_CALLBACK(on_key_event), this);
-  g_signal_connect(window_, "button-press-event", G_CALLBACK(on_button_event), this);
-  g_signal_connect(window_, "button-release-event", G_CALLBACK(on_button_event), this);
-  gtk_widget_add_events(window_, GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK | GDK_SMOOTH_SCROLL_MASK | GDK_ENTER_NOTIFY_MASK | GDK_LEAVE_NOTIFY_MASK);
-  g_signal_connect(window_, "motion-notify-event", G_CALLBACK(on_motion_event), this);
-  g_signal_connect(window_, "scroll-event", G_CALLBACK(on_scroll_event), this);
-  g_signal_connect(window_, "enter-notify-event", G_CALLBACK(on_enter_notify_event), this);
-  g_signal_connect(window_, "leave-notify-event", G_CALLBACK(on_leave_notify_event), this);
-  g_signal_connect(window_, "focus-in-event", G_CALLBACK(on_focus_in_event), this);
-  g_signal_connect(window_, "focus-out-event", G_CALLBACK(on_focus_out_event), this);
-  g_signal_connect(window_, "configure-event", G_CALLBACK(on_configure_event), this);
-
-  // Create user content manager for message handling
-  content_manager_ = webkit_user_content_manager_new();
-  g_signal_connect(content_manager_, "script-message-received::wef",
-                   G_CALLBACK(on_script_message), this);
-  webkit_user_content_manager_register_script_message_handler(content_manager_, "wef");
-
-  // Create webview with content manager
-  webview_ = WEBKIT_WEB_VIEW(webkit_web_view_new_with_user_content_manager(content_manager_));
-
-  // Inject initialization script
-  const char* initScript = R"JS(
+static const char* g_init_script = R"JS(
 (function() {
   const pendingCalls = new Map();
   let nextCallId = 1;
@@ -471,161 +493,257 @@ WebKitGTKBackend::WebKitGTKBackend(int width, int height, const std::string& tit
 })();
 )JS";
 
-  WebKitUserScript* script = webkit_user_script_new(
-      initScript,
-      WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
-      WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
-      nullptr, nullptr);
-  webkit_user_content_manager_add_script(content_manager_, script);
-  webkit_user_script_unref(script);
+static void on_script_message(WebKitUserContentManager* manager,
+                              WebKitJavascriptResult* js_result,
+                              gpointer user_data) {
+  auto it = g_content_manager_to_wef_id.find(manager);
+  uint32_t wid = (it != g_content_manager_to_wef_id.end()) ? it->second : 0;
 
-  // Add webview to window
-  gtk_container_add(GTK_CONTAINER(window_), GTK_WIDGET(webview_));
+  JSCValue* value = webkit_javascript_result_get_js_value(js_result);
+  if (jsc_value_is_string(value)) {
+    gchar* str = jsc_value_to_string(value);
+    if (g_gtk_backend) {
+      g_gtk_backend->HandleJsMessage(wid, str);
+    }
+    g_free(str);
+  }
+}
+
+static void on_window_destroy(GtkWidget* widget, gpointer user_data) {
+  uint32_t wid = WefIdForWidget(widget);
+  if (wid > 0) {
+    RuntimeLoader::GetInstance()->DispatchCloseRequestedEvent(wid);
+    UnregisterWidget(widget);
+  }
+  // If no more windows, quit
+  {
+    std::lock_guard<std::mutex> lock(g_widget_mutex);
+    if (g_widget_to_wef_id.empty()) {
+      gtk_main_quit();
+    }
+  }
+}
+
+WebKitGTKBackend::WebKitGTKBackend() {
+  g_gtk_backend = this;
 }
 
 WebKitGTKBackend::~WebKitGTKBackend() {
-  webkit_user_content_manager_unregister_script_message_handler(content_manager_, "wef");
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  for (auto& [wid, state] : windows_) {
+    webkit_user_content_manager_unregister_script_message_handler(state.content_manager, "wef");
+    g_content_manager_to_wef_id.erase(state.content_manager);
+    UnregisterWidget(state.window);
+  }
+  windows_.clear();
+  g_gtk_backend = nullptr;
 }
 
-void WebKitGTKBackend::Navigate(const std::string& url) {
-  std::string urlCopy = url;
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* pair = static_cast<std::pair<WebKitGTKBackend*, std::string>*>(data);
-    webkit_web_view_load_uri(pair->first->webview_, pair->second.c_str());
-    delete pair;
-    return G_SOURCE_REMOVE;
-  }, new std::pair<WebKitGTKBackend*, std::string>(this, urlCopy));
+LinuxWindowState* WebKitGTKBackend::GetWindow(uint32_t window_id) {
+  auto it = windows_.find(window_id);
+  return it != windows_.end() ? &it->second : nullptr;
 }
 
-void WebKitGTKBackend::SetTitle(const std::string& title) {
-  std::string titleCopy = title;
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* pair = static_cast<std::pair<WebKitGTKBackend*, std::string>*>(data);
-    gtk_window_set_title(GTK_WINDOW(pair->first->window_), pair->second.c_str());
-    delete pair;
-    return G_SOURCE_REMOVE;
-  }, new std::pair<WebKitGTKBackend*, std::string>(this, titleCopy));
+void WebKitGTKBackend::CreateWindow(uint32_t window_id, int width, int height) {
+  GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+  gtk_window_set_default_size(GTK_WINDOW(window), width, height);
+  g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), nullptr);
+  g_signal_connect(window, "key-press-event", G_CALLBACK(on_key_event), nullptr);
+  g_signal_connect(window, "key-release-event", G_CALLBACK(on_key_event), nullptr);
+  g_signal_connect(window, "button-press-event", G_CALLBACK(on_button_event), nullptr);
+  g_signal_connect(window, "button-release-event", G_CALLBACK(on_button_event), nullptr);
+  gtk_widget_add_events(window, GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK |
+                                GDK_SMOOTH_SCROLL_MASK | GDK_ENTER_NOTIFY_MASK |
+                                GDK_LEAVE_NOTIFY_MASK);
+  g_signal_connect(window, "motion-notify-event", G_CALLBACK(on_motion_event), nullptr);
+  g_signal_connect(window, "scroll-event", G_CALLBACK(on_scroll_event), nullptr);
+  g_signal_connect(window, "enter-notify-event", G_CALLBACK(on_enter_notify_event), nullptr);
+  g_signal_connect(window, "leave-notify-event", G_CALLBACK(on_leave_notify_event), nullptr);
+  g_signal_connect(window, "focus-in-event", G_CALLBACK(on_focus_in_event), nullptr);
+  g_signal_connect(window, "focus-out-event", G_CALLBACK(on_focus_out_event), nullptr);
+  g_signal_connect(window, "configure-event", G_CALLBACK(on_configure_event), nullptr);
+
+  RegisterWidget(window, window_id);
+
+  WebKitUserContentManager* content_manager = webkit_user_content_manager_new();
+  g_signal_connect(content_manager, "script-message-received::wef",
+                   G_CALLBACK(on_script_message), nullptr);
+  webkit_user_content_manager_register_script_message_handler(content_manager, "wef");
+  g_content_manager_to_wef_id[content_manager] = window_id;
+
+  WebKitWebView* webview = WEBKIT_WEB_VIEW(
+      webkit_web_view_new_with_user_content_manager(content_manager));
+
+  WebKitUserScript* script = webkit_user_script_new(
+      g_init_script,
+      WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+      WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
+      nullptr, nullptr);
+  webkit_user_content_manager_add_script(content_manager, script);
+  webkit_user_script_unref(script);
+
+  gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(webview));
+
+  LinuxWindowState state;
+  state.window_id = window_id;
+  state.window = window;
+  state.webview = webview;
+  state.content_manager = content_manager;
+
+  {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    windows_[window_id] = state;
+  }
+
+  gtk_widget_show_all(window);
 }
 
-void WebKitGTKBackend::ExecuteJs(const std::string& script) {
-  std::string scriptCopy = script;
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* pair = static_cast<std::pair<WebKitGTKBackend*, std::string>*>(data);
-    webkit_web_view_run_javascript(pair->first->webview_, pair->second.c_str(),
+void WebKitGTKBackend::CloseWindow(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    webkit_user_content_manager_unregister_script_message_handler(state->content_manager, "wef");
+    g_content_manager_to_wef_id.erase(state->content_manager);
+    UnregisterWidget(state->window);
+    gtk_widget_destroy(state->window);
+    windows_.erase(window_id);
+  }
+}
+
+void WebKitGTKBackend::Navigate(uint32_t window_id, const std::string& url) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    webkit_web_view_load_uri(state->webview, url.c_str());
+  }
+}
+
+void WebKitGTKBackend::SetTitle(uint32_t window_id, const std::string& title) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_window_set_title(GTK_WINDOW(state->window), title.c_str());
+  }
+}
+
+void WebKitGTKBackend::ExecuteJs(uint32_t window_id, const std::string& script) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    webkit_web_view_run_javascript(state->webview, script.c_str(),
                                     nullptr, nullptr, nullptr);
-    delete pair;
-    return G_SOURCE_REMOVE;
-  }, new std::pair<WebKitGTKBackend*, std::string>(this, scriptCopy));
+  }
 }
 
 void WebKitGTKBackend::Quit() {
-  g_idle_add([](gpointer data) -> gboolean {
+  g_idle_add([](gpointer) -> gboolean {
     gtk_main_quit();
     return G_SOURCE_REMOVE;
   }, nullptr);
 }
 
-void WebKitGTKBackend::SetWindowSize(int width, int height) {
-  struct SizeData { WebKitGTKBackend* backend; int w; int h; };
-  auto* sizeData = new SizeData{this, width, height};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* sd = static_cast<SizeData*>(data);
-    gtk_window_resize(GTK_WINDOW(sd->backend->window_), sd->w, sd->h);
-    delete sd;
-    return G_SOURCE_REMOVE;
-  }, sizeData);
+void WebKitGTKBackend::SetWindowSize(uint32_t window_id, int width, int height) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_window_resize(GTK_WINDOW(state->window), width, height);
+  }
 }
 
-void WebKitGTKBackend::GetWindowSize(int* width, int* height) {
-  int w = 0, h = 0;
-  gtk_window_get_size(GTK_WINDOW(window_), &w, &h);
-  if (width) *width = w;
-  if (height) *height = h;
+void WebKitGTKBackend::GetWindowSize(uint32_t window_id, int* width, int* height) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    int w = 0, h = 0;
+    gtk_window_get_size(GTK_WINDOW(state->window), &w, &h);
+    if (width) *width = w;
+    if (height) *height = h;
+  }
 }
 
-void WebKitGTKBackend::SetWindowPosition(int x, int y) {
-  struct PosData { WebKitGTKBackend* backend; int x; int y; };
-  auto* posData = new PosData{this, x, y};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* pd = static_cast<PosData*>(data);
-    gtk_window_move(GTK_WINDOW(pd->backend->window_), pd->x, pd->y);
-    delete pd;
-    return G_SOURCE_REMOVE;
-  }, posData);
+void WebKitGTKBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_window_move(GTK_WINDOW(state->window), x, y);
+  }
 }
 
-void WebKitGTKBackend::GetWindowPosition(int* x, int* y) {
-  int wx = 0, wy = 0;
-  gtk_window_get_position(GTK_WINDOW(window_), &wx, &wy);
-  if (x) *x = wx;
-  if (y) *y = wy;
+void WebKitGTKBackend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    int wx = 0, wy = 0;
+    gtk_window_get_position(GTK_WINDOW(state->window), &wx, &wy);
+    if (x) *x = wx;
+    if (y) *y = wy;
+  }
 }
 
-void WebKitGTKBackend::SetResizable(bool resizable) {
-  struct ResData { WebKitGTKBackend* backend; bool resizable; };
-  auto* resData = new ResData{this, resizable};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* rd = static_cast<ResData*>(data);
-    gtk_window_set_resizable(GTK_WINDOW(rd->backend->window_), rd->resizable);
-    delete rd;
-    return G_SOURCE_REMOVE;
-  }, resData);
+void WebKitGTKBackend::SetResizable(uint32_t window_id, bool resizable) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_window_set_resizable(GTK_WINDOW(state->window), resizable);
+  }
 }
 
-bool WebKitGTKBackend::IsResizable() {
-  return gtk_window_get_resizable(GTK_WINDOW(window_)) != FALSE;
+bool WebKitGTKBackend::IsResizable(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  return state ? gtk_window_get_resizable(GTK_WINDOW(state->window)) != FALSE : false;
 }
 
-void WebKitGTKBackend::SetAlwaysOnTop(bool always_on_top) {
-  struct TopData { WebKitGTKBackend* backend; bool on_top; };
-  auto* topData = new TopData{this, always_on_top};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* td = static_cast<TopData*>(data);
-    gtk_window_set_keep_above(GTK_WINDOW(td->backend->window_), td->on_top);
-    delete td;
-    return G_SOURCE_REMOVE;
-  }, topData);
+void WebKitGTKBackend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_window_set_keep_above(GTK_WINDOW(state->window), always_on_top);
+  }
 }
 
-bool WebKitGTKBackend::IsAlwaysOnTop() {
-  // GTK does not provide a direct getter for keep-above state;
-  // GDK window state must be checked.
-  GdkWindow* gdk_window = gtk_widget_get_window(window_);
-  if (gdk_window) {
-    GdkWindowState state = gdk_window_get_state(gdk_window);
-    return (state & GDK_WINDOW_STATE_ABOVE) != 0;
+bool WebKitGTKBackend::IsAlwaysOnTop(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    GdkWindow* gdk_window = gtk_widget_get_window(state->window);
+    if (gdk_window) {
+      GdkWindowState wstate = gdk_window_get_state(gdk_window);
+      return (wstate & GDK_WINDOW_STATE_ABOVE) != 0;
+    }
   }
   return false;
 }
 
-bool WebKitGTKBackend::IsVisible() {
-  return gtk_widget_get_visible(window_) != FALSE;
+bool WebKitGTKBackend::IsVisible(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  return state ? gtk_widget_get_visible(state->window) != FALSE : false;
 }
 
-void WebKitGTKBackend::Show() {
-  g_idle_add([](gpointer data) -> gboolean {
-    gtk_widget_show(static_cast<GtkWidget*>(data));
-    return G_SOURCE_REMOVE;
-  }, window_);
+void WebKitGTKBackend::Show(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_widget_show_all(state->window);
+  }
 }
 
-void WebKitGTKBackend::Hide() {
-  g_idle_add([](gpointer data) -> gboolean {
-    gtk_widget_hide(static_cast<GtkWidget*>(data));
-    return G_SOURCE_REMOVE;
-  }, window_);
+void WebKitGTKBackend::Hide(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_widget_hide(state->window);
+  }
 }
 
-void WebKitGTKBackend::Focus() {
-  struct FocusData { GtkWidget* window; };
-  auto* fd = new FocusData{window_};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* fd = static_cast<FocusData*>(data);
-    gtk_widget_show(fd->window);
-    gtk_window_present(GTK_WINDOW(fd->window));
-    delete fd;
-    return G_SOURCE_REMOVE;
-  }, fd);
+void WebKitGTKBackend::Focus(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    gtk_widget_show(state->window);
+    gtk_window_present(GTK_WINDOW(state->window));
+  }
 }
 
 void WebKitGTKBackend::PostUiTask(void (*task)(void*), void* data) {
@@ -639,63 +757,68 @@ void WebKitGTKBackend::PostUiTask(void (*task)(void*), void* data) {
   }, td);
 }
 
-void WebKitGTKBackend::InvokeJsCallback(uint64_t callback_id, wef::ValuePtr args) {
+void WebKitGTKBackend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) {
   std::string argsJson = json::Serialize(args);
-  struct CbData { WebKitGTKBackend* backend; uint64_t id; std::string args; };
-  auto* cbData = new CbData{this, callback_id, argsJson};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* cbd = static_cast<CbData*>(data);
-    std::string script = "window.__wefInvokeCallback(" +
-                         std::to_string(cbd->id) + ", " + cbd->args + ");";
-    webkit_web_view_run_javascript(cbd->backend->webview_, script.c_str(),
-                                    nullptr, nullptr, nullptr);
-    delete cbd;
-    return G_SOURCE_REMOVE;
-  }, cbData);
+  std::string script = "window.__wefInvokeCallback(" +
+                       std::to_string(callback_id) + ", " + argsJson + ");";
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  if (window_id == 0) {
+    for (auto& [wid, state] : windows_) {
+      webkit_web_view_run_javascript(state.webview, script.c_str(),
+                                      nullptr, nullptr, nullptr);
+    }
+  } else {
+    auto* state = GetWindow(window_id);
+    if (state) {
+      webkit_web_view_run_javascript(state->webview, script.c_str(),
+                                      nullptr, nullptr, nullptr);
+    }
+  }
 }
 
-void WebKitGTKBackend::ReleaseJsCallback(uint64_t callback_id) {
-  struct CbData { WebKitGTKBackend* backend; uint64_t id; };
-  auto* cbData = new CbData{this, callback_id};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* cbd = static_cast<CbData*>(data);
-    std::string script = "window.__wefReleaseCallback(" +
-                         std::to_string(cbd->id) + ");";
-    webkit_web_view_run_javascript(cbd->backend->webview_, script.c_str(),
-                                    nullptr, nullptr, nullptr);
-    delete cbd;
-    return G_SOURCE_REMOVE;
-  }, cbData);
+void WebKitGTKBackend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) {
+  std::string script = "window.__wefReleaseCallback(" +
+                       std::to_string(callback_id) + ");";
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  if (window_id == 0) {
+    for (auto& [wid, state] : windows_) {
+      webkit_web_view_run_javascript(state.webview, script.c_str(),
+                                      nullptr, nullptr, nullptr);
+    }
+  } else {
+    auto* state = GetWindow(window_id);
+    if (state) {
+      webkit_web_view_run_javascript(state->webview, script.c_str(),
+                                      nullptr, nullptr, nullptr);
+    }
+  }
 }
 
-void WebKitGTKBackend::RespondToJsCall(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) {
+void WebKitGTKBackend::RespondToJsCall(uint32_t window_id, uint64_t call_id,
+                                        wef::ValuePtr result, wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
   std::string errorJson = (error && !error->IsNull()) ? json::Serialize(error) : "null";
-  struct RespData { WebKitGTKBackend* backend; uint64_t id; std::string result; std::string error; };
-  auto* respData = new RespData{this, call_id, resultJson, errorJson};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* rd = static_cast<RespData*>(data);
-    std::string script;
-    if (rd->error == "null") {
-      script = "window.__wefRespond(" + std::to_string(rd->id) + ", " +
-               rd->result + ", null);";
-    } else {
-      script = "window.__wefRespond(" + std::to_string(rd->id) + ", null, " +
-               rd->error + ");";
-    }
-    webkit_web_view_run_javascript(rd->backend->webview_, script.c_str(),
+  std::string script;
+  if (errorJson == "null") {
+    script = "window.__wefRespond(" + std::to_string(call_id) + ", " +
+             resultJson + ", null);";
+  } else {
+    script = "window.__wefRespond(" + std::to_string(call_id) + ", null, " +
+             errorJson + ");";
+  }
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state) {
+    webkit_web_view_run_javascript(state->webview, script.c_str(),
                                     nullptr, nullptr, nullptr);
-    delete rd;
-    return G_SOURCE_REMOVE;
-  }, respData);
+  }
 }
 
 void WebKitGTKBackend::Run() {
-  gtk_widget_show_all(window_);
   gtk_main();
 }
 
-void WebKitGTKBackend::HandleJsMessage(const char* jsonStr) {
+void WebKitGTKBackend::HandleJsMessage(uint32_t window_id, const char* jsonStr) {
   wef::ValuePtr msg = json::ParseJson(jsonStr);
   if (!msg || !msg->IsDict()) return;
 
@@ -716,13 +839,13 @@ void WebKitGTKBackend::HandleJsMessage(const char* jsonStr) {
   std::string method = methodIt->second->IsString() ? methodIt->second->GetString() : "";
   wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
-  RuntimeLoader::GetInstance()->OnJsCall(call_id, method, args);
+  RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
 }
 
 // ============================================================================
 // Factory Function
 // ============================================================================
 
-WebviewBackend* CreateWebviewBackend(int width, int height, const std::string& title) {
-  return new WebKitGTKBackend(width, height, title);
+WefBackend* CreateWefBackend() {
+  return new WebKitGTKBackend();
 }

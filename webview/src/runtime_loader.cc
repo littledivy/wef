@@ -13,28 +13,28 @@
 
 RuntimeLoader* RuntimeLoader::instance_ = nullptr;
 
-static void Backend_Navigate(void* data, const char* url) {
+static void Backend_Navigate(void* data, uint32_t window_id, const char* url) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend && url) {
-    backend->Navigate(url);
+    backend->Navigate(window_id, url);
   }
 }
 
-static void Backend_SetTitle(void* data, const char* title) {
+static void Backend_SetTitle(void* data, uint32_t window_id, const char* title) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend && title) {
-    backend->SetTitle(title);
+    backend->SetTitle(window_id, title);
   }
 }
 
-static void Backend_ExecuteJs(void* data, const char* script,
+static void Backend_ExecuteJs(void* data, uint32_t window_id, const char* script,
                               wef_js_result_fn callback, void* callback_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend && script) {
-    backend->ExecuteJs(script);
+    backend->ExecuteJs(window_id, script);
     // TODO: webview backends don't support result callbacks yet
     if (callback) {
       callback(nullptr, nullptr, callback_data);
@@ -50,102 +50,102 @@ static void Backend_Quit(void* data) {
   }
 }
 
-static void Backend_SetWindowSize(void* data, int width, int height) {
+static void Backend_SetWindowSize(void* data, uint32_t window_id, int width, int height) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->SetWindowSize(width, height);
+    backend->SetWindowSize(window_id, width, height);
   }
 }
 
-static void Backend_GetWindowSize(void* data, int* width, int* height) {
+static void Backend_GetWindowSize(void* data, uint32_t window_id, int* width, int* height) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->GetWindowSize(width, height);
+    backend->GetWindowSize(window_id, width, height);
   }
 }
 
-static void Backend_SetWindowPosition(void* data, int x, int y) {
+static void Backend_SetWindowPosition(void* data, uint32_t window_id, int x, int y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->SetWindowPosition(x, y);
+    backend->SetWindowPosition(window_id, x, y);
   }
 }
 
-static void Backend_GetWindowPosition(void* data, int* x, int* y) {
+static void Backend_GetWindowPosition(void* data, uint32_t window_id, int* x, int* y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->GetWindowPosition(x, y);
+    backend->GetWindowPosition(window_id, x, y);
   }
 }
 
-static void Backend_SetResizable(void* data, bool resizable) {
+static void Backend_SetResizable(void* data, uint32_t window_id, bool resizable) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->SetResizable(resizable);
+    backend->SetResizable(window_id, resizable);
   }
 }
 
-static bool Backend_IsResizable(void* data) {
+static bool Backend_IsResizable(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    return backend->IsResizable();
-  }
-  return false;
-}
-
-static void Backend_SetAlwaysOnTop(void* data, bool always_on_top) {
-  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  WefBackend* backend = loader->GetBackend();
-  if (backend) {
-    backend->SetAlwaysOnTop(always_on_top);
-  }
-}
-
-static bool Backend_IsAlwaysOnTop(void* data) {
-  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  WefBackend* backend = loader->GetBackend();
-  if (backend) {
-    return backend->IsAlwaysOnTop();
+    return backend->IsResizable(window_id);
   }
   return false;
 }
 
-static bool Backend_IsVisible(void* data) {
+static void Backend_SetAlwaysOnTop(void* data, uint32_t window_id, bool always_on_top) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    return backend->IsVisible();
+    backend->SetAlwaysOnTop(window_id, always_on_top);
+  }
+}
+
+static bool Backend_IsAlwaysOnTop(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    return backend->IsAlwaysOnTop(window_id);
   }
   return false;
 }
 
-static void Backend_Show(void* data) {
+static bool Backend_IsVisible(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->Show();
+    return backend->IsVisible(window_id);
+  }
+  return false;
+}
+
+static void Backend_Show(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->Show(window_id);
   }
 }
 
-static void Backend_Hide(void* data) {
+static void Backend_Hide(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->Hide();
+    backend->Hide(window_id);
   }
 }
 
-static void Backend_Focus(void* data) {
+static void Backend_Focus(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->Focus();
+    backend->Focus(window_id);
   }
 }
 
@@ -383,9 +383,10 @@ static void Backend_SetJsCallHandler(void* data, wef_js_call_fn handler, void* u
 static void Backend_JsCallRespond(void* data, uint64_t call_id,
                                    wef_value_t* result, wef_value_t* error) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  uint32_t window_id = loader->ConsumeCallWindow(call_id);
   wef::ValuePtr resultPtr = (result && result->value) ? result->value : wef::Value::Null();
   wef::ValuePtr errorPtr = (error && error->value) ? error->value : wef::Value::Null();
-  loader->JsCallRespond(call_id, resultPtr, errorPtr);
+  loader->JsCallRespond(window_id, call_id, resultPtr, errorPtr);
 }
 
 static void Backend_InvokeJsCallback(void* data, uint64_t callback_id, wef_value_t* args) {
@@ -393,7 +394,8 @@ static void Backend_InvokeJsCallback(void* data, uint64_t callback_id, wef_value
   WefBackend* backend = loader->GetBackend();
   if (backend) {
     wef::ValuePtr argsPtr = (args && args->value) ? args->value : wef::Value::List();
-    backend->InvokeJsCallback(callback_id, argsPtr);
+    // Broadcast to window 0 (all windows) since callback_id isn't tied to a window
+    backend->InvokeJsCallback(0, callback_id, argsPtr);
   }
 }
 
@@ -457,7 +459,7 @@ static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend) {
-    backend->ReleaseJsCallback(callback_id);
+    backend->ReleaseJsCallback(0, callback_id);
   }
 }
 
@@ -480,6 +482,31 @@ static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
     backend->SetApplicationMenu(menu_template, &loader->GetBackendApi(),
                                 on_click, on_click_data);
   }
+}
+
+static uint32_t Backend_CreateWindow(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  uint32_t window_id = loader->AllocateWindowId();
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->CreateWindow(window_id, 800, 600);
+  }
+  return window_id;
+}
+
+static void Backend_CloseWindow(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->CloseWindow(window_id);
+  }
+}
+
+static void Backend_SetCloseRequestedHandler(void* data,
+                                              wef_close_requested_fn handler,
+                                              void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetCloseRequestedHandler(handler, user_data);
 }
 
 void RuntimeLoader::InitializeBackendApi() {
@@ -549,9 +576,9 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.invoke_js_callback = Backend_InvokeJsCallback;
   backend_api_.release_js_callback = Backend_ReleaseJsCallback;
 
-  backend_api_.get_window_handle = [](void*) -> void* { return nullptr; };
-  backend_api_.get_display_handle = [](void*) -> void* { return nullptr; };
-  backend_api_.get_window_handle_type = [](void*) -> int { return WEF_WINDOW_HANDLE_UNKNOWN; };
+  backend_api_.get_window_handle = [](void*, uint32_t) -> void* { return nullptr; };
+  backend_api_.get_display_handle = [](void*, uint32_t) -> void* { return nullptr; };
+  backend_api_.get_window_handle_type = [](void*, uint32_t) -> int { return WEF_WINDOW_HANDLE_UNKNOWN; };
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
@@ -564,6 +591,9 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.poll_js_calls = Backend_PollJsCalls;
   backend_api_.set_js_call_notify = Backend_SetJsCallNotify;
   backend_api_.set_application_menu = Backend_SetApplicationMenu;
+  backend_api_.create_window = Backend_CreateWindow;
+  backend_api_.close_window = Backend_CloseWindow;
+  backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;
 }
 
 RuntimeLoader::RuntimeLoader() {
@@ -692,11 +722,12 @@ void RuntimeLoader::Shutdown() {
   }
 }
 
-void RuntimeLoader::OnJsCall(uint64_t call_id, const std::string& method_path,
-                              wef::ValuePtr args) {
+void RuntimeLoader::OnJsCall(uint32_t window_id, uint64_t call_id,
+                              const std::string& method_path, wef::ValuePtr args) {
+  StoreCallWindow(call_id, window_id);
   {
     std::lock_guard<std::mutex> lock(pending_mutex_);
-    pending_js_calls_.push({call_id, method_path, args});
+    pending_js_calls_.push({window_id, call_id, method_path, args});
   }
 
   std::lock_guard<std::mutex> lock(notify_mutex_);
@@ -728,16 +759,18 @@ void RuntimeLoader::PollPendingJsCalls() {
   for (auto& call : calls) {
     if (handler) {
       wef_value_t* argsWrapper = new wef_value(call.args);
-      handler(user_data, call.call_id, call.method_path.c_str(), argsWrapper);
+      handler(user_data, call.window_id, call.call_id, call.method_path.c_str(), argsWrapper);
     } else {
-      JsCallRespond(call.call_id, nullptr, wef::Value::String("No JS call handler registered"));
+      JsCallRespond(call.window_id, call.call_id, nullptr,
+                     wef::Value::String("No JS call handler registered"));
     }
   }
 }
 
-void RuntimeLoader::JsCallRespond(uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) {
+void RuntimeLoader::JsCallRespond(uint32_t window_id, uint64_t call_id,
+                                    wef::ValuePtr result, wef::ValuePtr error) {
   WefBackend* backend = GetBackend();
   if (backend) {
-    backend->RespondToJsCall(call_id, result, error);
+    backend->RespondToJsCall(window_id, call_id, result, error);
   }
 }
