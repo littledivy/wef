@@ -31,8 +31,11 @@ void WefWindowDelegate::OnWindowCreated(CefRefPtr<CefWindow> window) {
   if (handle && wef_id_ > 0) {
 #ifdef __APPLE__
     RegisterNSWindowForCefHandle(handle, wef_id_);
-#elif defined(_WIN32)
-    RuntimeLoader::GetInstance()->RegisterNativeHandle((void*)handle, wef_id_);
+#else
+    RuntimeLoader::GetInstance()->RegisterNativeHandle((void*)(uintptr_t)handle, wef_id_);
+#ifdef __linux__
+    MonitorLinuxWindowEvents(handle);
+#endif
 #endif
   }
 }
@@ -43,8 +46,8 @@ void WefWindowDelegate::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   if (handle) {
 #ifdef __APPLE__
     UnregisterNSWindowForCefHandle(handle);
-#elif defined(_WIN32)
-    RuntimeLoader::GetInstance()->UnregisterNativeHandle((void*)handle);
+#else
+    RuntimeLoader::GetInstance()->UnregisterNativeHandle((void*)(uintptr_t)handle);
 #endif
   }
   if (wef_id_ > 0) {

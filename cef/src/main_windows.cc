@@ -7,8 +7,13 @@
 #include <string>
 #include <cstring>
 
+#include "include/base/cef_callback.h"
 #include "include/cef_app.h"
 #include "include/cef_sandbox_win.h"
+#include "include/cef_task.h"
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_window.h"
+#include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
 
 #include "app.h"
@@ -163,26 +168,35 @@ class WefCombinedApp : public CefApp,
   void OnContextInitialized() override {
     CEF_REQUIRE_UI_THREAD();
 
+    // Keep the handler alive for the lifetime of the app.
+    // Backend_CreateWindow uses WefHandler::GetInstance() from the runtime
+    // thread, so the handler must outlive this function scope.
+    static CefRefPtr<WefHandler> handler(new WefHandler());
+
     if (!g_runtime_path.empty()) {
       if (!RuntimeLoader::GetInstance()->Load(g_runtime_path)) {
         std::cerr << "Failed to load runtime, exiting" << std::endl;
         CefQuitMessageLoop();
         return;
       }
+      // Defer Start() to the next message loop iteration.
+      // OnContextInitialized runs during CefInitialize(), before
+      // CefRunMessageLoop() has started.
+      CefPostTask(TID_UI, base::BindOnce([]() {
+        RuntimeLoader::GetInstance()->Start();
+      }));
+    } else {
+      // No runtime: create a default window for demo
+      uint32_t wef_id = RuntimeLoader::GetInstance()->AllocateWindowId();
+      g_pending_wef_ids.push(wef_id);
+      CefBrowserSettings browser_settings;
+      CefRefPtr<CefBrowserView> browser_view =
+          CefBrowserView::CreateBrowserView(
+              handler, "https://example.com", browser_settings,
+              nullptr, nullptr, nullptr);
+      CefWindow::CreateTopLevelWindow(
+          new WefWindowDelegate(browser_view, wef_id));
     }
-
-    CefRefPtr<WefHandler> handler(new WefHandler());
-    CefBrowserSettings browser_settings;
-
-    std::string initial_url = g_runtime_path.empty() ? "https://example.com" : "about:blank";
-
-    CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-        handler, initial_url, browser_settings, nullptr, nullptr, nullptr);
-
-    uint32_t wef_id = RuntimeLoader::GetInstance()->AllocateWindowId();
-    g_pending_wef_ids.push(wef_id);
-    CefWindow::CreateTopLevelWindow(
-        new WefWindowDelegate(browser_view, wef_id));
   }
 
  private:

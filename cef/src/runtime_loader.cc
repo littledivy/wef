@@ -830,7 +830,10 @@ void RuntimeLoader::InitializeBackendApi() {
 #elif defined(__APPLE__)
   backend_api_.set_application_menu = Backend_SetApplicationMenu_Mac;
 #else
-  // Linux: application menus not yet implemented
+  // Linux: CEF Views creates raw X11 windows (not GtkWindows), so there is
+  // no GTK container to attach a GtkMenuBar to. Application menus would
+  // require D-Bus menu protocol or drawing a custom menu bar, which is
+  // future work (see issue #3 — Wayland/Phase 4).
   backend_api_.set_application_menu = [](void*, wef_value_t*, wef_menu_click_fn, void*) {};
 #endif
 }

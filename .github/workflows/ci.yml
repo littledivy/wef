@@ -147,7 +147,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build pkg-config \
-            libx11-dev libglib2.0-dev libnss3-dev libnspr4-dev \
+            libx11-dev libxi-dev libglib2.0-dev libnss3-dev libnspr4-dev \
             libatk1.0-dev libatk-bridge2.0-dev libcups2-dev libdrm-dev \
             libgtk-3-dev libgbm-dev libasound2-dev libpango1.0-dev \
             libcairo2-dev libxcomposite-dev libxdamage-dev libxrandr-dev \

@@ -197,6 +197,11 @@ elseif(OS_LINUX)
     )
   endif()
 
+  # GTK3 (for GDK/X11 headers) and XI2 (for input event monitoring)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+  pkg_check_modules(XI2 REQUIRED xi)
+
   set(WEF_SRCS_COMMON
     src/app.cc
     src/app.h
@@ -211,8 +216,13 @@ elseif(OS_LINUX)
 
   add_executable(${CEF_TARGET} ${WEF_SRCS_COMMON} ${WEF_SRCS_LINUX})
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
-  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS})
-  target_include_directories(${CEF_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${WEF_INCLUDE_DIR}")
+  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS} ${XI2_LIBRARIES})
+  target_include_directories(${CEF_TARGET} PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/src"
+    "${WEF_INCLUDE_DIR}"
+    ${GTK3_INCLUDE_DIRS}
+    ${XI2_INCLUDE_DIRS}
+  )
 
   # Set RPATH so the executable finds libcef.so next to it
   set_target_properties(${CEF_TARGET} PROPERTIES

@@ -379,4 +379,9 @@ void RegisterNSWindowForCefHandle(void* cef_handle, uint32_t window_id);
 void UnregisterNSWindowForCefHandle(void* cef_handle);
 #endif
 
+#ifdef __linux__
+// Register a CEF window for XI2 event monitoring (implemented in main_linux.cc).
+void MonitorLinuxWindowEvents(unsigned long xid);
+#endif
+
 #endif
