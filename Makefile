@@ -147,7 +147,8 @@ cef-deps: $(CEF_ROOT)/libcef_dll_wrapper/libcef_dll_wrapper$(LIB_EXT) ## Downloa
 cef: check-deps cef-deps ## Build the CEF backend
 	cmake -G Ninja -B cef/build -S cef \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DCEF_ROOT=$(CEF_ROOT)
+		-DCEF_ROOT=$(CEF_ROOT) \
+		-DPROJECT_ARCH=$(PROJ_ARCH)
 	ninja -C cef/build
 
 # ─── Servo Backend ──────────────────────────────────────────────────

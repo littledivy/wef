@@ -211,7 +211,7 @@ elseif(OS_LINUX)
 
   add_executable(${CEF_TARGET} ${WEF_SRCS_COMMON} ${WEF_SRCS_LINUX})
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
-  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_STANDARD_LIBS})
+  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS})
   target_include_directories(${CEF_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src" "${WEF_INCLUDE_DIR}")
 
   # Set RPATH so the executable finds libcef.so next to it
