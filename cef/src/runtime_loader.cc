@@ -658,20 +658,19 @@ static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
                                        void* on_click_data) {
   if (!menu_template) return;
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
-  CefRefPtr<CefBrowser> browser = loader->GetBrowser();
-  if (!browser) return;
-
   const wef_backend_api_t* api = &loader->GetBackendApi();
 
-  CefPostTask(TID_UI, base::BindOnce(
-      [](CefRefPtr<CefBrowser> b, wef_value_t* tmpl, const wef_backend_api_t* a,
-         wef_menu_click_fn fn, void* d) {
-        HWND hwnd = b->GetHost()->GetWindowHandle();
-        if (hwnd) {
-          win32_menu::SetApplicationMenu(hwnd, tmpl, a, fn, d);
-        }
-      },
-      browser, menu_template, api, on_click, on_click_data));
+  loader->ForEachBrowser([&](CefRefPtr<CefBrowser> browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, wef_value_t* tmpl, const wef_backend_api_t* a,
+           wef_menu_click_fn fn, void* d) {
+          HWND hwnd = b->GetHost()->GetWindowHandle();
+          if (hwnd) {
+            win32_menu::SetApplicationMenu(hwnd, tmpl, a, fn, d);
+          }
+        },
+        browser, menu_template, api, on_click, on_click_data));
+  });
 }
 #elif defined(__APPLE__)
 // Defined in runtime_loader_mac.mm

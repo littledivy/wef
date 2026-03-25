@@ -8,7 +8,6 @@
 #include <windows.h>
 #include <windowsx.h>
 #include <wrl.h>
-#include <wil/com.h>
 
 // WebView2 headers
 #include "WebView2.h"

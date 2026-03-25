@@ -373,13 +373,6 @@ class WebKitGTKBackend : public WefBackend {
 
   void HandleJsMessage(uint32_t window_id, const char* json);
 
-  void SetApplicationMenu(wef_value_t* menu_template,
-                          const wef_backend_api_t* api,
-                          wef_menu_click_fn on_click,
-                          void* on_click_data) override {
-    // Linux GTK menus not yet implemented
-  }
-
  private:
   LinuxWindowState* GetWindow(uint32_t window_id);
 

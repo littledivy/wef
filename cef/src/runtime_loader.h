@@ -124,6 +124,22 @@ class RuntimeLoader {
     return it != nswindow_to_wef_id_.end() ? it->second : 0;
   }
 
+  void RegisterNativeHandle(void* handle, uint32_t window_id) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    native_handle_to_wef_id_[handle] = window_id;
+  }
+
+  void UnregisterNativeHandle(void* handle) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    native_handle_to_wef_id_.erase(handle);
+  }
+
+  uint32_t GetWefIdForNativeHandle(void* handle) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto it = native_handle_to_wef_id_.find(handle);
+    return it != native_handle_to_wef_id_.end() ? it->second : 0;
+  }
+
   template<typename F>
   void ForEachBrowser(F&& fn) {
     std::lock_guard<std::mutex> lock(windows_mutex_);
@@ -289,6 +305,7 @@ class RuntimeLoader {
   std::map<int, uint32_t> browser_id_to_wef_id_;  // CefBrowser::GetIdentifier() -> wef_id
   std::map<uint64_t, uint32_t> call_to_window_;  // call_id -> window_id for JsCallRespond
   std::map<void*, uint32_t> nswindow_to_wef_id_;
+  std::map<void*, uint32_t> native_handle_to_wef_id_;
   std::mutex windows_mutex_;
   std::condition_variable browser_ready_cv_;
   std::atomic<uint32_t> next_window_id_{1};

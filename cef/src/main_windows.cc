@@ -25,6 +25,10 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     MOUSEHOOKSTRUCT* mhs = reinterpret_cast<MOUSEHOOKSTRUCT*>(lParam);
     RuntimeLoader* loader = RuntimeLoader::GetInstance();
 
+    // Find the wef window_id from the top-level HWND
+    HWND topLevel = mhs->hwnd ? GetAncestor(mhs->hwnd, GA_ROOT) : nullptr;
+    uint32_t window_id = topLevel ? loader->GetWefIdForNativeHandle((void*)topLevel) : 0;
+
     POINT pt = mhs->pt;
     if (mhs->hwnd) {
       ScreenToClient(mhs->hwnd, &pt);
@@ -41,30 +45,30 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     switch (wParam) {
       case WM_LBUTTONDOWN:
         loader->DispatchMouseClickEvent(
-            WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
+            window_id, WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
         break;
       case WM_LBUTTONUP:
         loader->DispatchMouseClickEvent(
-            WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
+            window_id, WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
         break;
       case WM_RBUTTONDOWN:
         loader->DispatchMouseClickEvent(
-            WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
+            window_id, WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
         break;
       case WM_RBUTTONUP:
         loader->DispatchMouseClickEvent(
-            WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
+            window_id, WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
         break;
       case WM_MBUTTONDOWN:
         loader->DispatchMouseClickEvent(
-            WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
+            window_id, WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
         break;
       case WM_MBUTTONUP:
         loader->DispatchMouseClickEvent(
-            WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
+            window_id, WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
         break;
       case WM_MOUSEMOVE:
-        loader->DispatchMouseMoveEvent(x, y, modifiers);
+        loader->DispatchMouseMoveEvent(window_id, x, y, modifiers);
         break;
       case WM_MOUSEWHEEL: {
         // In WH_MOUSE hook, wheel data is in MOUSEHOOKSTRUCTEX::mouseData
@@ -72,7 +76,7 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
         short delta = HIWORD(mhsx->mouseData);
         double delta_y = static_cast<double>(delta) / WHEEL_DELTA;
         loader->DispatchWheelEvent(
-            0.0, delta_y, x, y, modifiers, WEF_WHEEL_DELTA_LINE);
+            window_id, 0.0, delta_y, x, y, modifiers, WEF_WHEEL_DELTA_LINE);
         break;
       }
     }
@@ -96,7 +100,6 @@ void RemoveNativeMouseMonitor() {
 
 static int run_headless(const std::string& runtimePath) {
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
-  loader->SetBrowser(nullptr);
 
   if (runtimePath.empty()) {
     std::cerr << "No runtime library found for headless worker." << std::endl;

@@ -6,6 +6,8 @@
 #include <dlfcn.h>
 #else
 #include <windows.h>
+// windows.h defines CreateWindow as a macro which conflicts with WefBackend::CreateWindow
+#undef CreateWindow
 #endif
 
 #include <iostream>

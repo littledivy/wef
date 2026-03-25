@@ -21,7 +21,7 @@ jobs:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
           - { target: x86_64-pc-windows-msvc,    os: windows-latest }
-          - { target: x86_64-apple-darwin,       os: macos-13 }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel }
           - { target: aarch64-apple-darwin,      os: macos-14 }
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +35,10 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y pkg-config libx11-dev libxcb1-dev libxkbcommon-dev libwayland-dev
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -71,7 +75,7 @@ jobs:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
           - { target: x86_64-pc-windows-msvc,    os: windows-latest }
-          - { target: x86_64-apple-darwin,       os: macos-13 }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel }
           - { target: aarch64-apple-darwin,      os: macos-14 }
     steps:
       - uses: actions/checkout@v4
@@ -84,7 +88,7 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install llvm ninja
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -132,7 +136,7 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-apple-darwin,       os: macos-13 }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel }
           - { target: aarch64-apple-darwin,      os: macos-14 }
           - { target: x86_64-pc-windows-msvc,    os: windows-latest }
     steps:
@@ -151,7 +155,7 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ninja
+        run: brew install llvm ninja
 
       - name: Install dependencies (Windows)
         if: runner.os == 'Windows'
@@ -195,7 +199,7 @@ jobs:
         include:
           - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-apple-darwin,       os: macos-13 }
+          - { target: x86_64-apple-darwin,       os: macos-15-intel }
           - { target: aarch64-apple-darwin,      os: macos-14 }
     steps:
       - uses: actions/checkout@v4
@@ -216,11 +220,11 @@ jobs:
             libvulkan-dev libgl-dev \
             libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
             libgstreamer-plugins-bad1.0-dev \
-            libclang-dev clang
+            libclang-dev clang llvm
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake yasm nasm
+        run: brew install llvm cmake yasm nasm
 
       - run: make servo
 

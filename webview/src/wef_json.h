@@ -5,6 +5,7 @@
 
 #include "webview_value.h"
 
+#include <climits>
 #include <sstream>
 #include <cstring>
 

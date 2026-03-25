@@ -3,9 +3,9 @@
 cmake_minimum_required(VERSION 3.19)
 
 if(APPLE)
-  project(wef VERSION 1.0.0 LANGUAGES CXX OBJCXX)
+  project(wef VERSION 1.0.0 LANGUAGES C CXX OBJCXX)
 else()
-  project(wef VERSION 1.0.0 LANGUAGES CXX)
+  project(wef VERSION 1.0.0 LANGUAGES C CXX)
 endif()
 
 set(CMAKE_CXX_STANDARD 17)
