@@ -21,7 +21,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 12;
+pub const WEF_API_VERSION: u32 = 13;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -115,6 +115,15 @@ pub type WefCloseRequestedFn = unsafe extern "C" fn(
   *mut c_void, // user_data
   u32,         // window_id
 );
+pub type WefDialogResultFn = unsafe extern "C" fn(
+  *mut c_void,   // user_data
+  c_int,         // confirmed (1=ok, 0=cancel)
+  *const c_char, // input_value (prompt only, else null)
+);
+
+pub const WEF_DIALOG_ALERT: i32 = 0;
+pub const WEF_DIALOG_CONFIRM: i32 = 1;
+pub const WEF_DIALOG_PROMPT: i32 = 2;
 
 pub const WEF_WHEEL_DELTA_PIXEL: i32 = 0;
 pub const WEF_WHEEL_DELTA_LINE: i32 = 1;
@@ -267,6 +276,18 @@ pub struct WefBackendApi {
       *mut WefValue,
       Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
       *mut c_void,
+    ),
+  >,
+  pub show_dialog: Option<
+    unsafe extern "C" fn(
+      *mut c_void,           // backend_data
+      u32,                   // window_id
+      c_int,                 // dialog_type
+      *const c_char,         // title
+      *const c_char,         // message
+      *const c_char,         // default_value
+      Option<WefDialogResultFn>, // callback
+      *mut c_void,           // callback_data
     ),
   >,
 }
@@ -538,6 +559,7 @@ pub fn create_api_base() -> WefBackendApi {
     poll_js_calls: None,
     set_js_call_notify: None,
     set_application_menu: None,
+    show_dialog: None,
   }
 }
 
@@ -649,6 +671,17 @@ pub fn remove_window_handles(window_id: u32) {
   }
 }
 
+// --- Pending dialog ---
+
+pub struct PendingDialog {
+  pub dialog_type: i32,
+  pub title: String,
+  pub message: String,
+  pub default_value: String,
+  pub callback: Option<WefDialogResultFn>,
+  pub callback_data: usize,
+}
+
 // --- Per-window common state ---
 
 pub struct WindowState {
@@ -658,6 +691,7 @@ pub struct WindowState {
   pub pending_resizable: Mutex<Option<bool>>,
   pub pending_always_on_top: Mutex<Option<bool>>,
   pub pending_visible: Mutex<Option<bool>>,
+  pub pending_dialog: Mutex<Option<PendingDialog>>,
   pub cursor_position: Mutex<(f64, f64)>,
   pub last_press_time: Mutex<Option<std::time::Instant>>,
   pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
@@ -673,6 +707,7 @@ impl WindowState {
       pending_resizable: Mutex::new(None),
       pending_always_on_top: Mutex::new(None),
       pending_visible: Mutex::new(None),
+      pending_dialog: Mutex::new(None),
       cursor_position: Mutex::new((0.0, 0.0)),
       last_press_time: Mutex::new(None),
       last_press_button: Mutex::new(None),
@@ -728,6 +763,7 @@ impl Default for EventHandlers {
 pub struct CommonState {
   pub windows: Mutex<HashMap<u32, WindowState>>,
   pub handlers: EventHandlers,
+  pub pending_global_dialog: Mutex<Option<PendingDialog>>,
 }
 
 impl CommonState {
@@ -735,6 +771,7 @@ impl CommonState {
     Self {
       windows: Mutex::new(HashMap::new()),
       handlers: EventHandlers::new(),
+      pending_global_dialog: Mutex::new(None),
     }
   }
 
@@ -795,6 +832,9 @@ pub enum CommonEvent {
     window_id: u32,
   },
   Focus {
+    window_id: u32,
+  },
+  ShowDialog {
     window_id: u32,
   },
   Quit,
@@ -1224,6 +1264,55 @@ macro_rules! define_common_backend_fns {
           .unwrap() = handler.map(|h| (h, user_data as usize));
       }
     }
+
+    unsafe extern "C" fn backend_show_dialog(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      dialog_type: ::std::ffi::c_int,
+      title: *const ::std::ffi::c_char,
+      message: *const ::std::ffi::c_char,
+      default_value: *const ::std::ffi::c_char,
+      callback: Option<$crate::WefDialogResultFn>,
+      callback_data: *mut ::std::ffi::c_void,
+    ) {
+      let title_str = if title.is_null() {
+        String::new()
+      } else {
+        ::std::ffi::CStr::from_ptr(title).to_string_lossy().into_owned()
+      };
+      let message_str = if message.is_null() {
+        String::new()
+      } else {
+        ::std::ffi::CStr::from_ptr(message).to_string_lossy().into_owned()
+      };
+      let default_str = if default_value.is_null() {
+        String::new()
+      } else {
+        ::std::ffi::CStr::from_ptr(default_value).to_string_lossy().into_owned()
+      };
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let dialog = $crate::PendingDialog {
+          dialog_type,
+          title: title_str,
+          message: message_str,
+          default_value: default_str,
+          callback,
+          callback_data: callback_data as usize,
+        };
+        if window_id == 0 {
+          *state.common().pending_global_dialog.lock().unwrap() = Some(dialog);
+        } else {
+          state.common().with_window(window_id, |ws| {
+            *ws.pending_dialog.lock().unwrap() = Some(dialog);
+          });
+        }
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::ShowDialog { window_id },
+          ),
+        );
+      }
+    }
   };
 }
 
@@ -1262,6 +1351,7 @@ macro_rules! fill_common_api {
     $api.set_move_handler = Some(backend_set_move_handler);
     $api.set_close_requested_handler =
       Some(backend_set_close_requested_handler);
+    $api.show_dialog = Some(backend_show_dialog);
   };
 }
 
@@ -1342,6 +1432,28 @@ pub fn handle_common_event<B: BackendAccess>(
       window.focus_window();
       true
     }
+    CommonEvent::ShowDialog { window_id: eid } if *eid == window_id => {
+      if let Some(state) = B::get() {
+        state.common().with_window(window_id, |ws| {
+          if let Some(dialog) = ws.pending_dialog.lock().unwrap().take() {
+            let (confirmed, input) =
+              show_native_dialog(dialog.dialog_type, &dialog.title, &dialog.message, &dialog.default_value);
+            if let Some(cb) = dialog.callback {
+              let input_cstr = input
+                .as_ref()
+                .map(|s| std::ffi::CString::new(s.as_str()).unwrap());
+              let input_ptr = input_cstr
+                .as_ref()
+                .map_or(std::ptr::null(), |s| s.as_ptr());
+              unsafe {
+                cb(dialog.callback_data as *mut c_void, confirmed as c_int, input_ptr)
+              };
+            }
+          }
+        });
+      }
+      true
+    }
     CommonEvent::UiTask { task, data } => {
       unsafe { task(*data as *mut c_void) };
       true
@@ -1376,6 +1488,155 @@ pub fn apply_pending_post_create(ws: &WindowState, window: &Window) {
   if let Some(true) = *ws.pending_always_on_top.lock().unwrap() {
     window.set_window_level(WindowLevel::AlwaysOnTop);
   }
+}
+
+/// Handle an app-wide dialog (window_id == 0) that doesn't require a parent window.
+pub fn handle_global_dialog<B: BackendAccess>() {
+  if let Some(state) = B::get() {
+    if let Some(dialog) =
+      state.common().pending_global_dialog.lock().unwrap().take()
+    {
+      let (confirmed, input) = show_native_dialog(
+        dialog.dialog_type,
+        &dialog.title,
+        &dialog.message,
+        &dialog.default_value,
+      );
+      if let Some(cb) = dialog.callback {
+        let input_cstr = input
+          .as_ref()
+          .map(|s| std::ffi::CString::new(s.as_str()).unwrap());
+        let input_ptr = input_cstr
+          .as_ref()
+          .map_or(std::ptr::null(), |s| s.as_ptr());
+        unsafe {
+          cb(
+            dialog.callback_data as *mut c_void,
+            confirmed as c_int,
+            input_ptr,
+          )
+        };
+      }
+    }
+  }
+}
+
+// --- Native dialog implementation ---
+
+pub fn show_native_dialog(
+  dialog_type: i32,
+  title: &str,
+  message: &str,
+  default_value: &str,
+) -> (bool, Option<String>) {
+  match dialog_type {
+    WEF_DIALOG_ALERT => {
+      rfd::MessageDialog::new()
+        .set_title(title)
+        .set_description(message)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+      (true, None)
+    }
+    WEF_DIALOG_CONFIRM => {
+      let result = rfd::MessageDialog::new()
+        .set_title(title)
+        .set_description(message)
+        .set_buttons(rfd::MessageButtons::OkCancel)
+        .show();
+      (result == rfd::MessageDialogResult::Ok, None)
+    }
+    WEF_DIALOG_PROMPT => show_prompt_dialog(title, message, default_value),
+    _ => (false, None),
+  }
+}
+
+#[cfg(target_os = "macos")]
+fn show_prompt_dialog(
+  title: &str,
+  message: &str,
+  default_value: &str,
+) -> (bool, Option<String>) {
+  let script = format!(
+    "set result to display dialog \"{}\" default answer \"{}\" with title \"{}\" buttons {{\"Cancel\", \"OK\"}} default button \"OK\"\nreturn text returned of result",
+    message.replace('\\', "\\\\").replace('"', "\\\""),
+    default_value.replace('\\', "\\\\").replace('"', "\\\""),
+    title.replace('\\', "\\\\").replace('"', "\\\""),
+  );
+  match std::process::Command::new("osascript")
+    .arg("-e")
+    .arg(&script)
+    .output()
+  {
+    Ok(output) if output.status.success() => {
+      let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+      (true, Some(text))
+    }
+    _ => (false, None),
+  }
+}
+
+#[cfg(target_os = "windows")]
+fn show_prompt_dialog(
+  title: &str,
+  message: &str,
+  default_value: &str,
+) -> (bool, Option<String>) {
+  let script = format!(
+    r#"Add-Type -AssemblyName Microsoft.VisualBasic; [Microsoft.VisualBasic.Interaction]::InputBox('{}', '{}', '{}')"#,
+    message.replace('\'', "''"),
+    title.replace('\'', "''"),
+    default_value.replace('\'', "''"),
+  );
+  match std::process::Command::new("powershell")
+    .args(["-Command", &script])
+    .output()
+  {
+    Ok(output) if output.status.success() => {
+      let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+      if text.is_empty() {
+        (false, None)
+      } else {
+        (true, Some(text))
+      }
+    }
+    _ => (false, None),
+  }
+}
+
+#[cfg(target_os = "linux")]
+fn show_prompt_dialog(
+  title: &str,
+  message: &str,
+  default_value: &str,
+) -> (bool, Option<String>) {
+  match std::process::Command::new("zenity")
+    .args([
+      "--entry",
+      "--title",
+      title,
+      "--text",
+      message,
+      "--entry-text",
+      default_value,
+    ])
+    .output()
+  {
+    Ok(output) if output.status.success() => {
+      let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+      (true, Some(text))
+    }
+    _ => (false, None),
+  }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+fn show_prompt_dialog(
+  _title: &str,
+  _message: &str,
+  default_value: &str,
+) -> (bool, Option<String>) {
+  (true, Some(default_value.to_string()))
 }
 
 // --- Keyboard modifier flags ---

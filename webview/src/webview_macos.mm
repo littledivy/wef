@@ -62,6 +62,11 @@ class WKWebViewBackend : public WefBackend {
                           wef_menu_click_fn on_click,
                           void* on_click_data) override;
 
+  void ShowDialog(uint32_t window_id, int dialog_type,
+                  const std::string& title, const std::string& message,
+                  const std::string& default_value,
+                  wef_dialog_result_fn callback, void* callback_data) override;
+
   void HandleJsMessage(uint32_t window_id, uint64_t call_id, const std::string& method, wef::ValuePtr args);
 
  private:
@@ -1225,6 +1230,50 @@ void WKWebViewBackend::SetApplicationMenu(wef_value_t* menu_template,
     NSMenu* menubar = BuildMenuFromValue(menu_template, api);
     if (menubar) {
       [NSApp setMainMenu:menubar];
+    }
+  });
+}
+
+void WKWebViewBackend::ShowDialog(uint32_t window_id, int dialog_type,
+                                   const std::string& title, const std::string& message,
+                                   const std::string& default_value,
+                                   wef_dialog_result_fn callback, void* callback_data) {
+  NSString* nsTitle = [NSString stringWithUTF8String:title.c_str()];
+  NSString* nsMessage = [NSString stringWithUTF8String:message.c_str()];
+  NSString* nsDefault = [NSString stringWithUTF8String:default_value.c_str()];
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSAlert* alert = [[NSAlert alloc] init];
+    [alert setMessageText:nsTitle];
+    [alert setInformativeText:nsMessage];
+
+    NSTextField* inputField = nil;
+
+    if (dialog_type == WEF_DIALOG_ALERT) {
+      [alert addButtonWithTitle:@"OK"];
+    } else if (dialog_type == WEF_DIALOG_CONFIRM) {
+      [alert addButtonWithTitle:@"OK"];
+      [alert addButtonWithTitle:@"Cancel"];
+    } else if (dialog_type == WEF_DIALOG_PROMPT) {
+      [alert addButtonWithTitle:@"OK"];
+      [alert addButtonWithTitle:@"Cancel"];
+      inputField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+      [inputField setStringValue:nsDefault];
+      [alert setAccessoryView:inputField];
+      [alert layout];
+      [[alert window] makeFirstResponder:inputField];
+    }
+
+    NSModalResponse response = [alert runModal];
+    bool confirmed = (response == NSAlertFirstButtonReturn);
+
+    if (callback) {
+      if (dialog_type == WEF_DIALOG_PROMPT && confirmed && inputField) {
+        const char* text = [[inputField stringValue] UTF8String];
+        callback(callback_data, 1, text);
+      } else {
+        callback(callback_data, confirmed ? 1 : 0, nullptr);
+      }
     }
   });
 }

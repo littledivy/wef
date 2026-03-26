@@ -230,6 +230,52 @@ void RemoveNativeMouseMonitor() {
   }
 }
 
+// --- Native Dialog (macOS) ---
+
+void ShowNativeDialog_Mac(int dialog_type, const char* title, const char* message,
+                          const char* default_value, wef_dialog_result_fn callback,
+                          void* callback_data) {
+  NSString* nsTitle = title ? [NSString stringWithUTF8String:title] : @"";
+  NSString* nsMessage = message ? [NSString stringWithUTF8String:message] : @"";
+  NSString* nsDefault = default_value ? [NSString stringWithUTF8String:default_value] : @"";
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSAlert* alert = [[NSAlert alloc] init];
+    [alert setMessageText:nsTitle];
+    [alert setInformativeText:nsMessage];
+
+    NSTextField* inputField = nil;
+
+    if (dialog_type == WEF_DIALOG_ALERT) {
+      [alert addButtonWithTitle:@"OK"];
+    } else if (dialog_type == WEF_DIALOG_CONFIRM) {
+      [alert addButtonWithTitle:@"OK"];
+      [alert addButtonWithTitle:@"Cancel"];
+    } else if (dialog_type == WEF_DIALOG_PROMPT) {
+      [alert addButtonWithTitle:@"OK"];
+      [alert addButtonWithTitle:@"Cancel"];
+      inputField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+      [inputField setStringValue:nsDefault];
+      [alert setAccessoryView:inputField];
+      // Make the text field first responder
+      [alert layout];
+      [[alert window] makeFirstResponder:inputField];
+    }
+
+    NSModalResponse response = [alert runModal];
+    bool confirmed = (response == NSAlertFirstButtonReturn);
+
+    if (callback) {
+      if (dialog_type == WEF_DIALOG_PROMPT && confirmed && inputField) {
+        const char* text = [[inputField stringValue] UTF8String];
+        callback(callback_data, 1, text);
+      } else {
+        callback(callback_data, confirmed ? 1 : 0, nullptr);
+      }
+    }
+  });
+}
+
 // --- Application Menu (macOS) ---
 
 static wef_menu_click_fn g_menu_click_fn = nullptr;

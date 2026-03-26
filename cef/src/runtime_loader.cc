@@ -725,7 +725,67 @@ static void Backend_SetCloseRequestedHandler(void* data,
   loader->SetCloseRequestedHandler(handler, user_data);
 }
 
+static void Backend_ShowDialog(void* data, uint32_t window_id, int dialog_type,
+                               const char* title, const char* message,
+                               const char* default_value,
+                               wef_dialog_result_fn callback, void* callback_data) {
+  std::string title_str = title ? title : "";
+  std::string message_str = message ? message : "";
+  std::string default_str = default_value ? default_value : "";
+
+#ifdef __APPLE__
+  ShowNativeDialog_Mac(dialog_type, title_str.c_str(), message_str.c_str(),
+                       default_str.c_str(), callback, callback_data);
+#elif defined(__linux__)
+  // Use zenity for dialogs on Linux
+  std::string cmd;
+  if (dialog_type == WEF_DIALOG_ALERT) {
+    cmd = "zenity --info --title=\"" + title_str + "\" --text=\"" + message_str + "\" 2>/dev/null";
+    int ret = system(cmd.c_str());
+    if (callback) callback(callback_data, (ret == 0) ? 1 : 0, nullptr);
+  } else if (dialog_type == WEF_DIALOG_CONFIRM) {
+    cmd = "zenity --question --title=\"" + title_str + "\" --text=\"" + message_str + "\" 2>/dev/null";
+    int ret = system(cmd.c_str());
+    if (callback) callback(callback_data, (ret == 0) ? 1 : 0, nullptr);
+  } else if (dialog_type == WEF_DIALOG_PROMPT) {
+    cmd = "zenity --entry --title=\"" + title_str + "\" --text=\"" + message_str +
+          "\" --entry-text=\"" + default_str + "\" 2>/dev/null";
+    FILE* fp = popen(cmd.c_str(), "r");
+    if (fp) {
+      char buf[4096] = {};
+      if (fgets(buf, sizeof(buf), fp)) {
+        // Remove trailing newline
+        size_t len = strlen(buf);
+        if (len > 0 && buf[len - 1] == '\n') buf[len - 1] = '\0';
+      }
+      int ret = pclose(fp);
+      if (callback) callback(callback_data, (ret == 0) ? 1 : 0, (ret == 0) ? buf : nullptr);
+    } else {
+      if (callback) callback(callback_data, 0, nullptr);
+    }
+  }
+#elif defined(_WIN32)
+  CefPostTask(TID_UI, base::BindOnce(
+      [](int dtype, std::string t, std::string m, std::string d,
+         wef_dialog_result_fn cb, void* cb_data) {
+        if (dtype == WEF_DIALOG_ALERT) {
+          MessageBoxA(nullptr, m.c_str(), t.c_str(), MB_OK | MB_ICONINFORMATION);
+          if (cb) cb(cb_data, 1, nullptr);
+        } else if (dtype == WEF_DIALOG_CONFIRM) {
+          int ret = MessageBoxA(nullptr, m.c_str(), t.c_str(), MB_OKCANCEL | MB_ICONQUESTION);
+          if (cb) cb(cb_data, (ret == IDOK) ? 1 : 0, nullptr);
+        } else if (dtype == WEF_DIALOG_PROMPT) {
+          // Use default value as result for now (Windows prompt requires custom dialog)
+          int ret = MessageBoxA(nullptr, m.c_str(), t.c_str(), MB_OKCANCEL | MB_ICONQUESTION);
+          if (cb) cb(cb_data, (ret == IDOK) ? 1 : 0, (ret == IDOK) ? d.c_str() : nullptr);
+        }
+      },
+      dialog_type, title_str, message_str, default_str, callback, callback_data));
+#endif
+}
+
 void RuntimeLoader::InitializeBackendApi() {
+  memset(&backend_api_, 0, sizeof(backend_api_));
   backend_api_.version = WEF_API_VERSION;
   backend_api_.backend_data = this;
 
@@ -836,6 +896,8 @@ void RuntimeLoader::InitializeBackendApi() {
   // future work (see issue #3 — Wayland/Phase 4).
   backend_api_.set_application_menu = [](void*, wef_value_t*, wef_menu_click_fn, void*) {};
 #endif
+
+  backend_api_.show_dialog = Backend_ShowDialog;
 }
 
 // --- RuntimeLoader lifecycle ---

@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 12
+#define WEF_API_VERSION 13
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -73,6 +73,18 @@ typedef void (*wef_menu_click_fn)(
 // Mouse event state
 #define WEF_MOUSE_PRESSED  0
 #define WEF_MOUSE_RELEASED 1
+
+// Dialog types
+#define WEF_DIALOG_ALERT   0
+#define WEF_DIALOG_CONFIRM 1
+#define WEF_DIALOG_PROMPT  2
+
+// Callback for dialog results.
+typedef void (*wef_dialog_result_fn)(
+    void* user_data,
+    int confirmed,           // 1 = OK/Yes, 0 = Cancel/No
+    const char* input_value  // For prompt: user input text. NULL for alert/confirm.
+);
 
 // Callback for mouse click events.
 typedef void (*wef_mouse_click_fn)(
@@ -346,6 +358,19 @@ struct wef_backend_api {
         wef_value_t* menu_template,
         wef_menu_click_fn on_click,
         void* on_click_data
+    );
+
+    // Show a native dialog (alert, confirm, or prompt).
+    // The callback is invoked with the result after the user dismisses the dialog.
+    void (*show_dialog)(
+        void* backend_data,
+        uint32_t window_id,
+        int dialog_type,            // WEF_DIALOG_*
+        const char* title,
+        const char* message,
+        const char* default_value,  // For prompt: default input text. NULL for alert/confirm.
+        wef_dialog_result_fn callback,
+        void* callback_data
     );
 };
 

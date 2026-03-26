@@ -234,6 +234,11 @@ class WebView2Backend : public WefBackend {
 
   void SetApplicationMenu(wef_value_t*, const wef_backend_api_t*, wef_menu_click_fn, void*) override {}
 
+  void ShowDialog(uint32_t window_id, int dialog_type,
+                  const std::string& title, const std::string& message,
+                  const std::string& default_value,
+                  wef_dialog_result_fn callback, void* callback_data) override;
+
   void HandleJsMessage(uint32_t window_id, const std::wstring& json);
 
  private:
@@ -850,6 +855,66 @@ void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& js
   wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
   RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
+}
+
+// ============================================================================
+// Dialog
+// ============================================================================
+
+void WebView2Backend::ShowDialog(uint32_t window_id, int dialog_type,
+                                  const std::string& title, const std::string& message,
+                                  const std::string& default_value,
+                                  wef_dialog_result_fn callback, void* callback_data) {
+  // Convert strings to wide strings for Win32 API
+  auto toWide = [](const std::string& s) -> std::wstring {
+    if (s.empty()) return L"";
+    int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
+    std::wstring ws(len - 1, 0);
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &ws[0], len);
+    return ws;
+  };
+
+  std::wstring wTitle = toWide(title);
+  std::wstring wMessage = toWide(message);
+
+  HWND hwnd = nullptr;
+  auto* win = GetWindow(window_id);
+  if (win) hwnd = win->hwnd;
+
+  if (dialog_type == WEF_DIALOG_ALERT) {
+    MessageBoxW(hwnd, wMessage.c_str(), wTitle.c_str(), MB_OK | MB_ICONINFORMATION);
+    if (callback) callback(callback_data, 1, nullptr);
+  } else if (dialog_type == WEF_DIALOG_CONFIRM) {
+    int ret = MessageBoxW(hwnd, wMessage.c_str(), wTitle.c_str(), MB_OKCANCEL | MB_ICONQUESTION);
+    if (callback) callback(callback_data, (ret == IDOK) ? 1 : 0, nullptr);
+  } else if (dialog_type == WEF_DIALOG_PROMPT) {
+    // Windows does not have a built-in prompt dialog, so use PowerShell
+    std::string script =
+        "Add-Type -AssemblyName Microsoft.VisualBasic; "
+        "[Microsoft.VisualBasic.Interaction]::InputBox('" +
+        message + "', '" + title + "', '" + default_value + "')";
+    std::string cmd = "powershell -Command \"" + script + "\"";
+
+    FILE* fp = _popen(cmd.c_str(), "r");
+    if (fp) {
+      char buf[4096] = {};
+      std::string result;
+      while (fgets(buf, sizeof(buf), fp)) {
+        result += buf;
+      }
+      int ret = _pclose(fp);
+      // Trim trailing whitespace
+      while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+        result.pop_back();
+      if (!result.empty()) {
+        if (callback) callback(callback_data, 1, result.c_str());
+      } else {
+        if (callback) callback(callback_data, 0, nullptr);
+      }
+    } else {
+      if (callback) callback(callback_data, 0, nullptr);
+    }
+  }
 }
 
 // ============================================================================

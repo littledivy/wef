@@ -384,4 +384,11 @@ void UnregisterNSWindowForCefHandle(void* cef_handle);
 void MonitorLinuxWindowEvents(unsigned long xid);
 #endif
 
+#ifdef __APPLE__
+// Show a native dialog (alert/confirm/prompt) on macOS (implemented in runtime_loader_mac.mm).
+void ShowNativeDialog_Mac(int dialog_type, const char* title, const char* message,
+                          const char* default_value, wef_dialog_result_fn callback,
+                          void* callback_data);
+#endif
+
 #endif

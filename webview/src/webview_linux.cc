@@ -371,6 +371,11 @@ class WebKitGTKBackend : public WefBackend {
 
   void SetApplicationMenu(wef_value_t*, const wef_backend_api_t*, wef_menu_click_fn, void*) override {}
 
+  void ShowDialog(uint32_t window_id, int dialog_type,
+                  const std::string& title, const std::string& message,
+                  const std::string& default_value,
+                  wef_dialog_result_fn callback, void* callback_data) override;
+
   void HandleJsMessage(uint32_t window_id, const char* json);
 
  private:
@@ -833,6 +838,66 @@ void WebKitGTKBackend::HandleJsMessage(uint32_t window_id, const char* jsonStr) 
   wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
   RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
+}
+
+// ============================================================================
+// Dialog
+// ============================================================================
+
+void WebKitGTKBackend::ShowDialog(uint32_t window_id, int dialog_type,
+                                   const std::string& title, const std::string& message,
+                                   const std::string& default_value,
+                                   wef_dialog_result_fn callback, void* callback_data) {
+  GtkWindow* parent = nullptr;
+  auto* win = GetWindow(window_id);
+  if (win && win->window) parent = GTK_WINDOW(win->window);
+
+  if (dialog_type == WEF_DIALOG_ALERT) {
+    GtkWidget* dialog = gtk_message_dialog_new(
+        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+        "%s", message.c_str());
+    gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    if (callback) callback(callback_data, 1, nullptr);
+  } else if (dialog_type == WEF_DIALOG_CONFIRM) {
+    GtkWidget* dialog = gtk_message_dialog_new(
+        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
+        "%s", message.c_str());
+    gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
+    gint result = gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    if (callback) callback(callback_data, (result == GTK_RESPONSE_OK) ? 1 : 0, nullptr);
+  } else if (dialog_type == WEF_DIALOG_PROMPT) {
+    GtkWidget* dialog = gtk_dialog_new_with_buttons(
+        title.c_str(), parent,
+        (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_OK", GTK_RESPONSE_OK,
+        nullptr);
+    GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
+    GtkWidget* label = gtk_label_new(message.c_str());
+    gtk_container_add(GTK_CONTAINER(content), label);
+    GtkWidget* entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry), default_value.c_str());
+    gtk_container_add(GTK_CONTAINER(content), entry);
+    gtk_widget_show_all(dialog);
+    gtk_dialog_set_default_response(GTK_DIALOG(dialog), GTK_RESPONSE_OK);
+    gtk_entry_set_activates_default(GTK_ENTRY(entry), TRUE);
+
+    gint result = gtk_dialog_run(GTK_DIALOG(dialog));
+    const gchar* text = gtk_entry_get_text(GTK_ENTRY(entry));
+    std::string result_text = text ? text : "";
+    gtk_widget_destroy(dialog);
+
+    if (callback) {
+      if (result == GTK_RESPONSE_OK) {
+        callback(callback_data, 1, result_text.c_str());
+      } else {
+        callback(callback_data, 0, nullptr);
+      }
+    }
+  }
 }
 
 // ============================================================================

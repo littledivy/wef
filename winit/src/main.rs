@@ -189,6 +189,9 @@ impl ApplicationHandler<UserEvent> for App {
         CommonEvent::UiTask { task, data } => {
           unsafe { task(*data as *mut c_void) };
         }
+        CommonEvent::ShowDialog { window_id: 0 } => {
+          wef_backend_winit_common::handle_global_dialog::<BackendState>();
+        }
         other => {
           let wid = match other {
             CommonEvent::SetTitle { window_id }
@@ -198,7 +201,8 @@ impl ApplicationHandler<UserEvent> for App {
             | CommonEvent::SetAlwaysOnTop { window_id }
             | CommonEvent::Show { window_id }
             | CommonEvent::Hide { window_id }
-            | CommonEvent::Focus { window_id } => *window_id,
+            | CommonEvent::Focus { window_id }
+            | CommonEvent::ShowDialog { window_id } => *window_id,
             _ => return,
           };
           if let Some(info) = self.windows.get(&wid) {

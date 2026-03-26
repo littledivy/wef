@@ -22,7 +22,7 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
-pub const WEF_API_VERSION: u32 = 12;
+pub const WEF_API_VERSION: u32 = 13;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -831,6 +831,132 @@ impl Window {
       window_bindings.remove(name);
     }
   }
+
+  /// Show an alert dialog with a message. Fire-and-forget.
+  pub fn alert(&self, title: &str, message: &str) {
+    self.show_dialog_internal(
+      WEF_DIALOG_ALERT,
+      title,
+      message,
+      "",
+      None::<fn(bool, Option<String>)>,
+    );
+  }
+
+  /// Show a confirm dialog. Callback receives `true` if OK was pressed.
+  pub fn confirm<F>(&self, title: &str, message: &str, callback: F)
+  where
+    F: FnOnce(bool) + Send + 'static,
+  {
+    self.show_dialog_internal(
+      WEF_DIALOG_CONFIRM,
+      title,
+      message,
+      "",
+      Some(move |confirmed: bool, _input: Option<String>| {
+        callback(confirmed);
+      }),
+    );
+  }
+
+  /// Show a prompt dialog with a text input. Callback receives `Some(text)` if
+  /// OK was pressed, or `None` if cancelled.
+  pub fn prompt<F>(
+    &self,
+    title: &str,
+    message: &str,
+    default_value: &str,
+    callback: F,
+  ) where
+    F: FnOnce(Option<String>) + Send + 'static,
+  {
+    self.show_dialog_internal(
+      WEF_DIALOG_PROMPT,
+      title,
+      message,
+      default_value,
+      Some(
+        move |confirmed: bool, input: Option<String>| {
+          callback(if confirmed { input } else { None });
+        },
+      ),
+    );
+  }
+
+  fn show_dialog_internal<F>(
+    &self,
+    dialog_type: i32,
+    title: &str,
+    message: &str,
+    default_value: &str,
+    callback: Option<F>,
+  ) where
+    F: FnOnce(bool, Option<String>) + Send + 'static,
+  {
+    let api = api();
+    if let Some(f) = api.show_dialog {
+      let c_title = CString::new(title).expect("Invalid title");
+      let c_message = CString::new(message).expect("Invalid message");
+      let c_default =
+        CString::new(default_value).expect("Invalid default value");
+
+      match callback {
+        Some(cb_fn) => {
+          unsafe extern "C" fn trampoline(
+            user_data: *mut c_void,
+            confirmed: c_int,
+            input_value: *const c_char,
+          ) {
+            let cb = Box::from_raw(
+              user_data
+                as *mut Box<dyn FnOnce(bool, Option<String>) + Send>,
+            );
+            let input = if input_value.is_null() {
+              None
+            } else {
+              Some(
+                CStr::from_ptr(input_value)
+                  .to_string_lossy()
+                  .into_owned(),
+              )
+            };
+            cb(confirmed != 0, input);
+          }
+
+          let cb: Box<Box<dyn FnOnce(bool, Option<String>) + Send>> =
+            Box::new(Box::new(cb_fn));
+          let user_data = Box::into_raw(cb) as *mut c_void;
+
+          unsafe {
+            f(
+              api.backend_data,
+              self.id,
+              dialog_type as c_int,
+              c_title.as_ptr(),
+              c_message.as_ptr(),
+              c_default.as_ptr(),
+              Some(trampoline),
+              user_data,
+            )
+          };
+        }
+        None => {
+          unsafe {
+            f(
+              api.backend_data,
+              self.id,
+              dialog_type as c_int,
+              c_title.as_ptr(),
+              c_message.as_ptr(),
+              c_default.as_ptr(),
+              None,
+              std::ptr::null_mut(),
+            )
+          };
+        }
+      }
+    }
+  }
 }
 
 /// A menu item in an application menu template.
@@ -962,6 +1088,113 @@ pub fn set_application_menu_raw(template: Value) {
         Some(menu_click_callback),
         std::ptr::null_mut(),
       );
+    }
+  }
+}
+
+pub const WEF_DIALOG_ALERT: i32 = 0;
+pub const WEF_DIALOG_CONFIRM: i32 = 1;
+pub const WEF_DIALOG_PROMPT: i32 = 2;
+
+/// Show an alert dialog (app-wide, no parent window).
+pub fn alert(title: &str, message: &str) {
+  show_dialog_free(WEF_DIALOG_ALERT, title, message, "", None::<fn(bool, Option<String>)>);
+}
+
+/// Show a confirm dialog (app-wide). Callback receives `true` if OK was pressed.
+pub fn confirm<F>(title: &str, message: &str, callback: F)
+where
+  F: FnOnce(bool) + Send + 'static,
+{
+  show_dialog_free(
+    WEF_DIALOG_CONFIRM,
+    title,
+    message,
+    "",
+    Some(move |confirmed: bool, _: Option<String>| callback(confirmed)),
+  );
+}
+
+/// Show a prompt dialog (app-wide). Callback receives `Some(text)` if OK, `None` if cancelled.
+pub fn prompt<F>(title: &str, message: &str, default_value: &str, callback: F)
+where
+  F: FnOnce(Option<String>) + Send + 'static,
+{
+  show_dialog_free(
+    WEF_DIALOG_PROMPT,
+    title,
+    message,
+    default_value,
+    Some(move |confirmed: bool, input: Option<String>| {
+      callback(if confirmed { input } else { None });
+    }),
+  );
+}
+
+fn show_dialog_free<F>(
+  dialog_type: i32,
+  title: &str,
+  message: &str,
+  default_value: &str,
+  callback: Option<F>,
+) where
+  F: FnOnce(bool, Option<String>) + Send + 'static,
+{
+  let api = api();
+  if let Some(f) = api.show_dialog {
+    let c_title = CString::new(title).expect("Invalid title");
+    let c_message = CString::new(message).expect("Invalid message");
+    let c_default = CString::new(default_value).expect("Invalid default value");
+
+    match callback {
+      Some(cb_fn) => {
+        unsafe extern "C" fn trampoline(
+          user_data: *mut c_void,
+          confirmed: c_int,
+          input_value: *const c_char,
+        ) {
+          let cb = Box::from_raw(
+            user_data as *mut Box<dyn FnOnce(bool, Option<String>) + Send>,
+          );
+          let input = if input_value.is_null() {
+            None
+          } else {
+            Some(CStr::from_ptr(input_value).to_string_lossy().into_owned())
+          };
+          cb(confirmed != 0, input);
+        }
+
+        let cb: Box<Box<dyn FnOnce(bool, Option<String>) + Send>> =
+          Box::new(Box::new(cb_fn));
+        let user_data = Box::into_raw(cb) as *mut c_void;
+
+        unsafe {
+          f(
+            api.backend_data,
+            0, // no parent window
+            dialog_type as c_int,
+            c_title.as_ptr(),
+            c_message.as_ptr(),
+            c_default.as_ptr(),
+            Some(trampoline),
+            user_data,
+          )
+        };
+      }
+      None => {
+        unsafe {
+          f(
+            api.backend_data,
+            0,
+            dialog_type as c_int,
+            c_title.as_ptr(),
+            c_message.as_ptr(),
+            c_default.as_ptr(),
+            None,
+            std::ptr::null_mut(),
+          )
+        };
+      }
     }
   }
 }

@@ -304,6 +304,11 @@ class WefBackend {
                                   const wef_backend_api_t* api,
                                   wef_menu_click_fn on_click,
                                   void* on_click_data) = 0;
+
+  virtual void ShowDialog(uint32_t window_id, int dialog_type,
+                          const std::string& title, const std::string& message,
+                          const std::string& default_value,
+                          wef_dialog_result_fn callback, void* callback_data) = 0;
 };
 
 WefBackend* CreateWefBackend();

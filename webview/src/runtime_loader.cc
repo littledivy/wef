@@ -511,7 +511,22 @@ static void Backend_SetCloseRequestedHandler(void* data,
   loader->SetCloseRequestedHandler(handler, user_data);
 }
 
+static void Backend_ShowDialog(void* data, uint32_t window_id, int dialog_type,
+                               const char* title, const char* message,
+                               const char* default_value,
+                               wef_dialog_result_fn callback, void* callback_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    std::string t = title ? title : "";
+    std::string m = message ? message : "";
+    std::string d = default_value ? default_value : "";
+    backend->ShowDialog(window_id, dialog_type, t, m, d, callback, callback_data);
+  }
+}
+
 void RuntimeLoader::InitializeBackendApi() {
+  memset(&backend_api_, 0, sizeof(backend_api_));
   backend_api_.version = WEF_API_VERSION;
   backend_api_.backend_data = this;
 
@@ -596,6 +611,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.create_window = Backend_CreateWindow;
   backend_api_.close_window = Backend_CloseWindow;
   backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;
+  backend_api_.show_dialog = Backend_ShowDialog;
 }
 
 RuntimeLoader::RuntimeLoader() {
