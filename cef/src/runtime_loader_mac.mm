@@ -61,6 +61,10 @@ static uint32_t WefIdForNSWindow(NSWindow* win) {
   return RuntimeLoader::GetInstance()->GetWefIdForNSWindow((__bridge void*)win);
 }
 
+// Per-window menu storage (must be declared before focus observer uses them)
+static std::map<uint32_t, NSMenu*> g_window_menus;
+static std::mutex g_window_menus_mutex;
+
 void InstallNativeMouseMonitor() {
   if (g_mouse_monitor) return;
 
@@ -313,10 +317,6 @@ static void* g_menu_click_data = nullptr;
 }
 
 @end
-
-// Per-window menu storage for macOS
-static std::map<uint32_t, NSMenu*> g_window_menus;
-static std::mutex g_window_menus_mutex;
 
 static void ParseAccelerator(const std::string& accel, NSString** outKey,
                              NSEventModifierFlags* outMask) {
