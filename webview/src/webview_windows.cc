@@ -232,7 +232,14 @@ class WebView2Backend : public WefBackend {
 
   void Run() override;
 
-  void SetApplicationMenu(wef_value_t*, const wef_backend_api_t*, wef_menu_click_fn, void*) override {}
+  void SetApplicationMenu(uint32_t window_id, wef_value_t* menu_template,
+                          const wef_backend_api_t* api,
+                          wef_menu_click_fn on_click, void* on_click_data) override;
+
+  void ShowContextMenu(uint32_t window_id, int x, int y,
+                       wef_value_t* menu_template,
+                       const wef_backend_api_t* api,
+                       wef_menu_click_fn on_click, void* on_click_data) override;
 
   void ShowDialog(uint32_t window_id, int dialog_type,
                   const std::string& title, const std::string& message,
@@ -354,7 +361,7 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
       DestroyWindow(hwnd);
       return 0;
     case WM_COMMAND:
-      if (win32_menu::HandleMenuCommand(wParam))
+      if (win32_menu::HandleMenuCommand(hwnd, wParam))
         return 0;
       break;
     case WM_DESTROY:
@@ -855,6 +862,43 @@ void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& js
   wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
   RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
+}
+
+// ============================================================================
+// Application Menu
+// ============================================================================
+
+void WebView2Backend::SetApplicationMenu(uint32_t window_id,
+                                          wef_value_t* menu_template,
+                                          const wef_backend_api_t* api,
+                                          wef_menu_click_fn on_click,
+                                          void* on_click_data) {
+  if (!menu_template) return;
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state && state->hwnd) {
+    win32_menu::SetApplicationMenu(state->hwnd, menu_template, api,
+                                   on_click, on_click_data, window_id);
+  }
+}
+
+// ============================================================================
+// Context Menu
+// ============================================================================
+
+void WebView2Backend::ShowContextMenu(uint32_t window_id,
+                                       int x, int y,
+                                       wef_value_t* menu_template,
+                                       const wef_backend_api_t* api,
+                                       wef_menu_click_fn on_click,
+                                       void* on_click_data) {
+  if (!menu_template) return;
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state && state->hwnd) {
+    win32_menu::ShowContextMenu(state->hwnd, x, y, menu_template, api,
+                                on_click, on_click_data, window_id);
+  }
 }
 
 // ============================================================================

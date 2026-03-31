@@ -12,11 +12,12 @@
 
 namespace win32_menu {
 
-// Stored menu state — maps command IDs to item string IDs.
+// Per-window menu state — maps command IDs to item string IDs.
 struct MenuState {
   std::map<UINT, std::string> command_to_id;
   wef_menu_click_fn on_click = nullptr;
   void* on_click_data = nullptr;
+  uint32_t window_id = 0;
   UINT next_command_id = 0x8000; // Start above standard IDs
 
   UINT AllocCommandId(const std::string& item_id) {
@@ -29,15 +30,15 @@ struct MenuState {
     if (on_click) {
       auto it = command_to_id.find(cmd);
       if (it != command_to_id.end()) {
-        on_click(on_click_data, it->second.c_str());
+        on_click(on_click_data, window_id, it->second.c_str());
       }
     }
   }
 };
 
-inline MenuState& GetMenuState() {
-  static MenuState state;
-  return state;
+inline std::map<HWND, MenuState>& GetMenuStates() {
+  static std::map<HWND, MenuState> states;
+  return states;
 }
 
 // Parse accelerator string like "ctrl+shift+n" into display text.
@@ -76,10 +77,7 @@ inline std::string FormatAccelerator(const std::string& accel) {
 }
 
 // Create a role-based menu item (standard operations).
-inline bool CreateRoleMenuItem(HMENU menu, const std::string& role) {
-  // Standard roles map to WM_COMMAND with standard edit control messages.
-  // Since we're in a WebView/CEF context, these are mostly informational.
-  MenuState& state = GetMenuState();
+inline bool CreateRoleMenuItem(HMENU menu, const std::string& role, MenuState& state) {
 
   struct RoleEntry { const char* role; const char* label; };
   static const RoleEntry roles[] = {
@@ -112,7 +110,7 @@ inline void FreeVal(const wef_backend_api_t* api, wef_value_t* v) {
 }
 
 // Recursively build an HMENU from a wef_value_t list.
-inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) {
+inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, MenuState& state) {
   if (!val || !api->value_is_list(val)) return nullptr;
 
   HMENU menu = CreateMenu();
@@ -144,7 +142,7 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) 
       char* roleStr = api->value_get_string(roleVal, &len);
       FreeVal(api, roleVal);
       if (roleStr) {
-        CreateRoleMenuItem(menu, roleStr);
+        CreateRoleMenuItem(menu, roleStr, state);
         api->value_free_string(roleStr);
         FreeVal(api, itemVal);
         continue;
@@ -177,7 +175,7 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) 
     // Check for submenu
     wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
     if (submenuVal && api->value_is_list(submenuVal)) {
-      HMENU submenu = BuildMenuFromValue(submenuVal, api);
+      HMENU submenu = BuildMenuFromValue(submenuVal, api, state);
       FreeVal(api, submenuVal);
       if (submenu) {
         AppendMenuA(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), label.c_str());
@@ -188,7 +186,6 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) 
     FreeVal(api, submenuVal);
 
     // Regular clickable item
-    MenuState& state = GetMenuState();
     std::string itemId;
     wef_value_t* idVal = api->value_dict_get(itemVal, "id");
     if (idVal && api->value_is_string(idVal)) {
@@ -222,19 +219,21 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) 
 inline void SetApplicationMenu(HWND hwnd, wef_value_t* menu_template,
                                 const wef_backend_api_t* api,
                                 wef_menu_click_fn on_click,
-                                void* on_click_data) {
+                                void* on_click_data,
+                                uint32_t window_id = 0) {
   if (!menu_template || !hwnd) return;
 
-  MenuState& state = GetMenuState();
+  MenuState& state = GetMenuStates()[hwnd];
   state.command_to_id.clear();
   state.next_command_id = 0x8000;
   state.on_click = on_click;
   state.on_click_data = on_click_data;
+  state.window_id = window_id;
 
   // Destroy the old menu to avoid HMENU leak
   HMENU oldMenu = GetMenu(hwnd);
 
-  HMENU menubar = BuildMenuFromValue(menu_template, api);
+  HMENU menubar = BuildMenuFromValue(menu_template, api, state);
   if (menubar) {
     SetMenu(hwnd, menubar);
     DrawMenuBar(hwnd);
@@ -246,15 +245,52 @@ inline void SetApplicationMenu(HWND hwnd, wef_value_t* menu_template,
 }
 
 // Call this from WndProc on WM_COMMAND to dispatch menu clicks.
-inline bool HandleMenuCommand(WPARAM wParam) {
+inline bool HandleMenuCommand(HWND hwnd, WPARAM wParam) {
   UINT cmd = LOWORD(wParam);
-  MenuState& state = GetMenuState();
-  auto it = state.command_to_id.find(cmd);
-  if (it != state.command_to_id.end()) {
+  auto& states = GetMenuStates();
+  auto it = states.find(hwnd);
+  if (it == states.end()) return false;
+  MenuState& state = it->second;
+  auto cmd_it = state.command_to_id.find(cmd);
+  if (cmd_it != state.command_to_id.end()) {
     state.HandleCommand(cmd);
     return true;
   }
   return false;
+}
+
+// Show a context menu at the given position (client coordinates).
+// The menu is built from the same wef_value_t template as application menus.
+inline void ShowContextMenu(HWND hwnd, int x, int y,
+                            wef_value_t* menu_template,
+                            const wef_backend_api_t* api,
+                            wef_menu_click_fn on_click,
+                            void* on_click_data,
+                            uint32_t window_id = 0) {
+  if (!menu_template || !hwnd) return;
+
+  MenuState state;
+  state.on_click = on_click;
+  state.on_click_data = on_click_data;
+  state.window_id = window_id;
+
+  HMENU popup = BuildMenuFromValue(menu_template, api, state);
+  if (!popup) return;
+
+  // Convert client coordinates to screen coordinates
+  POINT pt = {x, y};
+  ClientToScreen(hwnd, &pt);
+
+  // TrackPopupMenu blocks until the user selects an item or dismisses.
+  // TPM_RETURNCMD makes it return the selected command ID directly.
+  UINT cmd = static_cast<UINT>(TrackPopupMenu(
+      popup, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr));
+
+  if (cmd != 0) {
+    state.HandleCommand(cmd);
+  }
+
+  DestroyMenu(popup);
 }
 
 } // namespace win32_menu

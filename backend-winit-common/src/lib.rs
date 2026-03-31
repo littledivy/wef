@@ -21,7 +21,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 13;
+pub const WEF_API_VERSION: u32 = 15;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -273,21 +273,33 @@ pub struct WefBackendApi {
   pub set_application_menu: Option<
     unsafe extern "C" fn(
       *mut c_void,
+      u32,
       *mut WefValue,
-      Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+      Option<unsafe extern "C" fn(*mut c_void, u32, *const c_char)>,
+      *mut c_void,
+    ),
+  >,
+  pub show_context_menu: Option<
+    unsafe extern "C" fn(
+      *mut c_void,
+      u32,
+      c_int,
+      c_int,
+      *mut WefValue,
+      Option<unsafe extern "C" fn(*mut c_void, u32, *const c_char)>,
       *mut c_void,
     ),
   >,
   pub show_dialog: Option<
     unsafe extern "C" fn(
-      *mut c_void,           // backend_data
-      u32,                   // window_id
-      c_int,                 // dialog_type
-      *const c_char,         // title
-      *const c_char,         // message
-      *const c_char,         // default_value
+      *mut c_void,               // backend_data
+      u32,                       // window_id
+      c_int,                     // dialog_type
+      *const c_char,             // title
+      *const c_char,             // message
+      *const c_char,             // default_value
       Option<WefDialogResultFn>, // callback
-      *mut c_void,           // callback_data
+      *mut c_void,               // callback_data
     ),
   >,
 }
@@ -559,6 +571,7 @@ pub fn create_api_base() -> WefBackendApi {
     poll_js_calls: None,
     set_js_call_notify: None,
     set_application_menu: None,
+    show_context_menu: None,
     show_dialog: None,
   }
 }
@@ -1278,17 +1291,23 @@ macro_rules! define_common_backend_fns {
       let title_str = if title.is_null() {
         String::new()
       } else {
-        ::std::ffi::CStr::from_ptr(title).to_string_lossy().into_owned()
+        ::std::ffi::CStr::from_ptr(title)
+          .to_string_lossy()
+          .into_owned()
       };
       let message_str = if message.is_null() {
         String::new()
       } else {
-        ::std::ffi::CStr::from_ptr(message).to_string_lossy().into_owned()
+        ::std::ffi::CStr::from_ptr(message)
+          .to_string_lossy()
+          .into_owned()
       };
       let default_str = if default_value.is_null() {
         String::new()
       } else {
-        ::std::ffi::CStr::from_ptr(default_value).to_string_lossy().into_owned()
+        ::std::ffi::CStr::from_ptr(default_value)
+          .to_string_lossy()
+          .into_owned()
       };
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
         let dialog = $crate::PendingDialog {
@@ -1436,17 +1455,24 @@ pub fn handle_common_event<B: BackendAccess>(
       if let Some(state) = B::get() {
         state.common().with_window(window_id, |ws| {
           if let Some(dialog) = ws.pending_dialog.lock().unwrap().take() {
-            let (confirmed, input) =
-              show_native_dialog(dialog.dialog_type, &dialog.title, &dialog.message, &dialog.default_value);
+            let (confirmed, input) = show_native_dialog(
+              dialog.dialog_type,
+              &dialog.title,
+              &dialog.message,
+              &dialog.default_value,
+            );
             if let Some(cb) = dialog.callback {
               let input_cstr = input
                 .as_ref()
                 .map(|s| std::ffi::CString::new(s.as_str()).unwrap());
-              let input_ptr = input_cstr
-                .as_ref()
-                .map_or(std::ptr::null(), |s| s.as_ptr());
+              let input_ptr =
+                input_cstr.as_ref().map_or(std::ptr::null(), |s| s.as_ptr());
               unsafe {
-                cb(dialog.callback_data as *mut c_void, confirmed as c_int, input_ptr)
+                cb(
+                  dialog.callback_data as *mut c_void,
+                  confirmed as c_int,
+                  input_ptr,
+                )
               };
             }
           }
@@ -1506,9 +1532,8 @@ pub fn handle_global_dialog<B: BackendAccess>() {
         let input_cstr = input
           .as_ref()
           .map(|s| std::ffi::CString::new(s.as_str()).unwrap());
-        let input_ptr = input_cstr
-          .as_ref()
-          .map_or(std::ptr::null(), |s| s.as_ptr());
+        let input_ptr =
+          input_cstr.as_ref().map_or(std::ptr::null(), |s| s.as_ptr());
         unsafe {
           cb(
             dialog.callback_data as *mut c_void,
@@ -1630,7 +1655,11 @@ fn show_prompt_dialog(
   }
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+#[cfg(not(any(
+  target_os = "macos",
+  target_os = "windows",
+  target_os = "linux"
+)))]
 fn show_prompt_dialog(
   _title: &str,
   _message: &str,

@@ -300,10 +300,18 @@ class WefBackend {
   virtual void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) = 0;
   virtual void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) = 0;
 
-  virtual void SetApplicationMenu(wef_value_t* menu_template,
+  virtual void SetApplicationMenu(uint32_t window_id,
+                                  wef_value_t* menu_template,
                                   const wef_backend_api_t* api,
                                   wef_menu_click_fn on_click,
                                   void* on_click_data) = 0;
+
+  virtual void ShowContextMenu(uint32_t window_id,
+                               int x, int y,
+                               wef_value_t* menu_template,
+                               const wef_backend_api_t* api,
+                               wef_menu_click_fn on_click,
+                               void* on_click_data) = 0;
 
   virtual void ShowDialog(uint32_t window_id, int dialog_type,
                           const std::string& title, const std::string& message,

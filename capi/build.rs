@@ -28,9 +28,7 @@ fn main() {
       .clang_arg("-D_NATIVE_WCHAR_T_DEFINED");
   }
 
-  let bindings = builder
-    .generate()
-    .expect("Unable to generate bindings");
+  let bindings = builder.generate().expect("Unable to generate bindings");
 
   let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
   bindings

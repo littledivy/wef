@@ -653,30 +653,62 @@ static void Backend_ReleaseJsCallback(void* data, uint64_t callback_id) {
 #if defined(_WIN32)
 #include <win32_menu.h>
 
-static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
+static void Backend_SetApplicationMenu(void* data, uint32_t window_id,
+                                       wef_value_t* menu_template,
                                        wef_menu_click_fn on_click,
                                        void* on_click_data) {
   if (!menu_template) return;
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   const wef_backend_api_t* api = &loader->GetBackendApi();
 
-  loader->ForEachBrowser([&](CefRefPtr<CefBrowser> browser) {
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  if (browser) {
     CefPostTask(TID_UI, base::BindOnce(
-        [](CefRefPtr<CefBrowser> b, wef_value_t* tmpl, const wef_backend_api_t* a,
+        [](CefRefPtr<CefBrowser> b, uint32_t wid, wef_value_t* tmpl, const wef_backend_api_t* a,
            wef_menu_click_fn fn, void* d) {
           HWND hwnd = b->GetHost()->GetWindowHandle();
           if (hwnd) {
-            win32_menu::SetApplicationMenu(hwnd, tmpl, a, fn, d);
+            win32_menu::SetApplicationMenu(hwnd, tmpl, a, fn, d, wid);
           }
         },
-        browser, menu_template, api, on_click, on_click_data));
-  });
+        browser, window_id, menu_template, api, on_click, on_click_data));
+  }
+}
+
+static void Backend_ShowContextMenu(void* data, uint32_t window_id,
+                                    int x, int y,
+                                    wef_value_t* menu_template,
+                                    wef_menu_click_fn on_click,
+                                    void* on_click_data) {
+  if (!menu_template) return;
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  const wef_backend_api_t* api = &loader->GetBackendApi();
+
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, uint32_t wid, int cx, int cy,
+           wef_value_t* tmpl, const wef_backend_api_t* a,
+           wef_menu_click_fn fn, void* d) {
+          HWND hwnd = b->GetHost()->GetWindowHandle();
+          if (hwnd) {
+            win32_menu::ShowContextMenu(hwnd, cx, cy, tmpl, a, fn, d, wid);
+          }
+        },
+        browser, window_id, x, y, menu_template, api, on_click, on_click_data));
+  }
 }
 #elif defined(__APPLE__)
 // Defined in runtime_loader_mac.mm
-extern void Backend_SetApplicationMenu_Mac(void* data, wef_value_t* menu_template,
+extern void Backend_SetApplicationMenu_Mac(void* data, uint32_t window_id,
+                                           wef_value_t* menu_template,
                                            wef_menu_click_fn on_click,
                                            void* on_click_data);
+extern void Backend_ShowContextMenu_Mac(void* data, uint32_t window_id,
+                                        int x, int y,
+                                        wef_value_t* menu_template,
+                                        wef_menu_click_fn on_click,
+                                        void* on_click_data);
 #endif
 
 // --- InitializeBackendApi ---
@@ -887,14 +919,17 @@ void RuntimeLoader::InitializeBackendApi() {
 
 #if defined(_WIN32)
   backend_api_.set_application_menu = Backend_SetApplicationMenu;
+  backend_api_.show_context_menu = Backend_ShowContextMenu;
 #elif defined(__APPLE__)
   backend_api_.set_application_menu = Backend_SetApplicationMenu_Mac;
+  backend_api_.show_context_menu = Backend_ShowContextMenu_Mac;
 #else
   // Linux: CEF Views creates raw X11 windows (not GtkWindows), so there is
   // no GTK container to attach a GtkMenuBar to. Application menus would
   // require D-Bus menu protocol or drawing a custom menu bar, which is
   // future work (see issue #3 — Wayland/Phase 4).
-  backend_api_.set_application_menu = [](void*, wef_value_t*, wef_menu_click_fn, void*) {};
+  backend_api_.set_application_menu = [](void*, uint32_t, wef_value_t*, wef_menu_click_fn, void*) {};
+  backend_api_.show_context_menu = [](void*, uint32_t, int, int, wef_value_t*, wef_menu_click_fn, void*) {};
 #endif
 
   backend_api_.show_dialog = Backend_ShowDialog;

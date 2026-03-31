@@ -475,14 +475,28 @@ static void Backend_SetJsCallNotify(void* data, void (*notify_fn)(void*), void* 
   loader->SetJsCallNotify(notify_fn, notify_data);
 }
 
-static void Backend_SetApplicationMenu(void* data, wef_value_t* menu_template,
+static void Backend_SetApplicationMenu(void* data, uint32_t window_id,
+                                       wef_value_t* menu_template,
                                        wef_menu_click_fn on_click,
                                        void* on_click_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend && menu_template) {
-    backend->SetApplicationMenu(menu_template, &loader->GetBackendApi(),
+    backend->SetApplicationMenu(window_id, menu_template, &loader->GetBackendApi(),
                                 on_click, on_click_data);
+  }
+}
+
+static void Backend_ShowContextMenu(void* data, uint32_t window_id,
+                                    int x, int y,
+                                    wef_value_t* menu_template,
+                                    wef_menu_click_fn on_click,
+                                    void* on_click_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend && menu_template) {
+    backend->ShowContextMenu(window_id, x, y, menu_template,
+                             &loader->GetBackendApi(), on_click, on_click_data);
   }
 }
 
@@ -608,6 +622,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.poll_js_calls = Backend_PollJsCalls;
   backend_api_.set_js_call_notify = Backend_SetJsCallNotify;
   backend_api_.set_application_menu = Backend_SetApplicationMenu;
+  backend_api_.show_context_menu = Backend_ShowContextMenu;
   backend_api_.create_window = Backend_CreateWindow;
   backend_api_.close_window = Backend_CloseWindow;
   backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;

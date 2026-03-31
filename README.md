@@ -45,4 +45,77 @@ wef ships three backends today. The [CEF](./cef) backend embeds Chromium 144 and
 | **WebView** | System native | No | No | Full |
 | **Servo** | Servo | No | Yes | Stub |
 
+### Feature support matrix
+
+Features marked with platform qualifiers indicate per-platform differences within a backend.
+
+#### Window management
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| Create / close window | Yes | Yes | Yes | Yes |
+| Navigate (load URL) | Yes | Yes | Yes | - |
+| Set title | Yes | Yes | Yes | Yes |
+| Execute JavaScript | Yes | Yes | Yes | - |
+| Set / get window size | Yes | Yes | Yes | Yes |
+| Set / get window position | Yes | Yes | Yes | Yes |
+| Set / get resizable | - | Yes | Yes | Yes |
+| Set / get always on top | Yes | Yes | Yes | Yes |
+| Show / hide / is visible | Yes | Yes | Yes | Yes |
+| Focus | Yes | Yes | Yes | Yes |
+| Quit | Yes | Yes | Yes | Yes |
+| Post UI task | Yes | Yes | Yes | Yes |
+
+#### JavaScript interop
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| JS call handler (native bindings) | Yes | Yes | Yes | - |
+| Respond to JS calls | Yes | Yes | Yes | - |
+| Invoke JS callbacks | Yes | Yes | Yes | - |
+| Release JS callbacks | Yes | Yes | Yes | - |
+
+#### Menus
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| Application menu | macOS, Windows | Yes | - | - |
+| Context menu | macOS, Windows | Yes | - | - |
+
+CEF on Linux cannot support menus because CEF Views creates raw X11 windows without a GTK container.
+
+#### Native dialogs
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| Alert | Yes | Yes | - | - |
+| Confirm | Yes | Yes | - | - |
+| Prompt | Yes | Yes | - | - |
+
+#### Input events
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| Keyboard events | Yes | Yes | Yes | Yes |
+| Mouse click events | Yes | Yes | Yes | Yes |
+| Mouse move events | Yes | Yes | Yes | Yes |
+| Wheel / scroll events | Yes | Yes | Yes | Yes |
+| Cursor enter / leave | Yes | Yes | Yes | Yes |
+
+#### Window events
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| Focus / blur | Yes | Yes | Yes | Yes |
+| Resize | Yes | Yes | Yes | Yes |
+| Move | Yes | Yes | Yes | Yes |
+| Close requested | Yes | Yes | Yes | Yes |
+
+#### Window handles (GPU surface creation)
+
+| Feature | CEF | WebView | Servo | Winit |
+|---|---|---|---|---|
+| Get window handle | - | - | - | Yes |
+| Get display handle | - | - | - | Yes |
+| Get window handle type | - | - | - | Yes |
 

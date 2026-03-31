@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 13
+#define WEF_API_VERSION 15
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -50,6 +50,7 @@ typedef void (*wef_js_result_fn)(
 
 typedef void (*wef_menu_click_fn)(
     void* user_data,
+    uint32_t window_id,
     const char* item_id
 );
 
@@ -353,8 +354,24 @@ struct wef_backend_api {
     // Application menu. menu_template is a wef_value_t list of menu items.
     // Each item is a dict with: label, submenu (list), role, type, id, accelerator.
     // When a custom item (with "id") is clicked, on_click is called with the id.
+    // On macOS the menu is applied to the global menu bar and swapped on window focus.
+    // On Windows/Linux the menu is attached to the specific window.
     void (*set_application_menu)(
         void* backend_data,
+        uint32_t window_id,
+        wef_value_t* menu_template,
+        wef_menu_click_fn on_click,
+        void* on_click_data
+    );
+
+    // Show a context menu at the given position (in window coordinates).
+    // menu_template uses the same format as set_application_menu (list of menu item dicts).
+    // on_click is called with the id of the clicked item.
+    void (*show_context_menu)(
+        void* backend_data,
+        uint32_t window_id,
+        int x,
+        int y,
         wef_value_t* menu_template,
         wef_menu_click_fn on_click,
         void* on_click_data

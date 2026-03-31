@@ -23,6 +23,7 @@ struct MacWindowState {
   id blur_observer;
   id resize_observer;
   id move_observer;
+  NSMenu* menu = nil;  // per-window menu (nil = no custom menu)
 };
 
 class WKWebViewBackend : public WefBackend {
@@ -57,10 +58,18 @@ class WKWebViewBackend : public WefBackend {
 
   void Run() override;
 
-  void SetApplicationMenu(wef_value_t* menu_template,
+  void SetApplicationMenu(uint32_t window_id,
+                          wef_value_t* menu_template,
                           const wef_backend_api_t* api,
                           wef_menu_click_fn on_click,
                           void* on_click_data) override;
+
+  void ShowContextMenu(uint32_t window_id,
+                       int x, int y,
+                       wef_value_t* menu_template,
+                       const wef_backend_api_t* api,
+                       wef_menu_click_fn on_click,
+                       void* on_click_data) override;
 
   void ShowDialog(uint32_t window_id, int dialog_type,
                   const std::string& title, const std::string& message,
@@ -641,6 +650,12 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
           object:window queue:nil
           usingBlock:^(NSNotification*) {
             RuntimeLoader::GetInstance()->DispatchFocusedEvent(window_id, 1);
+            // Swap to this window's menu
+            std::lock_guard<std::mutex> lock(windows_mutex_);
+            auto* state = GetWindow(window_id);
+            if (state && state->menu) {
+              [NSApp setMainMenu:state->menu];
+            }
           }];
 
       id blur_obs = [[NSNotificationCenter defaultCenter]
@@ -1031,7 +1046,8 @@ static void* g_webview_menu_click_data = nullptr;
   NSMenuItem* item = (NSMenuItem*)sender;
   NSString* itemId = [item representedObject];
   if (itemId && g_webview_menu_click_fn) {
-    g_webview_menu_click_fn(g_webview_menu_click_data, [itemId UTF8String]);
+    uint32_t wid = WefIdForNSWindow([NSApp keyWindow]);
+    g_webview_menu_click_fn(g_webview_menu_click_data, wid, [itemId UTF8String]);
   }
 }
 @end
@@ -1219,7 +1235,8 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
   return menu;
 }
 
-void WKWebViewBackend::SetApplicationMenu(wef_value_t* menu_template,
+void WKWebViewBackend::SetApplicationMenu(uint32_t window_id,
+                                           wef_value_t* menu_template,
                                            const wef_backend_api_t* api,
                                            wef_menu_click_fn on_click,
                                            void* on_click_data) {
@@ -1229,8 +1246,49 @@ void WKWebViewBackend::SetApplicationMenu(wef_value_t* menu_template,
   dispatch_async(dispatch_get_main_queue(), ^{
     NSMenu* menubar = BuildMenuFromValue(menu_template, api);
     if (menubar) {
-      [NSApp setMainMenu:menubar];
+      // Store the menu for this window
+      {
+        std::lock_guard<std::mutex> lock(windows_mutex_);
+        auto* state = GetWindow(window_id);
+        if (state) {
+          state->menu = menubar;
+        }
+      }
+      // If this window is currently the key window, apply immediately
+      NSWindow* keyWin = [NSApp keyWindow];
+      uint32_t keyWid = WefIdForNSWindow(keyWin);
+      if (keyWid == window_id) {
+        [NSApp setMainMenu:menubar];
+      }
     }
+  });
+}
+
+void WKWebViewBackend::ShowContextMenu(uint32_t window_id,
+                                       int x, int y,
+                                       wef_value_t* menu_template,
+                                       const wef_backend_api_t* api,
+                                       wef_menu_click_fn on_click,
+                                       void* on_click_data) {
+  g_webview_menu_click_fn = on_click;
+  g_webview_menu_click_data = on_click_data;
+
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menu = BuildMenuFromValue(menu_template, api);
+    if (!menu) return;
+
+    NSWindow* win = nil;
+    {
+      std::lock_guard<std::mutex> lock(windows_mutex_);
+      auto* state = GetWindow(window_id);
+      if (state) win = state->window;
+    }
+    if (!win) return;
+
+    NSView* view = [win contentView];
+    // Convert from top-left origin (wef coordinates) to bottom-left origin (NSView)
+    NSPoint loc = NSMakePoint(x, [view frame].size.height - y);
+    [menu popUpMenuPositioningItem:nil atLocation:loc inView:view];
   });
 }
 

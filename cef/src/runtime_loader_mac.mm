@@ -156,6 +156,12 @@ void InstallNativeMouseMonitor() {
         uint32_t wid = WefIdForNSWindow([note object]);
         if (wid > 0) {
           RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
+          // Swap to this window's menu
+          std::lock_guard<std::mutex> lock(g_window_menus_mutex);
+          auto it = g_window_menus.find(wid);
+          if (it != g_window_menus.end() && it->second) {
+            [NSApp setMainMenu:it->second];
+          }
         }
       }];
 
@@ -301,11 +307,16 @@ static void* g_menu_click_data = nullptr;
   NSMenuItem* item = (NSMenuItem*)sender;
   NSString* itemId = [item representedObject];
   if (itemId && g_menu_click_fn) {
-    g_menu_click_fn(g_menu_click_data, [itemId UTF8String]);
+    uint32_t wid = WefIdForNSWindow([NSApp keyWindow]);
+    g_menu_click_fn(g_menu_click_data, wid, [itemId UTF8String]);
   }
 }
 
 @end
+
+// Per-window menu storage for macOS
+static std::map<uint32_t, NSMenu*> g_window_menus;
+static std::mutex g_window_menus_mutex;
 
 static void ParseAccelerator(const std::string& accel, NSString** outKey,
                              NSEventModifierFlags* outMask) {
@@ -453,7 +464,38 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
 }
 
 // Exported function called from runtime_loader.cc on macOS
-void Backend_SetApplicationMenu_Mac(void* data, wef_value_t* menu_template,
+void Backend_ShowContextMenu_Mac(void* data, uint32_t window_id,
+                                 int x, int y,
+                                 wef_value_t* menu_template,
+                                 wef_menu_click_fn on_click,
+                                 void* on_click_data) {
+  if (!menu_template) return;
+  g_menu_click_fn = on_click;
+  g_menu_click_data = on_click_data;
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  const wef_backend_api_t* api = &loader->GetBackendApi();
+
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  if (!browser) return;
+
+  void* handle = browser->GetHost()->GetWindowHandle();
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menu = BuildMenuFromValue(menu_template, api);
+    if (!menu) return;
+
+    NSView* view = (__bridge NSView*)handle;
+    NSWindow* win = [view window];
+    if (!win) return;
+
+    NSView* contentView = [win contentView];
+    // Convert from top-left origin (wef coordinates) to bottom-left origin (NSView)
+    NSPoint loc = NSMakePoint(x, [contentView frame].size.height - y);
+    [menu popUpMenuPositioningItem:nil atLocation:loc inView:contentView];
+  });
+}
+
+void Backend_SetApplicationMenu_Mac(void* data, uint32_t window_id,
+                                    wef_value_t* menu_template,
                                     wef_menu_click_fn on_click,
                                     void* on_click_data) {
   if (!menu_template) return;
@@ -464,7 +506,16 @@ void Backend_SetApplicationMenu_Mac(void* data, wef_value_t* menu_template,
   dispatch_async(dispatch_get_main_queue(), ^{
     NSMenu* menubar = BuildMenuFromValue(menu_template, api);
     if (menubar) {
-      [NSApp setMainMenu:menubar];
+      // Store per-window
+      {
+        std::lock_guard<std::mutex> lock(g_window_menus_mutex);
+        g_window_menus[window_id] = menubar;
+      }
+      // If this window is currently key, apply immediately
+      uint32_t keyWid = WefIdForNSWindow([NSApp keyWindow]);
+      if (keyWid == window_id) {
+        [NSApp setMainMenu:menubar];
+      }
     }
   });
 }

@@ -22,7 +22,7 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
-pub const WEF_API_VERSION: u32 = 13;
+pub const WEF_API_VERSION: u32 = 15;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -41,8 +41,11 @@ static BINDINGS: OnceLock<
   Mutex<HashMap<u32, HashMap<String, BindingHandler>>>,
 > = OnceLock::new();
 static JS_CALL_NOTIFY: OnceLock<Notify> = OnceLock::new();
-static MENU_CLICK_HANDLER: OnceLock<
-  Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
+static MENU_CLICK_HANDLERS: OnceLock<
+  Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>>,
+> = OnceLock::new();
+static CONTEXT_MENU_HANDLERS: OnceLock<
+  Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>>,
 > = OnceLock::new();
 
 enum BindingHandler {
@@ -832,6 +835,72 @@ impl Window {
     }
   }
 
+  /// Set the application menu for this window.
+  /// On macOS, the menu is applied to the global menu bar and swapped when this window gains focus.
+  /// On Windows/Linux, the menu is attached directly to this window.
+  /// `on_click` is called with the `id` of the clicked menu item.
+  pub fn set_menu<F>(&self, template: &[MenuItem], on_click: F)
+  where
+    F: Fn(&str) + Send + Sync + 'static,
+  {
+    let value = Value::List(template.iter().map(|i| i.to_value()).collect());
+
+    {
+      let mut handlers = menu_click_handlers().lock().unwrap();
+      handlers.insert(self.id, Box::new(on_click));
+    }
+
+    let api = api();
+    if let Some(f) = api.set_application_menu {
+      let raw = value.to_raw();
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          raw,
+          Some(menu_click_callback),
+          std::ptr::null_mut(),
+        );
+      }
+    }
+  }
+
+  /// Show a context menu at the given position (in window coordinates).
+  /// Uses the same `MenuItem` template as `set_menu`.
+  /// `on_click` is called with the `id` of the clicked menu item.
+  pub fn show_context_menu<F>(
+    &self,
+    x: i32,
+    y: i32,
+    template: &[MenuItem],
+    on_click: F,
+  ) where
+    F: Fn(&str) + Send + Sync + 'static,
+  {
+    let value = Value::List(template.iter().map(|i| i.to_value()).collect());
+
+    {
+      let mut handlers = context_menu_handlers().lock().unwrap();
+      handlers.insert(self.id, Box::new(on_click));
+    }
+
+    let api = api();
+    if let Some(f) = api.show_context_menu {
+      let raw = value.to_raw();
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          x,
+          y,
+          raw,
+          Some(context_menu_click_callback),
+          std::ptr::null_mut(),
+        );
+      }
+    }
+  }
+
   /// Show an alert dialog with a message. Fire-and-forget.
   pub fn alert(&self, title: &str, message: &str) {
     self.show_dialog_internal(
@@ -875,11 +944,9 @@ impl Window {
       title,
       message,
       default_value,
-      Some(
-        move |confirmed: bool, input: Option<String>| {
-          callback(if confirmed { input } else { None });
-        },
-      ),
+      Some(move |confirmed: bool, input: Option<String>| {
+        callback(if confirmed { input } else { None });
+      }),
     );
   }
 
@@ -908,17 +975,12 @@ impl Window {
             input_value: *const c_char,
           ) {
             let cb = Box::from_raw(
-              user_data
-                as *mut Box<dyn FnOnce(bool, Option<String>) + Send>,
+              user_data as *mut Box<dyn FnOnce(bool, Option<String>) + Send>,
             );
             let input = if input_value.is_null() {
               None
             } else {
-              Some(
-                CStr::from_ptr(input_value)
-                  .to_string_lossy()
-                  .into_owned(),
-              )
+              Some(CStr::from_ptr(input_value).to_string_lossy().into_owned())
             };
             cb(confirmed != 0, input);
           }
@@ -1024,72 +1086,42 @@ impl MenuItem {
 
 unsafe extern "C" fn menu_click_callback(
   _user_data: *mut c_void,
+  window_id: u32,
   item_id: *const c_char,
 ) {
   if item_id.is_null() {
     return;
   }
   let id = CStr::from_ptr(item_id).to_string_lossy();
-  let handler = MENU_CLICK_HANDLER
-    .get_or_init(|| Mutex::new(None))
-    .lock()
-    .unwrap();
-  if let Some(ref f) = *handler {
-    f(&id);
+  let handlers = menu_click_handlers().lock().unwrap();
+  if let Some(handler) = handlers.get(&window_id) {
+    handler(&id);
   }
 }
 
-/// Set the application menu from a template and register a click handler.
-pub fn set_application_menu<F>(template: &[MenuItem], on_click: F)
-where
-  F: Fn(&str) + Send + Sync + 'static,
-{
-  {
-    let mut handler = MENU_CLICK_HANDLER
-      .get_or_init(|| Mutex::new(None))
-      .lock()
-      .unwrap();
-    *handler = Some(Box::new(on_click));
-  }
+fn menu_click_handlers(
+) -> &'static Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>> {
+  MENU_CLICK_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
-  let api = api();
-  if let Some(f) = api.set_application_menu {
-    let value = Value::List(template.iter().map(|i| i.to_value()).collect());
-    let raw = value.to_raw();
-    unsafe {
-      f(
-        api.backend_data,
-        raw,
-        Some(menu_click_callback),
-        std::ptr::null_mut(),
-      );
-    }
+unsafe extern "C" fn context_menu_click_callback(
+  _user_data: *mut c_void,
+  window_id: u32,
+  item_id: *const c_char,
+) {
+  if item_id.is_null() {
+    return;
+  }
+  let id = CStr::from_ptr(item_id).to_string_lossy();
+  let handlers = context_menu_handlers().lock().unwrap();
+  if let Some(handler) = handlers.get(&window_id) {
+    handler(&id);
   }
 }
 
-/// Set the menu click handler (called when a custom menu item is clicked).
-pub fn set_menu_click_handler(handler: impl Fn(&str) + Send + Sync + 'static) {
-  let mut h = MENU_CLICK_HANDLER
-    .get_or_init(|| Mutex::new(None))
-    .lock()
-    .unwrap();
-  *h = Some(Box::new(handler));
-}
-
-/// Set the application menu from a raw `Value` template.
-pub fn set_application_menu_raw(template: Value) {
-  let api = api();
-  if let Some(f) = api.set_application_menu {
-    let raw = template.to_raw();
-    unsafe {
-      f(
-        api.backend_data,
-        raw,
-        Some(menu_click_callback),
-        std::ptr::null_mut(),
-      );
-    }
-  }
+fn context_menu_handlers(
+) -> &'static Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>> {
+  CONTEXT_MENU_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 pub const WEF_DIALOG_ALERT: i32 = 0;
@@ -1098,7 +1130,13 @@ pub const WEF_DIALOG_PROMPT: i32 = 2;
 
 /// Show an alert dialog (app-wide, no parent window).
 pub fn alert(title: &str, message: &str) {
-  show_dialog_free(WEF_DIALOG_ALERT, title, message, "", None::<fn(bool, Option<String>)>);
+  show_dialog_free(
+    WEF_DIALOG_ALERT,
+    title,
+    message,
+    "",
+    None::<fn(bool, Option<String>)>,
+  );
 }
 
 /// Show a confirm dialog (app-wide). Callback receives `true` if OK was pressed.
