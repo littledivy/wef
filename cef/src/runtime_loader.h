@@ -286,6 +286,15 @@ class RuntimeLoader {
     js_call_notify_data_ = notify_data;
   }
 
+  void SetJsNamespace(const std::string& name) {
+    std::lock_guard<std::mutex> lock(js_namespace_mutex_);
+    js_namespace_ = name;
+  }
+  std::string GetJsNamespace() const {
+    std::lock_guard<std::mutex> lock(js_namespace_mutex_);
+    return js_namespace_;
+  }
+
  private:
   RuntimeLoader();
   ~RuntimeLoader();
@@ -355,6 +364,9 @@ class RuntimeLoader {
   void (*js_call_notify_fn_)(void*) = nullptr;
   void* js_call_notify_data_ = nullptr;
   std::mutex notify_mutex_;
+
+  std::string js_namespace_ = "Wef";
+  mutable std::mutex js_namespace_mutex_;
 
   struct PendingJsCall {
     uint32_t window_id;

@@ -11,6 +11,34 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <condition_variable>
+
+// Helper to run a callback synchronously on the GTK main thread.
+// If already on the main thread, runs immediately.
+template <typename F>
+static void gtk_invoke_sync(F&& fn) {
+  if (g_main_context_is_owner(g_main_context_default())) {
+    fn();
+    return;
+  }
+  std::mutex mtx;
+  std::condition_variable cv;
+  bool done = false;
+  struct Ctx { F* fn; std::mutex* mtx; std::condition_variable* cv; bool* done; };
+  Ctx ctx{&fn, &mtx, &cv, &done};
+  g_idle_add([](gpointer data) -> gboolean {
+    auto* c = static_cast<Ctx*>(data);
+    (*c->fn)();
+    {
+      std::lock_guard<std::mutex> lock(*c->mtx);
+      *c->done = true;
+    }
+    c->cv->notify_one();
+    return G_SOURCE_REMOVE;
+  }, &ctx);
+  std::unique_lock<std::mutex> lock(mtx);
+  cv.wait(lock, [&done] { return done; });
+}
 
 namespace keyboard {
 
@@ -380,6 +408,8 @@ class WebKitGTKBackend : public WefBackend {
                        const wef_backend_api_t* api,
                        wef_menu_click_fn on_click, void* on_click_data) override;
 
+  void OpenDevTools(uint32_t window_id) override;
+
   void ShowDialog(uint32_t window_id, int dialog_type,
                   const std::string& title, const std::string& message,
                   const std::string& default_value,
@@ -400,7 +430,8 @@ static WebKitGTKBackend* g_gtk_backend = nullptr;
 // GtkWidget → window_id mapping for script message routing
 static std::map<WebKitUserContentManager*, uint32_t> g_content_manager_to_wef_id;
 
-static const char* g_init_script = R"JS(
+static std::string BuildInitScript(const std::string& ns, const std::string& postMessage) {
+  return R"JS(
 (function() {
   const pendingCalls = new Map();
   let nextCallId = 1;
@@ -440,17 +471,13 @@ static const char* g_init_script = R"JS(
             return arg;
           });
 
-          window.webkit.messageHandlers.wef.postMessage(JSON.stringify({
-            callId: callId,
-            method: path.join('.'),
-            args: processedArgs
-          }));
+          )JS" + postMessage + R"JS(
         });
       }
     });
   }
 
-  window.Wef = createWefProxy();
+  window[")JS" + ns + R"JS("] = createWefProxy();
 
   window.__wefRespond = function(callId, result, error) {
     const pending = pendingCalls.get(callId);
@@ -497,8 +524,10 @@ static const char* g_init_script = R"JS(
       delete window.__wefCallbacks[callbackId];
     }
   };
+
 })();
 )JS";
+}
 
 static void on_script_message(WebKitUserContentManager* manager,
                               WebKitJavascriptResult* js_result,
@@ -551,6 +580,59 @@ LinuxWindowState* WebKitGTKBackend::GetWindow(uint32_t window_id) {
   return it != windows_.end() ? &it->second : nullptr;
 }
 
+static gboolean on_script_dialog(WebKitWebView* webview,
+                                  WebKitScriptDialog* dialog,
+                                  gpointer user_data) {
+  WebKitScriptDialogType type = webkit_script_dialog_get_dialog_type(dialog);
+  const gchar* message = webkit_script_dialog_get_message(dialog);
+
+  GtkWidget* toplevel = gtk_widget_get_toplevel(GTK_WIDGET(webview));
+  GtkWindow* parent = GTK_IS_WINDOW(toplevel) ? GTK_WINDOW(toplevel) : nullptr;
+
+  if (type == WEBKIT_SCRIPT_DIALOG_ALERT) {
+    GtkWidget* dlg = gtk_message_dialog_new(
+        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+        "%s", message);
+    gtk_dialog_run(GTK_DIALOG(dlg));
+    gtk_widget_destroy(dlg);
+    webkit_script_dialog_confirm_set_confirmed(dialog, TRUE);
+    return TRUE;
+  }
+
+  if (type == WEBKIT_SCRIPT_DIALOG_CONFIRM) {
+    GtkWidget* dlg = gtk_message_dialog_new(
+        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
+        "%s", message);
+    gint result = gtk_dialog_run(GTK_DIALOG(dlg));
+    gtk_widget_destroy(dlg);
+    webkit_script_dialog_confirm_set_confirmed(dialog, result == GTK_RESPONSE_OK);
+    return TRUE;
+  }
+
+  if (type == WEBKIT_SCRIPT_DIALOG_PROMPT) {
+    GtkWidget* dlg = gtk_message_dialog_new(
+        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
+        "%s", message);
+    GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    GtkWidget* entry = gtk_entry_new();
+    const gchar* default_text = webkit_script_dialog_prompt_get_default_text(dialog);
+    if (default_text) {
+      gtk_entry_set_text(GTK_ENTRY(entry), default_text);
+    }
+    gtk_container_add(GTK_CONTAINER(content), entry);
+    gtk_widget_show(entry);
+    gint result = gtk_dialog_run(GTK_DIALOG(dlg));
+    if (result == GTK_RESPONSE_OK) {
+      webkit_script_dialog_prompt_set_text(dialog, gtk_entry_get_text(GTK_ENTRY(entry)));
+    }
+    webkit_script_dialog_confirm_set_confirmed(dialog, result == GTK_RESPONSE_OK);
+    gtk_widget_destroy(dlg);
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
 void WebKitGTKBackend::CreateWindow(uint32_t window_id, int width, int height) {
   GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_default_size(GTK_WINDOW(window), width, height);
@@ -581,8 +663,20 @@ void WebKitGTKBackend::CreateWindow(uint32_t window_id, int width, int height) {
   WebKitWebView* webview = WEBKIT_WEB_VIEW(
       webkit_web_view_new_with_user_content_manager(content_manager));
 
+  g_signal_connect(webview, "script-dialog", G_CALLBACK(on_script_dialog), nullptr);
+
+  WebKitSettings* wk_settings = webkit_web_view_get_settings(webview);
+  webkit_settings_set_enable_developer_extras(wk_settings, TRUE);
+
+  std::string initScript = BuildInitScript(
+      RuntimeLoader::GetInstance()->GetJsNamespace(),
+      "window.webkit.messageHandlers.wef.postMessage(JSON.stringify({\n"
+      "            callId: callId,\n"
+      "            method: path.join('.'),\n"
+      "            args: processedArgs\n"
+      "          }));");
   WebKitUserScript* script = webkit_user_script_new(
-      g_init_script,
+      initScript.c_str(),
       WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
       WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
       nullptr, nullptr);
@@ -662,14 +756,16 @@ void WebKitGTKBackend::SetWindowSize(uint32_t window_id, int width, int height) 
 }
 
 void WebKitGTKBackend::GetWindowSize(uint32_t window_id, int* width, int* height) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  if (state) {
-    int w = 0, h = 0;
-    gtk_window_get_size(GTK_WINDOW(state->window), &w, &h);
-    if (width) *width = w;
-    if (height) *height = h;
-  }
+  int w = 0, h = 0;
+  gtk_invoke_sync([&] {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      gtk_window_get_size(GTK_WINDOW(state->window), &w, &h);
+    }
+  });
+  if (width) *width = w;
+  if (height) *height = h;
 }
 
 void WebKitGTKBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
@@ -681,14 +777,16 @@ void WebKitGTKBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
 }
 
 void WebKitGTKBackend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  if (state) {
-    int wx = 0, wy = 0;
-    gtk_window_get_position(GTK_WINDOW(state->window), &wx, &wy);
-    if (x) *x = wx;
-    if (y) *y = wy;
-  }
+  int wx = 0, wy = 0;
+  gtk_invoke_sync([&] {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      gtk_window_get_position(GTK_WINDOW(state->window), &wx, &wy);
+    }
+  });
+  if (x) *x = wx;
+  if (y) *y = wy;
 }
 
 void WebKitGTKBackend::SetResizable(uint32_t window_id, bool resizable) {
@@ -700,9 +798,15 @@ void WebKitGTKBackend::SetResizable(uint32_t window_id, bool resizable) {
 }
 
 bool WebKitGTKBackend::IsResizable(uint32_t window_id) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  return state ? gtk_window_get_resizable(GTK_WINDOW(state->window)) != FALSE : false;
+  bool result = false;
+  gtk_invoke_sync([&] {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      result = gtk_window_get_resizable(GTK_WINDOW(state->window)) != FALSE;
+    }
+  });
+  return result;
 }
 
 void WebKitGTKBackend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
@@ -714,22 +818,31 @@ void WebKitGTKBackend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
 }
 
 bool WebKitGTKBackend::IsAlwaysOnTop(uint32_t window_id) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  if (state) {
-    GdkWindow* gdk_window = gtk_widget_get_window(state->window);
-    if (gdk_window) {
-      GdkWindowState wstate = gdk_window_get_state(gdk_window);
-      return (wstate & GDK_WINDOW_STATE_ABOVE) != 0;
+  bool result = false;
+  gtk_invoke_sync([&] {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      GdkWindow* gdk_window = gtk_widget_get_window(state->window);
+      if (gdk_window) {
+        GdkWindowState wstate = gdk_window_get_state(gdk_window);
+        result = (wstate & GDK_WINDOW_STATE_ABOVE) != 0;
+      }
     }
-  }
-  return false;
+  });
+  return result;
 }
 
 bool WebKitGTKBackend::IsVisible(uint32_t window_id) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  return state ? gtk_widget_get_visible(state->window) != FALSE : false;
+  bool result = false;
+  gtk_invoke_sync([&] {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      result = gtk_widget_get_visible(state->window) != FALSE;
+    }
+  });
+  return result;
 }
 
 void WebKitGTKBackend::Show(uint32_t window_id) {
@@ -834,6 +947,7 @@ void WebKitGTKBackend::HandleJsMessage(uint32_t window_id, const char* jsonStr) 
   if (!msg || !msg->IsDict()) return;
 
   const auto& dict = msg->GetDict();
+
   auto callIdIt = dict.find("callId");
   auto methodIt = dict.find("method");
   auto argsIt = dict.find("args");
@@ -1031,6 +1145,19 @@ void WebKitGTKBackend::ShowContextMenu(uint32_t window_id,
 
   gtk_widget_show_all(menu);
   gtk_menu_popup_at_pointer(GTK_MENU(menu), nullptr);
+}
+
+// ============================================================================
+// DevTools
+// ============================================================================
+
+void WebKitGTKBackend::OpenDevTools(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state && state->webview) {
+    WebKitWebInspector* inspector = webkit_web_view_get_inspector(state->webview);
+    webkit_web_inspector_show(inspector);
+  }
 }
 
 // ============================================================================

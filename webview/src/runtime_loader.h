@@ -187,6 +187,15 @@ class RuntimeLoader {
     js_call_notify_data_ = notify_data;
   }
 
+  void SetJsNamespace(const std::string& name) {
+    std::lock_guard<std::mutex> lock(js_namespace_mutex_);
+    js_namespace_ = name;
+  }
+  std::string GetJsNamespace() const {
+    std::lock_guard<std::mutex> lock(js_namespace_mutex_);
+    return js_namespace_;
+  }
+
  private:
   RuntimeLoader();
   ~RuntimeLoader();
@@ -253,6 +262,9 @@ class RuntimeLoader {
   void* js_call_notify_data_ = nullptr;
   std::mutex notify_mutex_;
 
+  std::string js_namespace_ = "Wef";
+  mutable std::mutex js_namespace_mutex_;
+
   struct PendingJsCall {
     uint32_t window_id;
     uint64_t call_id;
@@ -312,6 +324,8 @@ class WefBackend {
                                const wef_backend_api_t* api,
                                wef_menu_click_fn on_click,
                                void* on_click_data) = 0;
+
+  virtual void OpenDevTools(uint32_t window_id) = 0;
 
   virtual void ShowDialog(uint32_t window_id, int dialog_type,
                           const std::string& title, const std::string& message,

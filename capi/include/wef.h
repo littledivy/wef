@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 15
+#define WEF_API_VERSION 18
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN  0
@@ -376,6 +376,13 @@ struct wef_backend_api {
         wef_menu_click_fn on_click,
         void* on_click_data
     );
+
+    // Open the DevTools inspector for the given window.
+    void (*open_devtools)(void* backend_data, uint32_t window_id);
+
+    // Set the global JS namespace name for bindings (default: "Wef").
+    // Must be called before creating any windows.
+    void (*set_js_namespace)(void* backend_data, const char* name);
 
     // Show a native dialog (alert, confirm, or prompt).
     // The callback is invoked with the result after the user dismisses the dialog.

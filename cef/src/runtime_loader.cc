@@ -12,6 +12,8 @@
 #include <iostream>
 #include <cstring>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
 
 #include "include/base/cef_callback.h"
 #include "include/cef_app.h"
@@ -22,6 +24,31 @@
 #include "include/wrapper/cef_helpers.h"
 
 RuntimeLoader* RuntimeLoader::instance_ = nullptr;
+
+// Helper to run a callback synchronously on the CEF UI thread.
+// If already on the UI thread, runs immediately.
+template <typename F>
+static void cef_invoke_sync(F&& fn) {
+  if (CefCurrentlyOn(TID_UI)) {
+    fn();
+    return;
+  }
+  std::mutex mtx;
+  std::condition_variable cv;
+  bool done = false;
+  CefPostTask(TID_UI, base::BindOnce(
+      [](F* fn, std::mutex* mtx, std::condition_variable* cv, bool* done) {
+        (*fn)();
+        {
+          std::lock_guard<std::mutex> lock(*mtx);
+          *done = true;
+        }
+        cv->notify_one();
+      },
+      &fn, &mtx, &cv, &done));
+  std::unique_lock<std::mutex> lock(mtx);
+  cv.wait(lock, [&done] { return done; });
+}
 
 // --- Backend API functions (cross-platform, using CEF Views) ---
 
@@ -101,20 +128,22 @@ static void Backend_SetWindowSize(void* data, uint32_t window_id, int width, int
 static void Backend_GetWindowSize(void* data, uint32_t window_id, int* width, int* height) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  int w = 0, h = 0;
   if (browser) {
-    auto browser_view = CefBrowserView::GetForBrowser(browser);
-    if (browser_view) {
-      auto window = browser_view->GetWindow();
-      if (window) {
-        CefSize size = window->GetSize();
-        if (width) *width = size.width;
-        if (height) *height = size.height;
-        return;
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (browser_view) {
+        auto window = browser_view->GetWindow();
+        if (window) {
+          CefSize size = window->GetSize();
+          w = size.width;
+          h = size.height;
+        }
       }
-    }
+    });
   }
-  if (width) *width = 0;
-  if (height) *height = 0;
+  if (width) *width = w;
+  if (height) *height = h;
 }
 
 static void Backend_SetWindowPosition(void* data, uint32_t window_id, int x, int y) {
@@ -138,20 +167,22 @@ static void Backend_SetWindowPosition(void* data, uint32_t window_id, int x, int
 static void Backend_GetWindowPosition(void* data, uint32_t window_id, int* x, int* y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  int px = 0, py = 0;
   if (browser) {
-    auto browser_view = CefBrowserView::GetForBrowser(browser);
-    if (browser_view) {
-      auto window = browser_view->GetWindow();
-      if (window) {
-        CefPoint pos = window->GetPosition();
-        if (x) *x = pos.x;
-        if (y) *y = pos.y;
-        return;
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (browser_view) {
+        auto window = browser_view->GetWindow();
+        if (window) {
+          CefPoint pos = window->GetPosition();
+          px = pos.x;
+          py = pos.y;
+        }
       }
-    }
+    });
   }
-  if (x) *x = 0;
-  if (y) *y = 0;
+  if (x) *x = px;
+  if (y) *y = py;
 }
 
 static void Backend_SetResizable(void* data, uint32_t window_id, bool resizable) {
@@ -189,31 +220,37 @@ static void Backend_SetAlwaysOnTop(void* data, uint32_t window_id, bool always_o
 static bool Backend_IsAlwaysOnTop(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  bool result = false;
   if (browser) {
-    auto browser_view = CefBrowserView::GetForBrowser(browser);
-    if (browser_view) {
-      auto window = browser_view->GetWindow();
-      if (window) {
-        return window->IsAlwaysOnTop();
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (browser_view) {
+        auto window = browser_view->GetWindow();
+        if (window) {
+          result = window->IsAlwaysOnTop();
+        }
       }
-    }
+    });
   }
-  return false;
+  return result;
 }
 
 static bool Backend_IsVisible(void* data, uint32_t window_id) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  bool result = false;
   if (browser) {
-    auto browser_view = CefBrowserView::GetForBrowser(browser);
-    if (browser_view) {
-      auto window = browser_view->GetWindow();
-      if (window) {
-        return window->IsVisible();
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (browser_view) {
+        auto window = browser_view->GetWindow();
+        if (window) {
+          result = window->IsVisible();
+        }
       }
-    }
+    });
   }
-  return false;
+  return result;
 }
 
 static void Backend_Show(void* data, uint32_t window_id) {
@@ -711,6 +748,29 @@ extern void Backend_ShowContextMenu_Mac(void* data, uint32_t window_id,
                                         void* on_click_data);
 #endif
 
+static void Backend_OpenDevTools(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b) {
+          CefWindowInfo windowInfo;
+#if defined(_WIN32)
+          windowInfo.SetAsPopup(nullptr, "DevTools");
+#endif
+          b->GetHost()->ShowDevTools(windowInfo, nullptr, CefBrowserSettings(), CefPoint());
+        },
+        browser));
+  }
+}
+
+static void Backend_SetJsNamespace(void* data, const char* name) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (name) {
+    loader->SetJsNamespace(name);
+  }
+}
+
 // --- InitializeBackendApi ---
 
 static uint32_t Backend_CreateWindow(void* data) {
@@ -726,8 +786,11 @@ static uint32_t Backend_CreateWindow(void* data) {
     g_pending_wef_ids.push(wid);
 
     CefBrowserSettings browser_settings;
+    CefRefPtr<CefDictionaryValue> extra_info = CefDictionaryValue::Create();
+    extra_info->SetString("wef_js_namespace",
+        RuntimeLoader::GetInstance()->GetJsNamespace());
     CefRefPtr<CefBrowserView> browser_view = CefBrowserView::CreateBrowserView(
-        handler, "about:blank", browser_settings, nullptr, nullptr, nullptr);
+        handler, "about:blank", browser_settings, extra_info, nullptr, nullptr);
     CefWindow::CreateTopLevelWindow(new WefWindowDelegate(browser_view, wid));
   }, window_id));
 
@@ -932,6 +995,8 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.show_context_menu = [](void*, uint32_t, int, int, wef_value_t*, wef_menu_click_fn, void*) {};
 #endif
 
+  backend_api_.open_devtools = Backend_OpenDevTools;
+  backend_api_.set_js_namespace = Backend_SetJsNamespace;
   backend_api_.show_dialog = Backend_ShowDialog;
 }
 

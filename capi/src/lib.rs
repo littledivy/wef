@@ -22,7 +22,7 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
-pub const WEF_API_VERSION: u32 = 15;
+pub const WEF_API_VERSION: u32 = 18;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -901,6 +901,14 @@ impl Window {
     }
   }
 
+  /// Open the DevTools inspector for this window.
+  pub fn open_devtools(&self) {
+    let api = api();
+    if let Some(f) = api.open_devtools {
+      unsafe { f(api.backend_data, self.id) };
+    }
+  }
+
   /// Show an alert dialog with a message. Fire-and-forget.
   pub fn alert(&self, title: &str, message: &str) {
     self.show_dialog_internal(
@@ -1122,6 +1130,20 @@ unsafe extern "C" fn context_menu_click_callback(
 fn context_menu_handlers(
 ) -> &'static Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>> {
   CONTEXT_MENU_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Set the global JS namespace name for bindings (default: `"Wef"`).
+/// Must be called before creating any windows.
+/// ```
+/// wef::set_js_namespace("MyApp");
+/// // JS code can now use: window.MyApp.greet("world")
+/// ```
+pub fn set_js_namespace(name: &str) {
+  let api = api();
+  if let Some(f) = api.set_js_namespace {
+    let c_name = CString::new(name).unwrap();
+    unsafe { f(api.backend_data, c_name.as_ptr()) };
+  }
 }
 
 pub const WEF_DIALOG_ALERT: i32 = 0;

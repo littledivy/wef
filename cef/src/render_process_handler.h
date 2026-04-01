@@ -74,6 +74,9 @@ class WefRenderProcessHandler : public CefRenderProcessHandler {
  public:
   WefRenderProcessHandler();
 
+  void OnBrowserCreated(CefRefPtr<CefBrowser> browser,
+                        CefRefPtr<CefDictionaryValue> extra_info) override;
+
   void OnContextCreated(CefRefPtr<CefBrowser> browser,
                         CefRefPtr<CefFrame> frame,
                         CefRefPtr<CefV8Context> context) override;
@@ -99,6 +102,7 @@ class WefRenderProcessHandler : public CefRenderProcessHandler {
                                            CefRefPtr<CefV8Context> context);
 
  private:
+  std::map<int, std::string> browser_namespaces_;
   std::atomic<uint64_t> next_call_id_{1};
   std::atomic<uint64_t> next_callback_id_{1};
   std::map<uint64_t, CefRefPtr<PromiseResolver>> pending_calls_;

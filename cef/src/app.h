@@ -10,6 +10,7 @@
 
 #include "include/cef_app.h"
 #include "include/cef_client.h"
+#include "include/cef_jsdialog_handler.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_window.h"
 
@@ -39,7 +40,8 @@ class WefWindowDelegate : public CefWindowDelegate {
 class WefHandler : public CefClient,
                    public CefLifeSpanHandler,
                    public CefDisplayHandler,
-                   public CefKeyboardHandler {
+                   public CefKeyboardHandler,
+                   public CefJSDialogHandler {
  public:
   WefHandler();
   ~WefHandler() override;
@@ -49,6 +51,7 @@ class WefHandler : public CefClient,
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+  CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
   bool DoClose(CefRefPtr<CefBrowser> browser) override;
@@ -60,6 +63,19 @@ class WefHandler : public CefClient,
   bool OnKeyEvent(CefRefPtr<CefBrowser> browser,
                   const CefKeyEvent& event,
                   CefEventHandle os_event) override;
+
+  bool OnJSDialog(CefRefPtr<CefBrowser> browser,
+                  const CefString& origin_url,
+                  JSDialogType dialog_type,
+                  const CefString& message_text,
+                  const CefString& default_prompt_text,
+                  CefRefPtr<CefJSDialogCallback> callback,
+                  bool& suppress_message) override;
+
+  bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser,
+                            const CefString& message_text,
+                            bool is_reload,
+                            CefRefPtr<CefJSDialogCallback> callback) override;
 
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
                                 CefRefPtr<CefFrame> frame,

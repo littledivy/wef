@@ -500,6 +500,21 @@ static void Backend_ShowContextMenu(void* data, uint32_t window_id,
   }
 }
 
+static void Backend_OpenDevTools(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  WefBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->OpenDevTools(window_id);
+  }
+}
+
+static void Backend_SetJsNamespace(void* data, const char* name) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (name) {
+    loader->SetJsNamespace(name);
+  }
+}
+
 static uint32_t Backend_CreateWindow(void* data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   uint32_t window_id = loader->AllocateWindowId();
@@ -623,6 +638,8 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_js_call_notify = Backend_SetJsCallNotify;
   backend_api_.set_application_menu = Backend_SetApplicationMenu;
   backend_api_.show_context_menu = Backend_ShowContextMenu;
+  backend_api_.open_devtools = Backend_OpenDevTools;
+  backend_api_.set_js_namespace = Backend_SetJsNamespace;
   backend_api_.create_window = Backend_CreateWindow;
   backend_api_.close_window = Backend_CloseWindow;
   backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;

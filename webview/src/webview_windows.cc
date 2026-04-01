@@ -197,6 +197,105 @@ struct UiTaskData {
 // WebView2 Backend
 // ============================================================================
 
+static std::string BuildInitScript(const std::string& ns, const std::string& postMessage) {
+  return R"JS(
+(function() {
+  const pendingCalls = new Map();
+  let nextCallId = 1;
+
+  function createWefProxy(path = []) {
+    return new Proxy(function() {}, {
+      get(target, prop) {
+        if (prop === 'then' || prop === 'catch' || prop === 'finally' ||
+            prop === 'constructor' || prop === Symbol.toStringTag) {
+          return undefined;
+        }
+        return createWefProxy([...path, prop]);
+      },
+      apply(target, thisArg, args) {
+        return new Promise((resolve, reject) => {
+          const callId = nextCallId++;
+          pendingCalls.set(callId, { resolve, reject });
+
+          const processedArgs = args.map(arg => {
+            if (typeof arg === 'function') {
+              const cbId = nextCallId++;
+              window.__wefCallbacks = window.__wefCallbacks || {};
+              window.__wefCallbacks[cbId] = arg;
+              return { __callback__: String(cbId) };
+            }
+            if (arg instanceof ArrayBuffer) {
+              const bytes = new Uint8Array(arg);
+              let binary = '';
+              bytes.forEach(b => binary += String.fromCharCode(b));
+              return { __binary__: btoa(binary) };
+            }
+            if (arg instanceof Uint8Array) {
+              let binary = '';
+              arg.forEach(b => binary += String.fromCharCode(b));
+              return { __binary__: btoa(binary) };
+            }
+            return arg;
+          });
+
+          )JS" + postMessage + R"JS(
+        });
+      }
+    });
+  }
+
+  window[")JS" + ns + R"JS("] = createWefProxy();
+
+  window.__wefRespond = function(callId, result, error) {
+    const pending = pendingCalls.get(callId);
+    if (pending) {
+      pendingCalls.delete(callId);
+      if (error) {
+        pending.reject(new Error(error));
+      } else {
+        function convertBinary(obj) {
+          if (obj && typeof obj === 'object') {
+            if (obj.__binary__) {
+              const binary = atob(obj.__binary__);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+              }
+              return bytes.buffer;
+            }
+            if (Array.isArray(obj)) {
+              return obj.map(convertBinary);
+            }
+            const result = {};
+            for (const key in obj) {
+              result[key] = convertBinary(obj[key]);
+            }
+            return result;
+          }
+          return obj;
+        }
+        pending.resolve(convertBinary(result));
+      }
+    }
+  };
+
+  window.__wefInvokeCallback = function(callbackId, args) {
+    const cb = window.__wefCallbacks && window.__wefCallbacks[callbackId];
+    if (cb) {
+      cb.apply(null, args);
+    }
+  };
+
+  window.__wefReleaseCallback = function(callbackId) {
+    if (window.__wefCallbacks) {
+      delete window.__wefCallbacks[callbackId];
+    }
+  };
+
+})();
+)JS";
+}
+
 class WebView2Backend;
 static WebView2Backend* g_win_backend = nullptr;
 
@@ -240,6 +339,8 @@ class WebView2Backend : public WefBackend {
                        wef_value_t* menu_template,
                        const wef_backend_api_t* api,
                        wef_menu_click_fn on_click, void* on_click_data) override;
+
+  void OpenDevTools(uint32_t window_id) override;
 
   void ShowDialog(uint32_t window_id, int dialog_type,
                   const std::string& title, const std::string& message,
@@ -475,106 +576,16 @@ void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) 
                       GetClientRect(hwnd, &bounds);
                       controller->put_Bounds(bounds);
 
+                      std::string initScript = BuildInitScript(
+                          RuntimeLoader::GetInstance()->GetJsNamespace(),
+                          "window.chrome.webview.postMessage(JSON.stringify({\n"
+                          "            callId: callId,\n"
+                          "            method: path.join('.'),\n"
+                          "            args: processedArgs\n"
+                          "          }));");
+                      std::wstring wInitScript(initScript.begin(), initScript.end());
                       state->webview->AddScriptToExecuteOnDocumentCreated(
-                          LR"JS(
-(function() {
-  const pendingCalls = new Map();
-  let nextCallId = 1;
-
-  function createWefProxy(path = []) {
-    return new Proxy(function() {}, {
-      get(target, prop) {
-        if (prop === 'then' || prop === 'catch' || prop === 'finally' ||
-            prop === 'constructor' || prop === Symbol.toStringTag) {
-          return undefined;
-        }
-        return createWefProxy([...path, prop]);
-      },
-      apply(target, thisArg, args) {
-        return new Promise((resolve, reject) => {
-          const callId = nextCallId++;
-          pendingCalls.set(callId, { resolve, reject });
-
-          const processedArgs = args.map(arg => {
-            if (typeof arg === 'function') {
-              const cbId = nextCallId++;
-              window.__wefCallbacks = window.__wefCallbacks || {};
-              window.__wefCallbacks[cbId] = arg;
-              return { __callback__: String(cbId) };
-            }
-            if (arg instanceof ArrayBuffer) {
-              const bytes = new Uint8Array(arg);
-              let binary = '';
-              bytes.forEach(b => binary += String.fromCharCode(b));
-              return { __binary__: btoa(binary) };
-            }
-            if (arg instanceof Uint8Array) {
-              let binary = '';
-              arg.forEach(b => binary += String.fromCharCode(b));
-              return { __binary__: btoa(binary) };
-            }
-            return arg;
-          });
-
-          window.chrome.webview.postMessage(JSON.stringify({
-            callId: callId,
-            method: path.join('.'),
-            args: processedArgs
-          }));
-        });
-      }
-    });
-  }
-
-  window.Wef = createWefProxy();
-
-  window.__wefRespond = function(callId, result, error) {
-    const pending = pendingCalls.get(callId);
-    if (pending) {
-      pendingCalls.delete(callId);
-      if (error) {
-        pending.reject(new Error(error));
-      } else {
-        function convertBinary(obj) {
-          if (obj && typeof obj === 'object') {
-            if (obj.__binary__) {
-              const binary = atob(obj.__binary__);
-              const bytes = new Uint8Array(binary.length);
-              for (let i = 0; i < binary.length; i++) {
-                bytes[i] = binary.charCodeAt(i);
-              }
-              return bytes.buffer;
-            }
-            if (Array.isArray(obj)) {
-              return obj.map(convertBinary);
-            }
-            const result = {};
-            for (const key in obj) {
-              result[key] = convertBinary(obj[key]);
-            }
-            return result;
-          }
-          return obj;
-        }
-        pending.resolve(convertBinary(result));
-      }
-    }
-  };
-
-  window.__wefInvokeCallback = function(callbackId, args) {
-    const cb = window.__wefCallbacks && window.__wefCallbacks[callbackId];
-    if (cb) {
-      cb.apply(null, args);
-    }
-  };
-
-  window.__wefReleaseCallback = function(callbackId) {
-    if (window.__wefCallbacks) {
-      delete window.__wefCallbacks[callbackId];
-    }
-  };
-})();
-)JS",
+                          wInitScript.c_str(),
                           nullptr);
 
                       uint32_t wid = window_id;
@@ -587,6 +598,47 @@ void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) 
                                   HandleJsMessage(wid, messageRaw);
                                   CoTaskMemFree(messageRaw);
                                 }
+                                return S_OK;
+                              }).Get(),
+                          nullptr);
+
+                      state->webview->add_ScriptDialogOpening(
+                          Callback<ICoreWebView2ScriptDialogOpeningEventHandler>(
+                              [hwnd](ICoreWebView2* sender, ICoreWebView2ScriptDialogOpeningEventArgs* args) -> HRESULT {
+                                COREWEBVIEW2_SCRIPT_DIALOG_KIND kind;
+                                args->get_Kind(&kind);
+
+                                LPWSTR messageRaw = nullptr;
+                                args->get_Message(&messageRaw);
+                                std::wstring message = messageRaw ? messageRaw : L"";
+                                if (messageRaw) CoTaskMemFree(messageRaw);
+
+                                if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_ALERT) {
+                                  MessageBoxW(hwnd, message.c_str(), L"Alert", MB_OK | MB_ICONINFORMATION);
+                                  args->Accept();
+                                } else if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM) {
+                                  int result = MessageBoxW(hwnd, message.c_str(), L"Confirm", MB_OKCANCEL | MB_ICONQUESTION);
+                                  if (result == IDOK) {
+                                    args->Accept();
+                                  }
+                                } else if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT) {
+                                  // For prompt, we need a custom dialog. Use a simple approach with TaskDialog-style input.
+                                  // WebView2 doesn't have a built-in way to show prompt with input, so we accept with the default.
+                                  LPWSTR defaultTextRaw = nullptr;
+                                  args->get_DefaultText(&defaultTextRaw);
+                                  std::wstring defaultText = defaultTextRaw ? defaultTextRaw : L"";
+                                  if (defaultTextRaw) CoTaskMemFree(defaultTextRaw);
+
+                                  // Use a simple MessageBox for now — accept with default text
+                                  int result = MessageBoxW(hwnd, message.c_str(), L"Prompt", MB_OKCANCEL | MB_ICONQUESTION);
+                                  if (result == IDOK) {
+                                    args->put_ResultText(defaultText.c_str());
+                                    args->Accept();
+                                  }
+                                } else if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD) {
+                                  args->Accept();
+                                }
+
                                 return S_OK;
                               }).Get(),
                           nullptr);
@@ -845,6 +897,7 @@ void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& js
   if (!msg || !msg->IsDict()) return;
 
   const auto& dict = msg->GetDict();
+
   auto callIdIt = dict.find("callId");
   auto methodIt = dict.find("method");
   auto argsIt = dict.find("args");
@@ -898,6 +951,18 @@ void WebView2Backend::ShowContextMenu(uint32_t window_id,
   if (state && state->hwnd) {
     win32_menu::ShowContextMenu(state->hwnd, x, y, menu_template, api,
                                 on_click, on_click_data, window_id);
+  }
+}
+
+// ============================================================================
+// DevTools
+// ============================================================================
+
+void WebView2Backend::OpenDevTools(uint32_t window_id) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (state && state->webview) {
+    state->webview->OpenDevToolsWindow();
   }
 }
 

@@ -2,15 +2,17 @@
 
 pub use winit;
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
-use std::ffi::{c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::thread;
 
 use libloading::{Library, Symbol};
+use muda::MenuEvent;
 #[allow(unused_imports)]
 use raw_window_handle::{
   HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
@@ -21,7 +23,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 15;
+pub const WEF_API_VERSION: u32 = 18;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -290,6 +292,8 @@ pub struct WefBackendApi {
       *mut c_void,
     ),
   >,
+  pub open_devtools: Option<unsafe extern "C" fn(*mut c_void, u32)>,
+  pub set_js_namespace: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
   pub show_dialog: Option<
     unsafe extern "C" fn(
       *mut c_void,               // backend_data
@@ -311,165 +315,417 @@ pub type RuntimeStartFn = unsafe extern "C" fn() -> c_int;
 #[allow(dead_code)]
 pub type RuntimeShutdownFn = unsafe extern "C" fn();
 
-// --- Value stub functions ---
+// --- SimpleValue: real WefValue backing type ---
 
-pub unsafe extern "C" fn value_is_null(_val: *mut WefValue) -> bool {
-  true
+enum SimpleValue {
+  Null,
+  Bool(bool),
+  Int(c_int),
+  Double(f64),
+  String(String),
+  List(Vec<*mut WefValue>),
+  Dict(Vec<(String, *mut WefValue)>),
+  Binary(Vec<u8>),
 }
-pub unsafe extern "C" fn value_is_bool(_val: *mut WefValue) -> bool {
-  false
+
+fn sv_to_wef(val: SimpleValue) -> *mut WefValue {
+  Box::into_raw(Box::new(val)) as *mut WefValue
 }
-pub unsafe extern "C" fn value_is_int(_val: *mut WefValue) -> bool {
-  false
+
+unsafe fn wef_ref(ptr: *mut WefValue) -> &'static SimpleValue {
+  &*(ptr as *const SimpleValue)
 }
-pub unsafe extern "C" fn value_is_double(_val: *mut WefValue) -> bool {
-  false
+
+unsafe fn wef_mut(ptr: *mut WefValue) -> &'static mut SimpleValue {
+  &mut *(ptr as *mut SimpleValue)
 }
-pub unsafe extern "C" fn value_is_string(_val: *mut WefValue) -> bool {
-  false
+
+unsafe fn wef_free(ptr: *mut WefValue) {
+  if ptr.is_null() {
+    return;
+  }
+  let val = Box::from_raw(ptr as *mut SimpleValue);
+  match *val {
+    SimpleValue::List(items) => {
+      for item in items {
+        wef_free(item);
+      }
+    }
+    SimpleValue::Dict(entries) => {
+      for (_, v) in entries {
+        wef_free(v);
+      }
+    }
+    _ => {}
+  }
 }
-pub unsafe extern "C" fn value_is_list(_val: *mut WefValue) -> bool {
-  false
+
+// --- Value functions ---
+
+pub unsafe extern "C" fn value_is_null(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return true;
+  }
+  matches!(wef_ref(val), SimpleValue::Null)
 }
-pub unsafe extern "C" fn value_is_dict(_val: *mut WefValue) -> bool {
-  false
+pub unsafe extern "C" fn value_is_bool(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::Bool(_))
 }
-pub unsafe extern "C" fn value_is_binary(_val: *mut WefValue) -> bool {
-  false
+pub unsafe extern "C" fn value_is_int(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::Int(_))
+}
+pub unsafe extern "C" fn value_is_double(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::Double(_))
+}
+pub unsafe extern "C" fn value_is_string(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::String(_))
+}
+pub unsafe extern "C" fn value_is_list(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::List(_))
+}
+pub unsafe extern "C" fn value_is_dict(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::Dict(_))
+}
+pub unsafe extern "C" fn value_is_binary(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  matches!(wef_ref(val), SimpleValue::Binary(_))
 }
 pub unsafe extern "C" fn value_is_callback(_val: *mut WefValue) -> bool {
-  false
+  false // no callback support in winit backend
 }
-pub unsafe extern "C" fn value_get_bool(_val: *mut WefValue) -> bool {
-  false
+pub unsafe extern "C" fn value_get_bool(val: *mut WefValue) -> bool {
+  if val.is_null() {
+    return false;
+  }
+  match wef_ref(val) {
+    SimpleValue::Bool(v) => *v,
+    _ => false,
+  }
 }
-pub unsafe extern "C" fn value_get_int(_val: *mut WefValue) -> c_int {
-  0
+pub unsafe extern "C" fn value_get_int(val: *mut WefValue) -> c_int {
+  if val.is_null() {
+    return 0;
+  }
+  match wef_ref(val) {
+    SimpleValue::Int(v) => *v,
+    _ => 0,
+  }
 }
-pub unsafe extern "C" fn value_get_double(_val: *mut WefValue) -> f64 {
-  0.0
+pub unsafe extern "C" fn value_get_double(val: *mut WefValue) -> f64 {
+  if val.is_null() {
+    return 0.0;
+  }
+  match wef_ref(val) {
+    SimpleValue::Double(v) => *v,
+    _ => 0.0,
+  }
 }
 pub unsafe extern "C" fn value_get_string(
-  _val: *mut WefValue,
+  val: *mut WefValue,
   len: *mut usize,
 ) -> *mut c_char {
-  if !len.is_null() {
-    unsafe { *len = 0 };
+  if val.is_null() {
+    if !len.is_null() {
+      *len = 0;
+    }
+    return std::ptr::null_mut();
   }
-  std::ptr::null_mut()
+  match wef_ref(val) {
+    SimpleValue::String(s) => {
+      if !len.is_null() {
+        *len = s.len();
+      }
+      CString::new(s.as_str())
+        .unwrap_or_default()
+        .into_raw()
+    }
+    _ => {
+      if !len.is_null() {
+        *len = 0;
+      }
+      std::ptr::null_mut()
+    }
+  }
 }
-pub unsafe extern "C" fn value_free_string(_s: *mut c_char) {}
-pub unsafe extern "C" fn value_list_size(_val: *mut WefValue) -> usize {
-  0
+pub unsafe extern "C" fn value_free_string(s: *mut c_char) {
+  if !s.is_null() {
+    let _ = CString::from_raw(s);
+  }
+}
+pub unsafe extern "C" fn value_list_size(val: *mut WefValue) -> usize {
+  if val.is_null() {
+    return 0;
+  }
+  match wef_ref(val) {
+    SimpleValue::List(items) => items.len(),
+    _ => 0,
+  }
 }
 pub unsafe extern "C" fn value_list_get(
-  _val: *mut WefValue,
-  _idx: usize,
+  val: *mut WefValue,
+  idx: usize,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  if val.is_null() {
+    return std::ptr::null_mut();
+  }
+  match wef_ref(val) {
+    SimpleValue::List(items) => {
+      items.get(idx).copied().unwrap_or(std::ptr::null_mut())
+    }
+    _ => std::ptr::null_mut(),
+  }
 }
 pub unsafe extern "C" fn value_dict_get(
-  _val: *mut WefValue,
-  _key: *const c_char,
+  val: *mut WefValue,
+  key: *const c_char,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  if val.is_null() || key.is_null() {
+    return std::ptr::null_mut();
+  }
+  let key_str = CStr::from_ptr(key).to_string_lossy();
+  match wef_ref(val) {
+    SimpleValue::Dict(entries) => entries
+      .iter()
+      .find(|(k, _)| k == key_str.as_ref())
+      .map(|(_, v)| *v)
+      .unwrap_or(std::ptr::null_mut()),
+    _ => std::ptr::null_mut(),
+  }
 }
 pub unsafe extern "C" fn value_dict_has(
-  _val: *mut WefValue,
-  _key: *const c_char,
+  val: *mut WefValue,
+  key: *const c_char,
 ) -> bool {
-  false
+  if val.is_null() || key.is_null() {
+    return false;
+  }
+  let key_str = CStr::from_ptr(key).to_string_lossy();
+  match wef_ref(val) {
+    SimpleValue::Dict(entries) => {
+      entries.iter().any(|(k, _)| k == key_str.as_ref())
+    }
+    _ => false,
+  }
 }
-pub unsafe extern "C" fn value_dict_size(_val: *mut WefValue) -> usize {
-  0
+pub unsafe extern "C" fn value_dict_size(val: *mut WefValue) -> usize {
+  if val.is_null() {
+    return 0;
+  }
+  match wef_ref(val) {
+    SimpleValue::Dict(entries) => entries.len(),
+    _ => 0,
+  }
 }
 pub unsafe extern "C" fn value_dict_keys(
-  _val: *mut WefValue,
+  val: *mut WefValue,
   count: *mut usize,
 ) -> *mut *mut c_char {
-  if !count.is_null() {
-    unsafe { *count = 0 };
+  if val.is_null() {
+    if !count.is_null() {
+      *count = 0;
+    }
+    return std::ptr::null_mut();
   }
-  std::ptr::null_mut()
+  match wef_ref(val) {
+    SimpleValue::Dict(entries) => {
+      let n = entries.len();
+      if !count.is_null() {
+        *count = n;
+      }
+      if n == 0 {
+        return std::ptr::null_mut();
+      }
+      let layout = std::alloc::Layout::array::<*mut c_char>(n).unwrap();
+      let ptr = std::alloc::alloc(layout) as *mut *mut c_char;
+      for (i, (k, _)) in entries.iter().enumerate() {
+        *ptr.add(i) = CString::new(k.as_str()).unwrap_or_default().into_raw();
+      }
+      ptr
+    }
+    _ => {
+      if !count.is_null() {
+        *count = 0;
+      }
+      std::ptr::null_mut()
+    }
+  }
 }
 pub unsafe extern "C" fn value_free_keys(
-  _keys: *mut *mut c_char,
-  _count: usize,
+  keys: *mut *mut c_char,
+  count: usize,
 ) {
+  if keys.is_null() {
+    return;
+  }
+  for i in 0..count {
+    let k = *keys.add(i);
+    if !k.is_null() {
+      let _ = CString::from_raw(k);
+    }
+  }
+  let layout = std::alloc::Layout::array::<*mut c_char>(count).unwrap();
+  std::alloc::dealloc(keys as *mut u8, layout);
 }
 pub unsafe extern "C" fn value_get_binary(
-  _val: *mut WefValue,
+  val: *mut WefValue,
   len: *mut usize,
 ) -> *const c_void {
-  if !len.is_null() {
-    unsafe { *len = 0 };
+  if val.is_null() {
+    if !len.is_null() {
+      *len = 0;
+    }
+    return std::ptr::null();
   }
-  std::ptr::null()
+  match wef_ref(val) {
+    SimpleValue::Binary(data) => {
+      if !len.is_null() {
+        *len = data.len();
+      }
+      data.as_ptr() as *const c_void
+    }
+    _ => {
+      if !len.is_null() {
+        *len = 0;
+      }
+      std::ptr::null()
+    }
+  }
 }
 pub unsafe extern "C" fn value_get_callback_id(_val: *mut WefValue) -> u64 {
   0
 }
 pub unsafe extern "C" fn value_null(_data: *mut c_void) -> *mut WefValue {
-  std::ptr::null_mut()
+  sv_to_wef(SimpleValue::Null)
 }
 pub unsafe extern "C" fn value_bool(
   _data: *mut c_void,
-  _v: bool,
+  v: bool,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  sv_to_wef(SimpleValue::Bool(v))
 }
 pub unsafe extern "C" fn value_int(
   _data: *mut c_void,
-  _v: c_int,
+  v: c_int,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  sv_to_wef(SimpleValue::Int(v))
 }
 pub unsafe extern "C" fn value_double(
   _data: *mut c_void,
-  _v: f64,
+  v: f64,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  sv_to_wef(SimpleValue::Double(v))
 }
 pub unsafe extern "C" fn value_string(
   _data: *mut c_void,
-  _v: *const c_char,
+  v: *const c_char,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  if v.is_null() {
+    return sv_to_wef(SimpleValue::String(String::new()));
+  }
+  let s = CStr::from_ptr(v).to_string_lossy().into_owned();
+  sv_to_wef(SimpleValue::String(s))
 }
 pub unsafe extern "C" fn value_list(_data: *mut c_void) -> *mut WefValue {
-  std::ptr::null_mut()
+  sv_to_wef(SimpleValue::List(Vec::new()))
 }
 pub unsafe extern "C" fn value_dict(_data: *mut c_void) -> *mut WefValue {
-  std::ptr::null_mut()
+  sv_to_wef(SimpleValue::Dict(Vec::new()))
 }
 pub unsafe extern "C" fn value_binary(
   _data: *mut c_void,
-  _d: *const c_void,
-  _len: usize,
+  d: *const c_void,
+  len: usize,
 ) -> *mut WefValue {
-  std::ptr::null_mut()
+  if d.is_null() || len == 0 {
+    return sv_to_wef(SimpleValue::Binary(Vec::new()));
+  }
+  let data = std::slice::from_raw_parts(d as *const u8, len).to_vec();
+  sv_to_wef(SimpleValue::Binary(data))
 }
 pub unsafe extern "C" fn value_list_append(
-  _list: *mut WefValue,
-  _val: *mut WefValue,
+  list: *mut WefValue,
+  val: *mut WefValue,
 ) -> bool {
-  false
+  if list.is_null() || val.is_null() {
+    return false;
+  }
+  match wef_mut(list) {
+    SimpleValue::List(items) => {
+      items.push(val);
+      true
+    }
+    _ => false,
+  }
 }
 pub unsafe extern "C" fn value_list_set(
-  _list: *mut WefValue,
-  _idx: usize,
-  _val: *mut WefValue,
+  list: *mut WefValue,
+  idx: usize,
+  val: *mut WefValue,
 ) -> bool {
-  false
+  if list.is_null() || val.is_null() {
+    return false;
+  }
+  match wef_mut(list) {
+    SimpleValue::List(items) => {
+      if idx < items.len() {
+        wef_free(items[idx]);
+        items[idx] = val;
+        true
+      } else {
+        false
+      }
+    }
+    _ => false,
+  }
 }
 pub unsafe extern "C" fn value_dict_set(
-  _dict: *mut WefValue,
-  _key: *const c_char,
-  _val: *mut WefValue,
+  dict: *mut WefValue,
+  key: *const c_char,
+  val: *mut WefValue,
 ) -> bool {
-  false
+  if dict.is_null() || key.is_null() || val.is_null() {
+    return false;
+  }
+  let key_str = CStr::from_ptr(key).to_string_lossy().into_owned();
+  match wef_mut(dict) {
+    SimpleValue::Dict(entries) => {
+      // Replace existing key if present
+      for entry in entries.iter_mut() {
+        if entry.0 == key_str {
+          wef_free(entry.1);
+          entry.1 = val;
+          return true;
+        }
+      }
+      entries.push((key_str, val));
+      true
+    }
+    _ => false,
+  }
 }
-pub unsafe extern "C" fn value_free(_val: *mut WefValue) {}
+pub unsafe extern "C" fn value_free(val: *mut WefValue) {
+  wef_free(val);
+}
 pub unsafe extern "C" fn set_js_call_handler(
   _data: *mut c_void,
   _handler: WefJsCallFn,
@@ -479,15 +735,18 @@ pub unsafe extern "C" fn set_js_call_handler(
 pub unsafe extern "C" fn js_call_respond(
   _data: *mut c_void,
   _call_id: u64,
-  _result: *mut WefValue,
-  _error: *mut WefValue,
+  result: *mut WefValue,
+  error: *mut WefValue,
 ) {
+  wef_free(result);
+  wef_free(error);
 }
 pub unsafe extern "C" fn invoke_js_callback(
   _data: *mut c_void,
   _cb_id: u64,
-  _args: *mut WefValue,
+  args: *mut WefValue,
 ) {
+  wef_free(args);
 }
 pub unsafe extern "C" fn release_js_callback(_data: *mut c_void, _cb_id: u64) {}
 
@@ -572,6 +831,8 @@ pub fn create_api_base() -> WefBackendApi {
     set_js_call_notify: None,
     set_application_menu: None,
     show_context_menu: None,
+    open_devtools: None,
+    set_js_namespace: None,
     show_dialog: None,
   }
 }
@@ -695,6 +956,341 @@ pub struct PendingDialog {
   pub callback_data: usize,
 }
 
+// --- Menu types ---
+
+pub type WefMenuClickFn =
+  unsafe extern "C" fn(*mut c_void, u32, *const c_char);
+
+pub enum ParsedMenuItem {
+  Item {
+    id: String,
+    label: String,
+    accelerator: Option<String>,
+    enabled: bool,
+  },
+  Submenu {
+    label: String,
+    items: Vec<ParsedMenuItem>,
+  },
+  Separator,
+  Role {
+    role: String,
+  },
+}
+
+pub struct PendingMenu {
+  pub items: Vec<ParsedMenuItem>,
+  pub callback: Option<WefMenuClickFn>,
+  pub callback_data: usize,
+}
+
+pub struct PendingContextMenu {
+  pub x: i32,
+  pub y: i32,
+  pub items: Vec<ParsedMenuItem>,
+  pub callback: Option<WefMenuClickFn>,
+  pub callback_data: usize,
+}
+
+/// Helper to read a string from a WefValue dict entry.
+unsafe fn wef_dict_string(dict: *mut WefValue, key: &str) -> Option<String> {
+  let c_key = CString::new(key).ok()?;
+  let val = value_dict_get(dict, c_key.as_ptr());
+  if val.is_null() || !value_is_string(val) {
+    return None;
+  }
+  let mut len: usize = 0;
+  let ptr = value_get_string(val, &mut len);
+  if ptr.is_null() {
+    return None;
+  }
+  let s = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+  value_free_string(ptr);
+  Some(s)
+}
+
+/// Parse a WefValue list into a vec of ParsedMenuItem.
+pub unsafe fn parse_menu_template(
+  template: *mut WefValue,
+) -> Vec<ParsedMenuItem> {
+  let mut items = Vec::new();
+  if template.is_null() || !value_is_list(template) {
+    return items;
+  }
+  let count = value_list_size(template);
+  for i in 0..count {
+    let entry = value_list_get(template, i);
+    if entry.is_null() || !value_is_dict(entry) {
+      continue;
+    }
+    // Check for separator
+    if let Some(ty) = wef_dict_string(entry, "type") {
+      if ty == "separator" {
+        items.push(ParsedMenuItem::Separator);
+        continue;
+      }
+    }
+    // Check for role
+    if let Some(role) = wef_dict_string(entry, "role") {
+      items.push(ParsedMenuItem::Role { role });
+      continue;
+    }
+    // Check for submenu
+    let c_submenu = CString::new("submenu").unwrap();
+    let submenu_val = value_dict_get(entry, c_submenu.as_ptr());
+    if !submenu_val.is_null() && value_is_list(submenu_val) {
+      let label = wef_dict_string(entry, "label").unwrap_or_default();
+      let children = parse_menu_template(submenu_val);
+      items.push(ParsedMenuItem::Submenu {
+        label,
+        items: children,
+      });
+      continue;
+    }
+    // Regular item
+    let label = wef_dict_string(entry, "label").unwrap_or_default();
+    let id = wef_dict_string(entry, "id").unwrap_or_else(|| label.clone());
+    let accelerator = wef_dict_string(entry, "accelerator");
+    let c_enabled = CString::new("enabled").unwrap();
+    let enabled_val = value_dict_get(entry, c_enabled.as_ptr());
+    let enabled = if enabled_val.is_null() || !value_is_bool(enabled_val) {
+      true
+    } else {
+      value_get_bool(enabled_val)
+    };
+    items.push(ParsedMenuItem::Item {
+      id,
+      label,
+      accelerator,
+      enabled,
+    });
+  }
+  items
+}
+
+// --- Menu callback storage ---
+
+struct MenuCallbackInfo {
+  callback: WefMenuClickFn,
+  callback_data: usize,
+  window_id: u32,
+}
+
+unsafe impl Send for MenuCallbackInfo {}
+
+static MENU_CLICK_STORE: Mutex<Option<HashMap<String, MenuCallbackInfo>>> =
+  Mutex::new(None);
+
+thread_local! {
+  static ACTIVE_APP_MENUS: RefCell<HashMap<u32, muda::Menu>> =
+    RefCell::new(HashMap::new());
+}
+
+fn register_menu_callbacks(
+  items: &[ParsedMenuItem],
+  callback: Option<WefMenuClickFn>,
+  callback_data: usize,
+  window_id: u32,
+) {
+  let cb = match callback {
+    Some(cb) => cb,
+    None => return,
+  };
+  let mut store = MENU_CLICK_STORE.lock().unwrap();
+  let store = store.get_or_insert_with(HashMap::new);
+  for item in items {
+    match item {
+      ParsedMenuItem::Item { id, .. } => {
+        store.insert(
+          id.clone(),
+          MenuCallbackInfo {
+            callback: cb,
+            callback_data,
+            window_id,
+          },
+        );
+      }
+      ParsedMenuItem::Submenu { items: children, .. } => {
+        register_menu_callbacks(children, callback, callback_data, window_id);
+      }
+      _ => {}
+    }
+  }
+}
+
+/// Build a muda Menu bar from parsed items.
+fn build_muda_menu(items: &[ParsedMenuItem]) -> muda::Menu {
+  let menu = muda::Menu::new();
+  for item in items {
+    let _ = append_muda_item_to_menu(&menu, item);
+  }
+  menu
+}
+
+fn append_muda_item_to_menu(
+  menu: &muda::Menu,
+  item: &ParsedMenuItem,
+) {
+  match item {
+    ParsedMenuItem::Submenu { label, items } => {
+      let submenu = muda::Submenu::new(label, true);
+      for child in items {
+        append_muda_item_to_submenu(&submenu, child);
+      }
+      let _ = menu.append(&submenu);
+    }
+    ParsedMenuItem::Item {
+      id,
+      label,
+      accelerator,
+      enabled,
+    } => {
+      let accel: Option<muda::accelerator::Accelerator> =
+        accelerator.as_deref().and_then(|s| s.parse().ok());
+      let item =
+        muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
+      let _ = menu.append(&item);
+    }
+    ParsedMenuItem::Separator => {
+      let _ = menu.append(&muda::PredefinedMenuItem::separator());
+    }
+    ParsedMenuItem::Role { role } => {
+      if let Some(item) = predefined_menu_item(role) {
+        let _ = menu.append(&item);
+      }
+    }
+  }
+}
+
+fn append_muda_item_to_submenu(
+  submenu: &muda::Submenu,
+  item: &ParsedMenuItem,
+) {
+  match item {
+    ParsedMenuItem::Submenu {
+      label,
+      items: children,
+    } => {
+      let child_submenu = muda::Submenu::new(label, true);
+      for child in children {
+        append_muda_item_to_submenu(&child_submenu, child);
+      }
+      let _ = submenu.append(&child_submenu);
+    }
+    ParsedMenuItem::Item {
+      id,
+      label,
+      accelerator,
+      enabled,
+    } => {
+      let accel: Option<muda::accelerator::Accelerator> =
+        accelerator.as_deref().and_then(|s| s.parse().ok());
+      let item =
+        muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
+      let _ = submenu.append(&item);
+    }
+    ParsedMenuItem::Separator => {
+      let _ = submenu.append(&muda::PredefinedMenuItem::separator());
+    }
+    ParsedMenuItem::Role { role } => {
+      if let Some(item) = predefined_menu_item(role) {
+        let _ = submenu.append(&item);
+      }
+    }
+  }
+}
+
+fn predefined_menu_item(role: &str) -> Option<muda::PredefinedMenuItem> {
+  match role.to_lowercase().as_str() {
+    "quit" => Some(muda::PredefinedMenuItem::quit(None)),
+    "copy" => Some(muda::PredefinedMenuItem::copy(None)),
+    "cut" => Some(muda::PredefinedMenuItem::cut(None)),
+    "paste" => Some(muda::PredefinedMenuItem::paste(None)),
+    "selectall" | "selectAll" => {
+      Some(muda::PredefinedMenuItem::select_all(None))
+    }
+    "undo" => Some(muda::PredefinedMenuItem::undo(None)),
+    "redo" => Some(muda::PredefinedMenuItem::redo(None)),
+    "minimize" => Some(muda::PredefinedMenuItem::minimize(None)),
+    "close" => Some(muda::PredefinedMenuItem::close_window(None)),
+    #[cfg(target_os = "macos")]
+    "hide" => Some(muda::PredefinedMenuItem::hide(None)),
+    #[cfg(target_os = "macos")]
+    "hideothers" | "hideOthers" => {
+      Some(muda::PredefinedMenuItem::hide_others(None))
+    }
+    #[cfg(target_os = "macos")]
+    "unhide" | "showall" | "showAll" => {
+      Some(muda::PredefinedMenuItem::show_all(None))
+    }
+    #[cfg(target_os = "macos")]
+    "about" => Some(muda::PredefinedMenuItem::about(None, None)),
+    "togglefullscreen" | "toggleFullScreen" => {
+      Some(muda::PredefinedMenuItem::fullscreen(None))
+    }
+    "separator" => Some(muda::PredefinedMenuItem::separator()),
+    _ => None,
+  }
+}
+
+/// Build a muda Submenu suitable for use as a context menu.
+fn build_muda_context_menu(items: &[ParsedMenuItem]) -> muda::Menu {
+  let menu = muda::Menu::new();
+  for item in items {
+    match item {
+      ParsedMenuItem::Submenu { label, items } => {
+        let submenu = muda::Submenu::new(label, true);
+        for child in items {
+          append_muda_item_to_submenu(&submenu, child);
+        }
+        let _ = menu.append(&submenu);
+      }
+      ParsedMenuItem::Item {
+        id,
+        label,
+        accelerator,
+        enabled,
+      } => {
+        let accel: Option<muda::accelerator::Accelerator> =
+          accelerator.as_deref().and_then(|s| s.parse().ok());
+        let item =
+          muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
+        let _ = menu.append(&item);
+      }
+      ParsedMenuItem::Separator => {
+        let _ = menu.append(&muda::PredefinedMenuItem::separator());
+      }
+      ParsedMenuItem::Role { role } => {
+        if let Some(item) = predefined_menu_item(role) {
+          let _ = menu.append(&item);
+        }
+      }
+    }
+  }
+  menu
+}
+
+/// Poll muda menu events and dispatch callbacks. Call from the event loop.
+pub fn poll_menu_events() {
+  while let Ok(event) = MenuEvent::receiver().try_recv() {
+    let id_str = event.id().0.clone();
+    let store = MENU_CLICK_STORE.lock().unwrap();
+    if let Some(store) = store.as_ref() {
+      if let Some(info) = store.get(&id_str) {
+        if let Ok(c_id) = CString::new(id_str.as_str()) {
+          unsafe {
+            (info.callback)(
+              info.callback_data as *mut c_void,
+              info.window_id,
+              c_id.as_ptr(),
+            );
+          }
+        }
+      }
+    }
+  }
+}
+
 // --- Per-window common state ---
 
 pub struct WindowState {
@@ -705,6 +1301,8 @@ pub struct WindowState {
   pub pending_always_on_top: Mutex<Option<bool>>,
   pub pending_visible: Mutex<Option<bool>>,
   pub pending_dialog: Mutex<Option<PendingDialog>>,
+  pub pending_app_menu: Mutex<Option<PendingMenu>>,
+  pub pending_context_menu: Mutex<Option<PendingContextMenu>>,
   pub cursor_position: Mutex<(f64, f64)>,
   pub last_press_time: Mutex<Option<std::time::Instant>>,
   pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
@@ -721,6 +1319,8 @@ impl WindowState {
       pending_always_on_top: Mutex::new(None),
       pending_visible: Mutex::new(None),
       pending_dialog: Mutex::new(None),
+      pending_app_menu: Mutex::new(None),
+      pending_context_menu: Mutex::new(None),
       cursor_position: Mutex::new((0.0, 0.0)),
       last_press_time: Mutex::new(None),
       last_press_button: Mutex::new(None),
@@ -848,6 +1448,12 @@ pub enum CommonEvent {
     window_id: u32,
   },
   ShowDialog {
+    window_id: u32,
+  },
+  SetApplicationMenu {
+    window_id: u32,
+  },
+  ShowContextMenu {
     window_id: u32,
   },
   Quit,
@@ -1332,6 +1938,61 @@ macro_rules! define_common_backend_fns {
         );
       }
     }
+
+    unsafe extern "C" fn backend_set_application_menu(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      template: *mut $crate::WefValue,
+      callback: Option<$crate::WefMenuClickFn>,
+      callback_data: *mut ::std::ffi::c_void,
+    ) {
+      let items = $crate::parse_menu_template(template);
+      $crate::value_free(template);
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_app_menu.lock().unwrap() = Some($crate::PendingMenu {
+            items,
+            callback,
+            callback_data: callback_data as usize,
+          });
+        });
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::SetApplicationMenu { window_id },
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_show_context_menu(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      x: ::std::ffi::c_int,
+      y: ::std::ffi::c_int,
+      template: *mut $crate::WefValue,
+      callback: Option<$crate::WefMenuClickFn>,
+      callback_data: *mut ::std::ffi::c_void,
+    ) {
+      let items = $crate::parse_menu_template(template);
+      $crate::value_free(template);
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        state.common().with_window(window_id, |ws| {
+          *ws.pending_context_menu.lock().unwrap() =
+            Some($crate::PendingContextMenu {
+              x,
+              y,
+              items,
+              callback,
+              callback_data: callback_data as usize,
+            });
+        });
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::ShowContextMenu { window_id },
+          ),
+        );
+      }
+    }
   };
 }
 
@@ -1371,6 +2032,8 @@ macro_rules! fill_common_api {
     $api.set_close_requested_handler =
       Some(backend_set_close_requested_handler);
     $api.show_dialog = Some(backend_show_dialog);
+    $api.set_application_menu = Some(backend_set_application_menu);
+    $api.show_context_menu = Some(backend_show_context_menu);
   };
 }
 
@@ -1474,6 +2137,108 @@ pub fn handle_common_event<B: BackendAccess>(
                   input_ptr,
                 )
               };
+            }
+          }
+        });
+      }
+      true
+    }
+    CommonEvent::SetApplicationMenu { window_id: eid }
+      if *eid == window_id =>
+    {
+      if let Some(state) = B::get() {
+        state.common().with_window(window_id, |ws| {
+          if let Some(pending) = ws.pending_app_menu.lock().unwrap().take() {
+            register_menu_callbacks(
+              &pending.items,
+              pending.callback,
+              pending.callback_data,
+              window_id,
+            );
+            let menu = build_muda_menu(&pending.items);
+
+            #[cfg(target_os = "macos")]
+            {
+              menu.init_for_nsapp();
+            }
+            #[cfg(target_os = "windows")]
+            {
+              if let Ok(wh) = window.window_handle() {
+                if let RawWindowHandle::Win32(handle) = wh.as_raw() {
+                  let hwnd = handle.hwnd.get() as isize;
+                  unsafe { let _ = menu.init_for_hwnd(hwnd); }
+                }
+              }
+            }
+            #[cfg(target_os = "linux")]
+            {
+              // muda on Linux requires a gtk window; winit doesn't
+              // provide one, so app menus are not supported on Linux.
+              let _ = &menu;
+            }
+
+            ACTIVE_APP_MENUS.with(|menus| {
+              menus.borrow_mut().insert(window_id, menu);
+            });
+          }
+        });
+      }
+      true
+    }
+    CommonEvent::ShowContextMenu { window_id: eid }
+      if *eid == window_id =>
+    {
+      if let Some(state) = B::get() {
+        state.common().with_window(window_id, |ws| {
+          if let Some(pending) =
+            ws.pending_context_menu.lock().unwrap().take()
+          {
+            register_menu_callbacks(
+              &pending.items,
+              pending.callback,
+              pending.callback_data,
+              window_id,
+            );
+            let menu = build_muda_context_menu(&pending.items);
+            let position = muda::dpi::Position::Logical(
+              muda::dpi::LogicalPosition::new(
+                pending.x as f64,
+                pending.y as f64,
+              ),
+            );
+
+            #[cfg(target_os = "macos")]
+            {
+              use muda::ContextMenu;
+              if let Ok(wh) = window.window_handle() {
+                if let RawWindowHandle::AppKit(handle) = wh.as_raw() {
+                  let ns_view = handle.ns_view.as_ptr();
+                  unsafe {
+                    let _ = menu.show_context_menu_for_nsview(
+                      ns_view as _,
+                      Some(position),
+                    );
+                  }
+                }
+              }
+            }
+            #[cfg(target_os = "windows")]
+            {
+              use muda::ContextMenu;
+              if let Ok(wh) = window.window_handle() {
+                if let RawWindowHandle::Win32(handle) = wh.as_raw() {
+                  let hwnd = handle.hwnd.get() as isize;
+                  let _ = unsafe {
+                    menu.show_context_menu_for_hwnd(hwnd, Some(position))
+                  };
+                }
+              }
+            }
+            #[cfg(target_os = "linux")]
+            {
+              // muda on Linux requires a gtk window; winit doesn't
+              // provide one, so context menus are not supported on Linux.
+              let _ = (&menu, &position);
             }
           }
         });

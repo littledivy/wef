@@ -5,6 +5,20 @@
 
 #include <iostream>
 
+#ifdef __linux__
+#include <gtk/gtk.h>
+#endif
+
+#ifdef __APPLE__
+// Defined in runtime_loader_mac.mm
+struct NativeDialogResult {
+  bool confirmed;
+  std::string text;
+};
+NativeDialogResult ShowNativeJSDialog_Mac(int type, const std::string& message,
+                                           const std::string& default_text);
+#endif
+
 #include "include/base/cef_callback.h"
 #include "include/cef_browser.h"
 #include "include/views/cef_browser_view.h"
@@ -271,6 +285,110 @@ bool WefHandler::OnKeyEvent(CefRefPtr<CefBrowser> browser,
       wid, state, key.c_str(), code.c_str(), modifiers, false);
 
   return false; // Don't consume the event — let CEF handle it too
+}
+
+bool WefHandler::OnJSDialog(CefRefPtr<CefBrowser> browser,
+                            const CefString& origin_url,
+                            JSDialogType dialog_type,
+                            const CefString& message_text,
+                            const CefString& default_prompt_text,
+                            CefRefPtr<CefJSDialogCallback> callback,
+                            bool& suppress_message) {
+  CEF_REQUIRE_UI_THREAD();
+  std::string msg = message_text.ToString();
+
+#ifdef _WIN32
+  // Get the native window handle from CEF Views
+  HWND hwnd = nullptr;
+  if (auto bv = CefBrowserView::GetForBrowser(browser)) {
+    if (auto win = bv->GetWindow()) {
+      hwnd = win->GetWindowHandle();
+    }
+  }
+
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_ALERT) {
+    std::wstring wmsg(msg.begin(), msg.end());
+    MessageBoxW(hwnd, wmsg.c_str(), L"Alert", MB_OK | MB_ICONINFORMATION);
+    callback->Continue(true, "");
+    return true;
+  }
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_CONFIRM) {
+    std::wstring wmsg(msg.begin(), msg.end());
+    int result = MessageBoxW(hwnd, wmsg.c_str(), L"Confirm", MB_OKCANCEL | MB_ICONQUESTION);
+    callback->Continue(result == IDOK, "");
+    return true;
+  }
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_PROMPT) {
+    std::wstring wmsg(msg.begin(), msg.end());
+    int result = MessageBoxW(hwnd, wmsg.c_str(), L"Prompt", MB_OKCANCEL | MB_ICONQUESTION);
+    callback->Continue(result == IDOK, default_prompt_text);
+    return true;
+  }
+#elif defined(__APPLE__)
+  // macOS: use native NSAlert via helper in runtime_loader_mac.mm
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_ALERT) {
+    ShowNativeJSDialog_Mac(0, msg, "");
+    callback->Continue(true, "");
+    return true;
+  }
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_CONFIRM) {
+    auto result = ShowNativeJSDialog_Mac(1, msg, "");
+    callback->Continue(result.confirmed, "");
+    return true;
+  }
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_PROMPT) {
+    auto result = ShowNativeJSDialog_Mac(2, msg, default_prompt_text.ToString());
+    callback->Continue(result.confirmed, result.text);
+    return true;
+  }
+#elif defined(__linux__)
+  // Linux: use GTK dialogs
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_ALERT) {
+    GtkWidget* dlg = gtk_message_dialog_new(
+        nullptr, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+        "%s", msg.c_str());
+    gtk_dialog_run(GTK_DIALOG(dlg));
+    gtk_widget_destroy(dlg);
+    callback->Continue(true, "");
+    return true;
+  }
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_CONFIRM) {
+    GtkWidget* dlg = gtk_message_dialog_new(
+        nullptr, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
+        "%s", msg.c_str());
+    gint result = gtk_dialog_run(GTK_DIALOG(dlg));
+    gtk_widget_destroy(dlg);
+    callback->Continue(result == GTK_RESPONSE_OK, "");
+    return true;
+  }
+  if (dialog_type == JSDialogType::JSDIALOGTYPE_PROMPT) {
+    std::string defaultText = default_prompt_text.ToString();
+    GtkWidget* dlg = gtk_message_dialog_new(
+        nullptr, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
+        "%s", msg.c_str());
+    GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
+    GtkWidget* entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(entry), defaultText.c_str());
+    gtk_container_add(GTK_CONTAINER(content), entry);
+    gtk_widget_show(entry);
+    gint result = gtk_dialog_run(GTK_DIALOG(dlg));
+    std::string resultText = (result == GTK_RESPONSE_OK)
+        ? gtk_entry_get_text(GTK_ENTRY(entry)) : "";
+    gtk_widget_destroy(dlg);
+    callback->Continue(result == GTK_RESPONSE_OK, resultText);
+    return true;
+  }
+#endif
+
+  return false;
+}
+
+bool WefHandler::OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser,
+                                       const CefString& message_text,
+                                       bool is_reload,
+                                       CefRefPtr<CefJSDialogCallback> callback) {
+  callback->Continue(true, "");
+  return true;
 }
 
 void WefHandler::CloseAllBrowsers(bool force_close) {

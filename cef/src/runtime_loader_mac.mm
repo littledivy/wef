@@ -240,6 +240,44 @@ void RemoveNativeMouseMonitor() {
   }
 }
 
+// --- JS Dialog for CEF (macOS) ---
+// Called from app.cc's OnJSDialog handler. Runs synchronously on the UI thread.
+
+struct NativeDialogResult {
+  bool confirmed;
+  std::string text;
+};
+
+NativeDialogResult ShowNativeJSDialog_Mac(int type, const std::string& message,
+                                           const std::string& default_text) {
+  NativeDialogResult result{false, ""};
+  // type: 0=alert, 1=confirm, 2=prompt
+  @autoreleasepool {
+    NSAlert* alert = [[NSAlert alloc] init];
+    [alert setMessageText:[NSString stringWithUTF8String:message.c_str()]];
+    [alert addButtonWithTitle:@"OK"];
+    if (type >= 1) {
+      [alert addButtonWithTitle:@"Cancel"];
+    }
+    [alert setAlertStyle:NSAlertStyleInformational];
+
+    NSTextField* input = nil;
+    if (type == 2) {
+      input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+      [input setStringValue:[NSString stringWithUTF8String:default_text.c_str()]];
+      [alert setAccessoryView:input];
+      [alert.window setInitialFirstResponder:input];
+    }
+
+    NSModalResponse response = [alert runModal];
+    result.confirmed = (response == NSAlertFirstButtonReturn);
+    if (type == 2 && result.confirmed && input) {
+      result.text = [[input stringValue] UTF8String];
+    }
+  }
+  return result;
+}
+
 // --- Native Dialog (macOS) ---
 
 void ShowNativeDialog_Mac(int dialog_type, const char* title, const char* message,

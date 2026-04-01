@@ -2,7 +2,6 @@
 
 #include "render_process_handler.h"
 
-
 CefRefPtr<WefRenderProcessHandler> g_render_handler;
 
 WefPathObject::WefPathObject(std::vector<std::string> path,
@@ -139,6 +138,15 @@ WefRenderProcessHandler::WefRenderProcessHandler() {
   g_render_handler = this;
 }
 
+void WefRenderProcessHandler::OnBrowserCreated(
+    CefRefPtr<CefBrowser> browser,
+    CefRefPtr<CefDictionaryValue> extra_info) {
+  if (extra_info && extra_info->HasKey("wef_js_namespace")) {
+    browser_namespaces_[browser->GetIdentifier()] =
+        extra_info->GetString("wef_js_namespace").ToString();
+  }
+}
+
 void WefRenderProcessHandler::OnContextCreated(
     CefRefPtr<CefBrowser> browser,
     CefRefPtr<CefFrame> frame,
@@ -146,10 +154,16 @@ void WefRenderProcessHandler::OnContextCreated(
 
   CefRefPtr<CefV8Value> global = context->GetGlobal();
 
+  std::string ns = "Wef";
+  auto it = browser_namespaces_.find(browser->GetIdentifier());
+  if (it != browser_namespaces_.end()) {
+    ns = it->second;
+  }
+
   CefRefPtr<WefPathObject> handler = new WefPathObject({}, frame);
   CefRefPtr<CefV8Value> wef = CefV8Value::CreateObject(nullptr, handler);
 
-  global->SetValue("Wef", wef, V8_PROPERTY_ATTRIBUTE_READONLY);
+  global->SetValue(ns, wef, V8_PROPERTY_ATTRIBUTE_READONLY);
 }
 
 void WefRenderProcessHandler::OnContextReleased(

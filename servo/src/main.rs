@@ -327,7 +327,9 @@ impl ApplicationHandler<UserEvent> for App {
             | CommonEvent::Show { window_id }
             | CommonEvent::Hide { window_id }
             | CommonEvent::Focus { window_id }
-            | CommonEvent::ShowDialog { window_id } => *window_id,
+            | CommonEvent::ShowDialog { window_id }
+            | CommonEvent::SetApplicationMenu { window_id }
+            | CommonEvent::ShowContextMenu { window_id } => *window_id,
             _ => return,
           };
           if let Some(win_state) = self.windows.get(&wid) {
@@ -440,6 +442,10 @@ impl ApplicationHandler<UserEvent> for App {
         }
       }
     }
+  }
+
+  fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+    wef_backend_winit_common::poll_menu_events();
   }
 
   fn window_event(

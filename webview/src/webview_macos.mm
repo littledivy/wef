@@ -71,6 +71,8 @@ class WKWebViewBackend : public WefBackend {
                        wef_menu_click_fn on_click,
                        void* on_click_data) override;
 
+  void OpenDevTools(uint32_t window_id) override;
+
   void ShowDialog(uint32_t window_id, int dialog_type,
                   const std::string& title, const std::string& message,
                   const std::string& default_value,
@@ -130,6 +132,7 @@ static void UnregisterNSWindow(NSWindow* win) {
   if (![message.body isKindOfClass:[NSDictionary class]]) return;
 
   NSDictionary* body = (NSDictionary*)message.body;
+
   NSNumber* callIdNum = body[@"callId"];
   NSString* method = body[@"method"];
   id argsJson = body[@"args"];
@@ -152,6 +155,59 @@ static void UnregisterNSWindow(NSWindow* win) {
 
   if (self.backend) {
     self.backend->HandleJsMessage(self.windowId, call_id, methodStr, args);
+  }
+}
+
+@end
+
+@interface WefUIDelegate : NSObject <WKUIDelegate>
+@end
+
+@implementation WefUIDelegate
+
+- (void)webView:(WKWebView *)webView
+    runJavaScriptAlertPanelWithMessage:(NSString *)message
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(void))completionHandler {
+  NSAlert* alert = [[NSAlert alloc] init];
+  [alert setMessageText:message];
+  [alert addButtonWithTitle:@"OK"];
+  [alert setAlertStyle:NSAlertStyleInformational];
+  [alert runModal];
+  completionHandler();
+}
+
+- (void)webView:(WKWebView *)webView
+    runJavaScriptConfirmPanelWithMessage:(NSString *)message
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(BOOL result))completionHandler {
+  NSAlert* alert = [[NSAlert alloc] init];
+  [alert setMessageText:message];
+  [alert addButtonWithTitle:@"OK"];
+  [alert addButtonWithTitle:@"Cancel"];
+  [alert setAlertStyle:NSAlertStyleInformational];
+  NSModalResponse response = [alert runModal];
+  completionHandler(response == NSAlertFirstButtonReturn);
+}
+
+- (void)webView:(WKWebView *)webView
+    runJavaScriptTextInputPanelWithPrompt:(NSString *)prompt
+    defaultText:(NSString *)defaultText
+    initiatedByFrame:(WKFrameInfo *)frame
+    completionHandler:(void (^)(NSString * _Nullable result))completionHandler {
+  NSAlert* alert = [[NSAlert alloc] init];
+  [alert setMessageText:prompt];
+  [alert addButtonWithTitle:@"OK"];
+  [alert addButtonWithTitle:@"Cancel"];
+  NSTextField* input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+  [input setStringValue:defaultText ?: @""];
+  [alert setAccessoryView:input];
+  [alert.window setInitialFirstResponder:input];
+  NSModalResponse response = [alert runModal];
+  if (response == NSAlertFirstButtonReturn) {
+    completionHandler([input stringValue]);
+  } else {
+    completionHandler(nil);
   }
 }
 
@@ -323,7 +379,8 @@ int NSButtonToWef(NSInteger buttonNumber) {
   }
 }
 
-NSString* g_wef_init_script = @R"JS(
+std::string BuildInitScript(const std::string& ns, const std::string& postMessage) {
+  return R"JS(
 (function() {
   const pendingCalls = new Map();
   let nextCallId = 1;
@@ -363,17 +420,13 @@ NSString* g_wef_init_script = @R"JS(
             return arg;
           });
 
-          window.webkit.messageHandlers.wef.postMessage({
-            callId: callId,
-            method: path.join('.'),
-            args: processedArgs
-          });
+          )JS" + postMessage + R"JS(
         });
       }
     });
   }
 
-  window.Wef = createWefProxy();
+  window[")JS" + ns + R"JS("] = createWefProxy();
 
   window.__wefRespond = function(callId, result, error) {
     const pending = pendingCalls.get(callId);
@@ -420,8 +473,10 @@ NSString* g_wef_init_script = @R"JS(
       delete window.__wefCallbacks[callbackId];
     }
   };
+
 })();
 )JS";
+}
 
 } // namespace
 
@@ -633,13 +688,24 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
       WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
       [config.userContentController addScriptMessageHandler:handler name:@"wef"];
 
+      std::string initScript = BuildInitScript(
+          RuntimeLoader::GetInstance()->GetJsNamespace(),
+          "window.webkit.messageHandlers.wef.postMessage({\n"
+          "            callId: callId,\n"
+          "            method: path.join('.'),\n"
+          "            args: processedArgs\n"
+          "          });");
       WKUserScript* script = [[WKUserScript alloc]
-          initWithSource:g_wef_init_script
+          initWithSource:[NSString stringWithUTF8String:initScript.c_str()]
           injectionTime:WKUserScriptInjectionTimeAtDocumentStart
           forMainFrameOnly:YES];
       [config.userContentController addUserScript:script];
 
       WKWebView* webview = [[WKWebView alloc] initWithFrame:frame configuration:config];
+      if ([webview respondsToSelector:@selector(setInspectable:)]) {
+        [webview setInspectable:YES];
+      }
+      webview.UIDelegate = [[WefUIDelegate alloc] init];
       [window setContentView:webview];
 
       RegisterNSWindow(window, window_id);
@@ -812,13 +878,18 @@ void WKWebViewBackend::SetWindowSize(uint32_t window_id, int width, int height) 
 }
 
 void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width, int* height) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  if (state) {
-    NSRect frame = [state->window frame];
-    if (width) *width = static_cast<int>(frame.size.width);
-    if (height) *height = static_cast<int>(frame.size.height);
-  }
+  __block int w = 0, h = 0;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      NSRect frame = [state->window frame];
+      w = static_cast<int>(frame.size.width);
+      h = static_cast<int>(frame.size.height);
+    }
+  });
+  if (width) *width = w;
+  if (height) *height = h;
 }
 
 void WKWebViewBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
@@ -837,14 +908,19 @@ void WKWebViewBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
 }
 
 void WKWebViewBackend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  if (state) {
-    NSRect frame = [state->window frame];
-    NSRect screenFrame = [[state->window screen] frame];
-    if (x) *x = static_cast<int>(frame.origin.x);
-    if (y) *y = static_cast<int>(screenFrame.size.height - frame.origin.y - frame.size.height);
-  }
+  __block int px = 0, py = 0;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      NSRect frame = [state->window frame];
+      NSRect screenFrame = [[state->window screen] frame];
+      px = static_cast<int>(frame.origin.x);
+      py = static_cast<int>(screenFrame.size.height - frame.origin.y - frame.size.height);
+    }
+  });
+  if (x) *x = px;
+  if (y) *y = py;
 }
 
 void WKWebViewBackend::SetResizable(uint32_t window_id, bool resizable) {
@@ -866,9 +942,15 @@ void WKWebViewBackend::SetResizable(uint32_t window_id, bool resizable) {
 }
 
 bool WKWebViewBackend::IsResizable(uint32_t window_id) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  return state ? ([state->window styleMask] & NSWindowStyleMaskResizable) != 0 : false;
+  __block bool result = false;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      result = ([state->window styleMask] & NSWindowStyleMaskResizable) != 0;
+    }
+  });
+  return result;
 }
 
 void WKWebViewBackend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
@@ -884,15 +966,27 @@ void WKWebViewBackend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
 }
 
 bool WKWebViewBackend::IsAlwaysOnTop(uint32_t window_id) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  return state ? [state->window level] >= NSFloatingWindowLevel : false;
+  __block bool result = false;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      result = [state->window level] >= NSFloatingWindowLevel;
+    }
+  });
+  return result;
 }
 
 bool WKWebViewBackend::IsVisible(uint32_t window_id) {
-  std::lock_guard<std::mutex> lock(windows_mutex_);
-  auto* state = GetWindow(window_id);
-  return state ? [state->window isVisible] : false;
+  __block bool result = false;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      result = [state->window isVisible];
+    }
+  });
+  return result;
 }
 
 void WKWebViewBackend::Show(uint32_t window_id) {
@@ -1289,6 +1383,24 @@ void WKWebViewBackend::ShowContextMenu(uint32_t window_id,
     // Convert from top-left origin (wef coordinates) to bottom-left origin (NSView)
     NSPoint loc = NSMakePoint(x, [view frame].size.height - y);
     [menu popUpMenuPositioningItem:nil atLocation:loc inView:view];
+  });
+}
+
+void WKWebViewBackend::OpenDevTools(uint32_t window_id) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state && state->webview) {
+      // WKWebView._inspector.show is available on macOS 13.3+
+      @try {
+        id inspector = [state->webview valueForKey:@"_inspector"];
+        if (inspector) {
+          [inspector performSelector:@selector(show)];
+        }
+      } @catch (NSException*) {
+        // Fallback: not available on this macOS version
+      }
+    }
   });
 }
 
