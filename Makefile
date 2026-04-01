@@ -73,6 +73,7 @@ BUILD_DIR := $(CURDIR)/build
 .PHONY: runtimes hello-runtime ddcore-runtime
 .PHONY: winit webview cef servo
 .PHONY: cef-deps
+.PHONY: fmt fmt-check lint
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
@@ -155,6 +156,28 @@ cef: check-deps cef-deps ## Build the CEF backend
 
 servo: check-deps ## Build the Servo backend
 	cd servo && cargo build --release
+
+# ─── Formatting & Linting ────────────────────────────────────────────
+
+CPP_SOURCES := $(shell find capi cef/src webview/src -name '*.cc' -o -name '*.cpp' -o -name '*.c' -o -name '*.h' -o -name '*.mm' 2>/dev/null)
+
+fmt: ## Format all source files
+	cargo fmt
+	deno fmt
+	@if command -v clang-format >/dev/null 2>&1 && [ -n "$(CPP_SOURCES)" ]; then \
+		clang-format -i $(CPP_SOURCES); \
+	fi
+
+fmt-check: ## Check formatting without modifying files
+	cargo fmt --check
+	deno fmt --check
+	@if command -v clang-format >/dev/null 2>&1 && [ -n "$(CPP_SOURCES)" ]; then \
+		clang-format --dry-run --Werror $(CPP_SOURCES); \
+	fi
+
+lint: ## Run all linters
+	cargo clippy --workspace -- -D warnings
+	deno lint
 
 # ─── Clean ───────────────────────────────────────────────────────────
 

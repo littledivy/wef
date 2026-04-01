@@ -1,4 +1,9 @@
-const { BrowserWindow, op_get_system_info, op_get_live_stats, op_get_processes } = Deno.core.ops;
+const {
+  BrowserWindow,
+  op_get_system_info,
+  op_get_live_stats,
+  op_get_processes,
+} = Deno.core.ops;
 
 const win = new BrowserWindow(1024, 768);
 win.setTitle("WEF System Dashboard");

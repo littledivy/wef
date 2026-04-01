@@ -444,7 +444,10 @@ impl ApplicationHandler<UserEvent> for App {
     }
   }
 
-  fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+  fn about_to_wait(
+    &mut self,
+    _event_loop: &winit::event_loop::ActiveEventLoop,
+  ) {
     wef_backend_winit_common::poll_menu_events();
   }
 

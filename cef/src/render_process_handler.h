@@ -21,30 +21,20 @@ class WefPathObject : public CefV8Interceptor, public CefV8Handler {
   explicit WefPathObject(std::vector<std::string> path,
                          CefRefPtr<CefFrame> frame);
 
-  bool Get(const CefString& name,
-           const CefRefPtr<CefV8Value> object,
-           CefRefPtr<CefV8Value>& retval,
-           CefString& exception) override;
+  bool Get(const CefString& name, const CefRefPtr<CefV8Value> object,
+           CefRefPtr<CefV8Value>& retval, CefString& exception) override;
 
-  bool Set(const CefString& name,
-           const CefRefPtr<CefV8Value> object,
-           const CefRefPtr<CefV8Value> value,
-           CefString& exception) override;
+  bool Set(const CefString& name, const CefRefPtr<CefV8Value> object,
+           const CefRefPtr<CefV8Value> value, CefString& exception) override;
 
-  bool Get(int index,
-           const CefRefPtr<CefV8Value> object,
-           CefRefPtr<CefV8Value>& retval,
-           CefString& exception) override;
+  bool Get(int index, const CefRefPtr<CefV8Value> object,
+           CefRefPtr<CefV8Value>& retval, CefString& exception) override;
 
-  bool Set(int index,
-           const CefRefPtr<CefV8Value> object,
-           const CefRefPtr<CefV8Value> value,
-           CefString& exception) override;
+  bool Set(int index, const CefRefPtr<CefV8Value> object,
+           const CefRefPtr<CefV8Value> value, CefString& exception) override;
 
-  bool Execute(const CefString& name,
-               CefRefPtr<CefV8Value> object,
-               const CefV8ValueList& arguments,
-               CefRefPtr<CefV8Value>& retval,
+  bool Execute(const CefString& name, CefRefPtr<CefV8Value> object,
+               const CefV8ValueList& arguments, CefRefPtr<CefV8Value>& retval,
                CefString& exception) override;
 
  private:
@@ -61,7 +51,6 @@ class PromiseResolver : public CefBaseRefCounted {
 
   void Resolve(CefRefPtr<CefV8Value> value);
   void Reject(const std::string& error);
-
 
  private:
   CefRefPtr<CefV8Value> promise_;
@@ -92,14 +81,15 @@ class WefRenderProcessHandler : public CefRenderProcessHandler {
 
   void StorePendingCall(uint64_t call_id, CefRefPtr<PromiseResolver> resolver);
 
-  uint64_t StoreCallback(CefRefPtr<CefV8Value> func, CefRefPtr<CefV8Context> context);
+  uint64_t StoreCallback(CefRefPtr<CefV8Value> func,
+                         CefRefPtr<CefV8Context> context);
 
   uint64_t GetNextCallId();
 
   CefRefPtr<CefValue> V8ValueToCefValue(CefRefPtr<CefV8Value> v8val);
 
   CefRefPtr<CefV8Value> CefValueToV8Value(CefRefPtr<CefValue> value,
-                                           CefRefPtr<CefV8Context> context);
+                                          CefRefPtr<CefV8Context> context);
 
  private:
   std::map<int, std::string> browser_namespaces_;

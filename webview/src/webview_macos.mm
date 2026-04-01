@@ -52,33 +52,32 @@ class WKWebViewBackend : public WefBackend {
   void Focus(uint32_t window_id) override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
-  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) override;
+  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id,
+                        wef::ValuePtr args) override;
   void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) override;
-  void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
+  void RespondToJsCall(uint32_t window_id, uint64_t call_id,
+                       wef::ValuePtr result, wef::ValuePtr error) override;
 
   void Run() override;
 
-  void SetApplicationMenu(uint32_t window_id,
-                          wef_value_t* menu_template,
+  void SetApplicationMenu(uint32_t window_id, wef_value_t* menu_template,
                           const wef_backend_api_t* api,
                           wef_menu_click_fn on_click,
                           void* on_click_data) override;
 
-  void ShowContextMenu(uint32_t window_id,
-                       int x, int y,
-                       wef_value_t* menu_template,
-                       const wef_backend_api_t* api,
+  void ShowContextMenu(uint32_t window_id, int x, int y,
+                       wef_value_t* menu_template, const wef_backend_api_t* api,
                        wef_menu_click_fn on_click,
                        void* on_click_data) override;
 
   void OpenDevTools(uint32_t window_id) override;
 
-  void ShowDialog(uint32_t window_id, int dialog_type,
-                  const std::string& title, const std::string& message,
-                  const std::string& default_value,
+  void ShowDialog(uint32_t window_id, int dialog_type, const std::string& title,
+                  const std::string& message, const std::string& default_value,
                   wef_dialog_result_fn callback, void* callback_data) override;
 
-  void HandleJsMessage(uint32_t window_id, uint64_t call_id, const std::string& method, wef::ValuePtr args);
+  void HandleJsMessage(uint32_t window_id, uint64_t call_id,
+                       const std::string& method, wef::ValuePtr args);
 
  private:
   MacWindowState* GetWindow(uint32_t window_id);
@@ -102,7 +101,8 @@ static std::map<void*, uint32_t> g_nswindow_to_wef_id;
 static std::mutex g_nswindow_mutex;
 
 static uint32_t WefIdForNSWindow(NSWindow* win) {
-  if (!win) return 0;
+  if (!win)
+    return 0;
   std::lock_guard<std::mutex> lock(g_nswindow_mutex);
   auto it = g_nswindow_to_wef_id.find((__bridge void*)win);
   return it != g_nswindow_to_wef_id.end() ? it->second : 0;
@@ -119,17 +119,19 @@ static void UnregisterNSWindow(NSWindow* win) {
 }
 
 @interface WefScriptMessageHandler : NSObject <WKScriptMessageHandler>
-@property (nonatomic, assign) WKWebViewBackend* backend;
-@property (nonatomic, assign) uint32_t windowId;
+@property(nonatomic, assign) WKWebViewBackend* backend;
+@property(nonatomic, assign) uint32_t windowId;
 @end
 
 @implementation WefScriptMessageHandler
 
-- (void)userContentController:(WKUserContentController *)userContentController
-      didReceiveScriptMessage:(WKScriptMessage *)message {
-  if (![message.name isEqualToString:@"wef"]) return;
+- (void)userContentController:(WKUserContentController*)userContentController
+      didReceiveScriptMessage:(WKScriptMessage*)message {
+  if (![message.name isEqualToString:@"wef"])
+    return;
 
-  if (![message.body isKindOfClass:[NSDictionary class]]) return;
+  if (![message.body isKindOfClass:[NSDictionary class]])
+    return;
 
   NSDictionary* body = (NSDictionary*)message.body;
 
@@ -137,7 +139,8 @@ static void UnregisterNSWindow(NSWindow* win) {
   NSString* method = body[@"method"];
   id argsJson = body[@"args"];
 
-  if (!callIdNum || !method) return;
+  if (!callIdNum || !method)
+    return;
 
   uint64_t call_id = [callIdNum unsignedLongLongValue];
   std::string methodStr = [method UTF8String];
@@ -146,9 +149,12 @@ static void UnregisterNSWindow(NSWindow* win) {
   if ([argsJson isKindOfClass:[NSArray class]]) {
     NSArray* argsArray = (NSArray*)argsJson;
     NSError* error = nil;
-    NSData* jsonData = [NSJSONSerialization dataWithJSONObject:argsArray options:0 error:&error];
+    NSData* jsonData = [NSJSONSerialization dataWithJSONObject:argsArray
+                                                       options:0
+                                                         error:&error];
     if (jsonData) {
-      NSString* jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+      NSString* jsonStr = [[NSString alloc] initWithData:jsonData
+                                                encoding:NSUTF8StringEncoding];
       args = json::ParseJson([jsonStr UTF8String]);
     }
   }
@@ -165,10 +171,10 @@ static void UnregisterNSWindow(NSWindow* win) {
 
 @implementation WefUIDelegate
 
-- (void)webView:(WKWebView *)webView
-    runJavaScriptAlertPanelWithMessage:(NSString *)message
-    initiatedByFrame:(WKFrameInfo *)frame
-    completionHandler:(void (^)(void))completionHandler {
+- (void)webView:(WKWebView*)webView
+    runJavaScriptAlertPanelWithMessage:(NSString*)message
+                      initiatedByFrame:(WKFrameInfo*)frame
+                     completionHandler:(void (^)(void))completionHandler {
   NSAlert* alert = [[NSAlert alloc] init];
   [alert setMessageText:message];
   [alert addButtonWithTitle:@"OK"];
@@ -177,10 +183,11 @@ static void UnregisterNSWindow(NSWindow* win) {
   completionHandler();
 }
 
-- (void)webView:(WKWebView *)webView
-    runJavaScriptConfirmPanelWithMessage:(NSString *)message
-    initiatedByFrame:(WKFrameInfo *)frame
-    completionHandler:(void (^)(BOOL result))completionHandler {
+- (void)webView:(WKWebView*)webView
+    runJavaScriptConfirmPanelWithMessage:(NSString*)message
+                        initiatedByFrame:(WKFrameInfo*)frame
+                       completionHandler:
+                           (void (^)(BOOL result))completionHandler {
   NSAlert* alert = [[NSAlert alloc] init];
   [alert setMessageText:message];
   [alert addButtonWithTitle:@"OK"];
@@ -190,16 +197,18 @@ static void UnregisterNSWindow(NSWindow* win) {
   completionHandler(response == NSAlertFirstButtonReturn);
 }
 
-- (void)webView:(WKWebView *)webView
-    runJavaScriptTextInputPanelWithPrompt:(NSString *)prompt
-    defaultText:(NSString *)defaultText
-    initiatedByFrame:(WKFrameInfo *)frame
-    completionHandler:(void (^)(NSString * _Nullable result))completionHandler {
+- (void)webView:(WKWebView*)webView
+    runJavaScriptTextInputPanelWithPrompt:(NSString*)prompt
+                              defaultText:(NSString*)defaultText
+                         initiatedByFrame:(WKFrameInfo*)frame
+                        completionHandler:(void (^)(NSString* _Nullable result))
+                                              completionHandler {
   NSAlert* alert = [[NSAlert alloc] init];
   [alert setMessageText:prompt];
   [alert addButtonWithTitle:@"OK"];
   [alert addButtonWithTitle:@"Cancel"];
-  NSTextField* input = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+  NSTextField* input =
+      [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
   [input setStringValue:defaultText ?: @""];
   [alert setAccessoryView:input];
   [alert.window setInitialFirstResponder:input];
@@ -214,12 +223,12 @@ static void UnregisterNSWindow(NSWindow* win) {
 @end
 
 @interface WefWindowDelegate : NSObject <NSWindowDelegate>
-@property (nonatomic, assign) uint32_t windowId;
+@property(nonatomic, assign) uint32_t windowId;
 @end
 
 @implementation WefWindowDelegate
 
-- (BOOL)windowShouldClose:(NSWindow *)sender {
+- (BOOL)windowShouldClose:(NSWindow*)sender {
   RuntimeLoader::GetInstance()->DispatchCloseRequestedEvent(self.windowId);
   return NO;
 }
@@ -234,33 +243,61 @@ std::string NSEventKeyToString(NSEvent* event) {
     unichar c = [chars characterAtIndex:0];
     // Map special characters to W3C key values
     switch (c) {
-      case NSUpArrowFunctionKey: return "ArrowUp";
-      case NSDownArrowFunctionKey: return "ArrowDown";
-      case NSLeftArrowFunctionKey: return "ArrowLeft";
-      case NSRightArrowFunctionKey: return "ArrowRight";
-      case NSHomeFunctionKey: return "Home";
-      case NSEndFunctionKey: return "End";
-      case NSPageUpFunctionKey: return "PageUp";
-      case NSPageDownFunctionKey: return "PageDown";
-      case NSDeleteFunctionKey: return "Delete";
-      case NSInsertFunctionKey: return "Insert";
-      case NSF1FunctionKey: return "F1";
-      case NSF2FunctionKey: return "F2";
-      case NSF3FunctionKey: return "F3";
-      case NSF4FunctionKey: return "F4";
-      case NSF5FunctionKey: return "F5";
-      case NSF6FunctionKey: return "F6";
-      case NSF7FunctionKey: return "F7";
-      case NSF8FunctionKey: return "F8";
-      case NSF9FunctionKey: return "F9";
-      case NSF10FunctionKey: return "F10";
-      case NSF11FunctionKey: return "F11";
-      case NSF12FunctionKey: return "F12";
-      case 27: return "Escape";
-      case 13: case 3: return "Enter";
-      case 9: return "Tab";
-      case 127: return "Backspace";
-      case 32: return " ";
+      case NSUpArrowFunctionKey:
+        return "ArrowUp";
+      case NSDownArrowFunctionKey:
+        return "ArrowDown";
+      case NSLeftArrowFunctionKey:
+        return "ArrowLeft";
+      case NSRightArrowFunctionKey:
+        return "ArrowRight";
+      case NSHomeFunctionKey:
+        return "Home";
+      case NSEndFunctionKey:
+        return "End";
+      case NSPageUpFunctionKey:
+        return "PageUp";
+      case NSPageDownFunctionKey:
+        return "PageDown";
+      case NSDeleteFunctionKey:
+        return "Delete";
+      case NSInsertFunctionKey:
+        return "Insert";
+      case NSF1FunctionKey:
+        return "F1";
+      case NSF2FunctionKey:
+        return "F2";
+      case NSF3FunctionKey:
+        return "F3";
+      case NSF4FunctionKey:
+        return "F4";
+      case NSF5FunctionKey:
+        return "F5";
+      case NSF6FunctionKey:
+        return "F6";
+      case NSF7FunctionKey:
+        return "F7";
+      case NSF8FunctionKey:
+        return "F8";
+      case NSF9FunctionKey:
+        return "F9";
+      case NSF10FunctionKey:
+        return "F10";
+      case NSF11FunctionKey:
+        return "F11";
+      case NSF12FunctionKey:
+        return "F12";
+      case 27:
+        return "Escape";
+      case 13:
+      case 3:
+        return "Enter";
+      case 9:
+        return "Tab";
+      case 127:
+        return "Backspace";
+      case 32:
+        return " ";
       default:
         if (c >= 0x20 && c < 0x7F) {
           return std::string(1, static_cast<char>(c));
@@ -273,113 +310,207 @@ std::string NSEventKeyToString(NSEvent* event) {
 
 std::string NSEventKeyCodeToCode(unsigned short keyCode) {
   switch (keyCode) {
-    case 0: return "KeyA";
-    case 1: return "KeyS";
-    case 2: return "KeyD";
-    case 3: return "KeyF";
-    case 4: return "KeyH";
-    case 5: return "KeyG";
-    case 6: return "KeyZ";
-    case 7: return "KeyX";
-    case 8: return "KeyC";
-    case 9: return "KeyV";
-    case 11: return "KeyB";
-    case 12: return "KeyQ";
-    case 13: return "KeyW";
-    case 14: return "KeyE";
-    case 15: return "KeyR";
-    case 16: return "KeyY";
-    case 17: return "KeyT";
-    case 18: return "Digit1";
-    case 19: return "Digit2";
-    case 20: return "Digit3";
-    case 21: return "Digit4";
-    case 22: return "Digit6";
-    case 23: return "Digit5";
-    case 24: return "Equal";
-    case 25: return "Digit9";
-    case 26: return "Digit7";
-    case 27: return "Minus";
-    case 28: return "Digit8";
-    case 29: return "Digit0";
-    case 30: return "BracketRight";
-    case 31: return "KeyO";
-    case 32: return "KeyU";
-    case 33: return "BracketLeft";
-    case 34: return "KeyI";
-    case 35: return "KeyP";
-    case 36: return "Enter";
-    case 37: return "KeyL";
-    case 38: return "KeyJ";
-    case 39: return "Quote";
-    case 40: return "KeyK";
-    case 41: return "Semicolon";
-    case 42: return "Backslash";
-    case 43: return "Comma";
-    case 44: return "Slash";
-    case 45: return "KeyN";
-    case 46: return "KeyM";
-    case 47: return "Period";
-    case 48: return "Tab";
-    case 49: return "Space";
-    case 50: return "Backquote";
-    case 51: return "Backspace";
-    case 53: return "Escape";
-    case 55: return "MetaLeft";
-    case 56: return "ShiftLeft";
-    case 57: return "CapsLock";
-    case 58: return "AltLeft";
-    case 59: return "ControlLeft";
-    case 60: return "ShiftRight";
-    case 61: return "AltRight";
-    case 62: return "ControlRight";
-    case 96: return "F5";
-    case 97: return "F6";
-    case 98: return "F7";
-    case 99: return "F3";
-    case 100: return "F8";
-    case 101: return "F9";
-    case 109: return "F10";
-    case 103: return "F11";
-    case 111: return "F12";
-    case 118: return "F4";
-    case 120: return "F2";
-    case 122: return "F1";
-    case 123: return "ArrowLeft";
-    case 124: return "ArrowRight";
-    case 125: return "ArrowDown";
-    case 126: return "ArrowUp";
-    case 117: return "Delete";
-    case 114: return "Insert";
-    case 115: return "Home";
-    case 119: return "End";
-    case 116: return "PageUp";
-    case 121: return "PageDown";
-    default: return "Unidentified";
+    case 0:
+      return "KeyA";
+    case 1:
+      return "KeyS";
+    case 2:
+      return "KeyD";
+    case 3:
+      return "KeyF";
+    case 4:
+      return "KeyH";
+    case 5:
+      return "KeyG";
+    case 6:
+      return "KeyZ";
+    case 7:
+      return "KeyX";
+    case 8:
+      return "KeyC";
+    case 9:
+      return "KeyV";
+    case 11:
+      return "KeyB";
+    case 12:
+      return "KeyQ";
+    case 13:
+      return "KeyW";
+    case 14:
+      return "KeyE";
+    case 15:
+      return "KeyR";
+    case 16:
+      return "KeyY";
+    case 17:
+      return "KeyT";
+    case 18:
+      return "Digit1";
+    case 19:
+      return "Digit2";
+    case 20:
+      return "Digit3";
+    case 21:
+      return "Digit4";
+    case 22:
+      return "Digit6";
+    case 23:
+      return "Digit5";
+    case 24:
+      return "Equal";
+    case 25:
+      return "Digit9";
+    case 26:
+      return "Digit7";
+    case 27:
+      return "Minus";
+    case 28:
+      return "Digit8";
+    case 29:
+      return "Digit0";
+    case 30:
+      return "BracketRight";
+    case 31:
+      return "KeyO";
+    case 32:
+      return "KeyU";
+    case 33:
+      return "BracketLeft";
+    case 34:
+      return "KeyI";
+    case 35:
+      return "KeyP";
+    case 36:
+      return "Enter";
+    case 37:
+      return "KeyL";
+    case 38:
+      return "KeyJ";
+    case 39:
+      return "Quote";
+    case 40:
+      return "KeyK";
+    case 41:
+      return "Semicolon";
+    case 42:
+      return "Backslash";
+    case 43:
+      return "Comma";
+    case 44:
+      return "Slash";
+    case 45:
+      return "KeyN";
+    case 46:
+      return "KeyM";
+    case 47:
+      return "Period";
+    case 48:
+      return "Tab";
+    case 49:
+      return "Space";
+    case 50:
+      return "Backquote";
+    case 51:
+      return "Backspace";
+    case 53:
+      return "Escape";
+    case 55:
+      return "MetaLeft";
+    case 56:
+      return "ShiftLeft";
+    case 57:
+      return "CapsLock";
+    case 58:
+      return "AltLeft";
+    case 59:
+      return "ControlLeft";
+    case 60:
+      return "ShiftRight";
+    case 61:
+      return "AltRight";
+    case 62:
+      return "ControlRight";
+    case 96:
+      return "F5";
+    case 97:
+      return "F6";
+    case 98:
+      return "F7";
+    case 99:
+      return "F3";
+    case 100:
+      return "F8";
+    case 101:
+      return "F9";
+    case 109:
+      return "F10";
+    case 103:
+      return "F11";
+    case 111:
+      return "F12";
+    case 118:
+      return "F4";
+    case 120:
+      return "F2";
+    case 122:
+      return "F1";
+    case 123:
+      return "ArrowLeft";
+    case 124:
+      return "ArrowRight";
+    case 125:
+      return "ArrowDown";
+    case 126:
+      return "ArrowUp";
+    case 117:
+      return "Delete";
+    case 114:
+      return "Insert";
+    case 115:
+      return "Home";
+    case 119:
+      return "End";
+    case 116:
+      return "PageUp";
+    case 121:
+      return "PageDown";
+    default:
+      return "Unidentified";
   }
 }
 
 uint32_t NSModifierFlagsToWef(NSEventModifierFlags flags) {
   uint32_t modifiers = 0;
-  if (flags & NSEventModifierFlagShift) modifiers |= WEF_MOD_SHIFT;
-  if (flags & NSEventModifierFlagControl) modifiers |= WEF_MOD_CONTROL;
-  if (flags & NSEventModifierFlagOption) modifiers |= WEF_MOD_ALT;
-  if (flags & NSEventModifierFlagCommand) modifiers |= WEF_MOD_META;
+  if (flags & NSEventModifierFlagShift)
+    modifiers |= WEF_MOD_SHIFT;
+  if (flags & NSEventModifierFlagControl)
+    modifiers |= WEF_MOD_CONTROL;
+  if (flags & NSEventModifierFlagOption)
+    modifiers |= WEF_MOD_ALT;
+  if (flags & NSEventModifierFlagCommand)
+    modifiers |= WEF_MOD_META;
   return modifiers;
 }
 
 int NSButtonToWef(NSInteger buttonNumber) {
   switch (buttonNumber) {
-    case 0: return WEF_MOUSE_BUTTON_LEFT;
-    case 1: return WEF_MOUSE_BUTTON_RIGHT;
-    case 2: return WEF_MOUSE_BUTTON_MIDDLE;
-    case 3: return WEF_MOUSE_BUTTON_BACK;
-    case 4: return WEF_MOUSE_BUTTON_FORWARD;
-    default: return WEF_MOUSE_BUTTON_LEFT;
+    case 0:
+      return WEF_MOUSE_BUTTON_LEFT;
+    case 1:
+      return WEF_MOUSE_BUTTON_RIGHT;
+    case 2:
+      return WEF_MOUSE_BUTTON_MIDDLE;
+    case 3:
+      return WEF_MOUSE_BUTTON_BACK;
+    case 4:
+      return WEF_MOUSE_BUTTON_FORWARD;
+    default:
+      return WEF_MOUSE_BUTTON_LEFT;
   }
 }
 
-std::string BuildInitScript(const std::string& ns, const std::string& postMessage) {
+std::string BuildInitScript(const std::string& ns,
+                            const std::string& postMessage) {
   return R"JS(
 (function() {
   const pendingCalls = new Map();
@@ -420,13 +551,15 @@ std::string BuildInitScript(const std::string& ns, const std::string& postMessag
             return arg;
           });
 
-          )JS" + postMessage + R"JS(
+          )JS" +
+         postMessage + R"JS(
         });
       }
     });
   }
 
-  window[")JS" + ns + R"JS("] = createWefProxy();
+  window[")JS" +
+         ns + R"JS("] = createWefProxy();
 
   window.__wefRespond = function(callId, result, error) {
     const pending = pendingCalls.get(callId);
@@ -478,7 +611,7 @@ std::string BuildInitScript(const std::string& ns, const std::string& postMessag
 )JS";
 }
 
-} // namespace
+}  // namespace
 
 // --- WKWebViewBackend implementation ---
 
@@ -491,15 +624,20 @@ WKWebViewBackend::~WKWebViewBackend() {
   for (auto& [wid, state] : windows_) {
     @autoreleasepool {
       if (state.focus_observer)
-        [[NSNotificationCenter defaultCenter] removeObserver:state.focus_observer];
+        [[NSNotificationCenter defaultCenter]
+            removeObserver:state.focus_observer];
       if (state.blur_observer)
-        [[NSNotificationCenter defaultCenter] removeObserver:state.blur_observer];
+        [[NSNotificationCenter defaultCenter]
+            removeObserver:state.blur_observer];
       if (state.resize_observer)
-        [[NSNotificationCenter defaultCenter] removeObserver:state.resize_observer];
+        [[NSNotificationCenter defaultCenter]
+            removeObserver:state.resize_observer];
       if (state.move_observer)
-        [[NSNotificationCenter defaultCenter] removeObserver:state.move_observer];
+        [[NSNotificationCenter defaultCenter]
+            removeObserver:state.move_observer];
       if (state.webview)
-        [state.webview.configuration.userContentController removeScriptMessageHandlerForName:@"wef"];
+        [state.webview.configuration.userContentController
+            removeScriptMessageHandlerForName:@"wef"];
       UnregisterNSWindow(state.window);
     }
   }
@@ -513,131 +651,170 @@ MacWindowState* WKWebViewBackend::GetWindow(uint32_t window_id) {
 
 void WKWebViewBackend::RemoveWindowState(uint32_t window_id) {
   auto it = windows_.find(window_id);
-  if (it == windows_.end()) return;
+  if (it == windows_.end())
+    return;
 
   auto& state = it->second;
   @autoreleasepool {
     if (state.focus_observer)
-      [[NSNotificationCenter defaultCenter] removeObserver:state.focus_observer];
+      [[NSNotificationCenter defaultCenter]
+          removeObserver:state.focus_observer];
     if (state.blur_observer)
       [[NSNotificationCenter defaultCenter] removeObserver:state.blur_observer];
     if (state.resize_observer)
-      [[NSNotificationCenter defaultCenter] removeObserver:state.resize_observer];
+      [[NSNotificationCenter defaultCenter]
+          removeObserver:state.resize_observer];
     if (state.move_observer)
       [[NSNotificationCenter defaultCenter] removeObserver:state.move_observer];
     if (state.webview)
-      [state.webview.configuration.userContentController removeScriptMessageHandlerForName:@"wef"];
+      [state.webview.configuration.userContentController
+          removeScriptMessageHandlerForName:@"wef"];
     UnregisterNSWindow(state.window);
   }
   windows_.erase(it);
 }
 
 void WKWebViewBackend::InstallGlobalMonitors() {
-  if (monitors_installed_) return;
+  if (monitors_installed_)
+    return;
   monitors_installed_ = true;
 
-  keyboard_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
-      (NSEventMaskKeyDown | NSEventMaskKeyUp)
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
+  keyboard_monitor_ = [NSEvent
+      addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown |
+                                            NSEventMaskKeyUp)
+                                   handler:^NSEvent*(NSEvent* event) {
+                                     NSWindow* win = [event window];
+                                     uint32_t wid = WefIdForNSWindow(win);
+                                     if (wid == 0)
+                                       return event;
 
-        int state = ([event type] == NSEventTypeKeyDown)
-            ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
-        std::string key = NSEventKeyToString(event);
-        std::string code = NSEventKeyCodeToCode([event keyCode]);
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
-        bool repeat = [event isARepeat];
+                                     int state =
+                                         ([event type] == NSEventTypeKeyDown)
+                                             ? WEF_KEY_PRESSED
+                                             : WEF_KEY_RELEASED;
+                                     std::string key =
+                                         NSEventKeyToString(event);
+                                     std::string code =
+                                         NSEventKeyCodeToCode([event keyCode]);
+                                     uint32_t modifiers = NSModifierFlagsToWef(
+                                         [event modifierFlags]);
+                                     bool repeat = [event isARepeat];
 
-        RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
-            wid, state, key.c_str(), code.c_str(), modifiers, repeat);
+                                     RuntimeLoader::GetInstance()
+                                         ->DispatchKeyboardEvent(
+                                             wid, state, key.c_str(),
+                                             code.c_str(), modifiers, repeat);
 
-        return event;
-      }];
+                                     return event;
+                                   }];
 
-  mouse_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
-      (NSEventMaskLeftMouseDown | NSEventMaskLeftMouseUp |
-       NSEventMaskRightMouseDown | NSEventMaskRightMouseUp |
-       NSEventMaskOtherMouseDown | NSEventMaskOtherMouseUp)
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
+  mouse_monitor_ = [NSEvent
+      addLocalMonitorForEventsMatchingMask:(NSEventMaskLeftMouseDown |
+                                            NSEventMaskLeftMouseUp |
+                                            NSEventMaskRightMouseDown |
+                                            NSEventMaskRightMouseUp |
+                                            NSEventMaskOtherMouseDown |
+                                            NSEventMaskOtherMouseUp)
+                                   handler:^NSEvent*(NSEvent* event) {
+                                     NSWindow* win = [event window];
+                                     uint32_t wid = WefIdForNSWindow(win);
+                                     if (wid == 0)
+                                       return event;
 
-        int state;
-        switch ([event type]) {
-          case NSEventTypeLeftMouseDown:
-          case NSEventTypeRightMouseDown:
-          case NSEventTypeOtherMouseDown:
-            state = WEF_MOUSE_PRESSED;
-            break;
-          default:
-            state = WEF_MOUSE_RELEASED;
-            break;
-        }
+                                     int state;
+                                     switch ([event type]) {
+                                       case NSEventTypeLeftMouseDown:
+                                       case NSEventTypeRightMouseDown:
+                                       case NSEventTypeOtherMouseDown:
+                                         state = WEF_MOUSE_PRESSED;
+                                         break;
+                                       default:
+                                         state = WEF_MOUSE_RELEASED;
+                                         break;
+                                     }
 
-        int button = NSButtonToWef([event buttonNumber]);
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
-        int32_t click_count = (int32_t)[event clickCount];
+                                     int button =
+                                         NSButtonToWef([event buttonNumber]);
+                                     uint32_t modifiers = NSModifierFlagsToWef(
+                                         [event modifierFlags]);
+                                     int32_t click_count =
+                                         (int32_t)[event clickCount];
 
-        NSPoint loc = [event locationInWindow];
-        double x = loc.x;
-        double y = 0;
-        if (win) {
-          y = [win contentLayoutRect].size.height - loc.y;
-        }
+                                     NSPoint loc = [event locationInWindow];
+                                     double x = loc.x;
+                                     double y = 0;
+                                     if (win) {
+                                       y = [win contentLayoutRect].size.height -
+                                           loc.y;
+                                     }
 
-        RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-            wid, state, button, x, y, modifiers, click_count);
+                                     RuntimeLoader::GetInstance()
+                                         ->DispatchMouseClickEvent(
+                                             wid, state, button, x, y,
+                                             modifiers, click_count);
 
-        return event;
-      }];
+                                     return event;
+                                   }];
 
-  mouse_move_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:
-      (NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged |
-       NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged)
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
+  mouse_move_monitor_ = [NSEvent
+      addLocalMonitorForEventsMatchingMask:(NSEventMaskMouseMoved |
+                                            NSEventMaskLeftMouseDragged |
+                                            NSEventMaskRightMouseDragged |
+                                            NSEventMaskOtherMouseDragged)
+                                   handler:^NSEvent*(NSEvent* event) {
+                                     NSWindow* win = [event window];
+                                     uint32_t wid = WefIdForNSWindow(win);
+                                     if (wid == 0)
+                                       return event;
 
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
-        NSPoint loc = [event locationInWindow];
-        double x = loc.x;
-        double y = 0;
-        if (win) {
-          y = [win contentLayoutRect].size.height - loc.y;
-        }
+                                     uint32_t modifiers = NSModifierFlagsToWef(
+                                         [event modifierFlags]);
+                                     NSPoint loc = [event locationInWindow];
+                                     double x = loc.x;
+                                     double y = 0;
+                                     if (win) {
+                                       y = [win contentLayoutRect].size.height -
+                                           loc.y;
+                                     }
 
-        RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(wid, x, y, modifiers);
-        return event;
-      }];
+                                     RuntimeLoader::GetInstance()
+                                         ->DispatchMouseMoveEvent(wid, x, y,
+                                                                  modifiers);
+                                     return event;
+                                   }];
 
-  scroll_monitor_ = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
-      handler:^NSEvent*(NSEvent* event) {
-        NSWindow* win = [event window];
-        uint32_t wid = WefIdForNSWindow(win);
-        if (wid == 0) return event;
+  scroll_monitor_ = [NSEvent
+      addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
+                                   handler:^NSEvent*(NSEvent* event) {
+                                     NSWindow* win = [event window];
+                                     uint32_t wid = WefIdForNSWindow(win);
+                                     if (wid == 0)
+                                       return event;
 
-        double delta_x = [event scrollingDeltaX];
-        double delta_y = [event scrollingDeltaY];
-        uint32_t modifiers = NSModifierFlagsToWef([event modifierFlags]);
+                                     double delta_x = [event scrollingDeltaX];
+                                     double delta_y = [event scrollingDeltaY];
+                                     uint32_t modifiers = NSModifierFlagsToWef(
+                                         [event modifierFlags]);
 
-        int32_t delta_mode = [event hasPreciseScrollingDeltas]
-            ? WEF_WHEEL_DELTA_PIXEL : WEF_WHEEL_DELTA_LINE;
+                                     int32_t delta_mode =
+                                         [event hasPreciseScrollingDeltas]
+                                             ? WEF_WHEEL_DELTA_PIXEL
+                                             : WEF_WHEEL_DELTA_LINE;
 
-        NSPoint loc = [event locationInWindow];
-        double x = loc.x;
-        double y = 0;
-        if (win) {
-          y = [win contentLayoutRect].size.height - loc.y;
-        }
+                                     NSPoint loc = [event locationInWindow];
+                                     double x = loc.x;
+                                     double y = 0;
+                                     if (win) {
+                                       y = [win contentLayoutRect].size.height -
+                                           loc.y;
+                                     }
 
-        RuntimeLoader::GetInstance()->DispatchWheelEvent(
-            wid, delta_x, delta_y, x, y, modifiers, delta_mode);
-        return event;
-      }];
+                                     RuntimeLoader::GetInstance()
+                                         ->DispatchWheelEvent(
+                                             wid, delta_x, delta_y, x, y,
+                                             modifiers, delta_mode);
+                                     return event;
+                                   }];
 }
 
 void WKWebViewBackend::RemoveGlobalMonitors() {
@@ -667,14 +844,14 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
       InstallGlobalMonitors();
 
       NSRect frame = NSMakeRect(0, 0, width, height);
-      NSWindowStyleMask style = NSWindowStyleMaskTitled |
-                                NSWindowStyleMaskClosable |
-                                NSWindowStyleMaskMiniaturizable |
-                                NSWindowStyleMaskResizable;
-      NSWindow* window = [[NSWindow alloc] initWithContentRect:frame
-                                                     styleMask:style
-                                                       backing:NSBackingStoreBuffered
-                                                         defer:NO];
+      NSWindowStyleMask style =
+          NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+          NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+      NSWindow* window =
+          [[NSWindow alloc] initWithContentRect:frame
+                                      styleMask:style
+                                        backing:NSBackingStoreBuffered
+                                          defer:NO];
       [window center];
 
       WefWindowDelegate* delegate = [[WefWindowDelegate alloc] init];
@@ -686,22 +863,24 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
       handler.windowId = window_id;
 
       WKWebViewConfiguration* config = [[WKWebViewConfiguration alloc] init];
-      [config.userContentController addScriptMessageHandler:handler name:@"wef"];
+      [config.userContentController addScriptMessageHandler:handler
+                                                       name:@"wef"];
 
-      std::string initScript = BuildInitScript(
-          RuntimeLoader::GetInstance()->GetJsNamespace(),
-          "window.webkit.messageHandlers.wef.postMessage({\n"
-          "            callId: callId,\n"
-          "            method: path.join('.'),\n"
-          "            args: processedArgs\n"
-          "          });");
+      std::string initScript =
+          BuildInitScript(RuntimeLoader::GetInstance()->GetJsNamespace(),
+                          "window.webkit.messageHandlers.wef.postMessage({\n"
+                          "            callId: callId,\n"
+                          "            method: path.join('.'),\n"
+                          "            args: processedArgs\n"
+                          "          });");
       WKUserScript* script = [[WKUserScript alloc]
-          initWithSource:[NSString stringWithUTF8String:initScript.c_str()]
-          injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+            initWithSource:[NSString stringWithUTF8String:initScript.c_str()]
+             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
           forMainFrameOnly:YES];
       [config.userContentController addUserScript:script];
 
-      WKWebView* webview = [[WKWebView alloc] initWithFrame:frame configuration:config];
+      WKWebView* webview = [[WKWebView alloc] initWithFrame:frame
+                                              configuration:config];
       if ([webview respondsToSelector:@selector(setInspectable:)]) {
         [webview setInspectable:YES];
       }
@@ -713,47 +892,53 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
       // Per-window notification observers
       id focus_obs = [[NSNotificationCenter defaultCenter]
           addObserverForName:NSWindowDidBecomeKeyNotification
-          object:window queue:nil
-          usingBlock:^(NSNotification*) {
-            RuntimeLoader::GetInstance()->DispatchFocusedEvent(window_id, 1);
-            // Swap to this window's menu
-            std::lock_guard<std::mutex> lock(windows_mutex_);
-            auto* state = GetWindow(window_id);
-            if (state && state->menu) {
-              [NSApp setMainMenu:state->menu];
-            }
-          }];
+                      object:window
+                       queue:nil
+                  usingBlock:^(NSNotification*) {
+                    RuntimeLoader::GetInstance()->DispatchFocusedEvent(
+                        window_id, 1);
+                    // Swap to this window's menu
+                    std::lock_guard<std::mutex> lock(windows_mutex_);
+                    auto* state = GetWindow(window_id);
+                    if (state && state->menu) {
+                      [NSApp setMainMenu:state->menu];
+                    }
+                  }];
 
       id blur_obs = [[NSNotificationCenter defaultCenter]
           addObserverForName:NSWindowDidResignKeyNotification
-          object:window queue:nil
-          usingBlock:^(NSNotification*) {
-            RuntimeLoader::GetInstance()->DispatchFocusedEvent(window_id, 0);
-          }];
+                      object:window
+                       queue:nil
+                  usingBlock:^(NSNotification*) {
+                    RuntimeLoader::GetInstance()->DispatchFocusedEvent(
+                        window_id, 0);
+                  }];
 
       id resize_obs = [[NSNotificationCenter defaultCenter]
           addObserverForName:NSWindowDidResizeNotification
-          object:window queue:nil
-          usingBlock:^(NSNotification* note) {
-            NSWindow* w = [note object];
-            if (w) {
-              NSRect f = [[w contentView] frame];
-              RuntimeLoader::GetInstance()->DispatchResizeEvent(
-                  window_id, (int)f.size.width, (int)f.size.height);
-            }
-          }];
+                      object:window
+                       queue:nil
+                  usingBlock:^(NSNotification* note) {
+                    NSWindow* w = [note object];
+                    if (w) {
+                      NSRect f = [[w contentView] frame];
+                      RuntimeLoader::GetInstance()->DispatchResizeEvent(
+                          window_id, (int)f.size.width, (int)f.size.height);
+                    }
+                  }];
 
       id move_obs = [[NSNotificationCenter defaultCenter]
           addObserverForName:NSWindowDidMoveNotification
-          object:window queue:nil
-          usingBlock:^(NSNotification* note) {
-            NSWindow* w = [note object];
-            if (w) {
-              NSRect f = [w frame];
-              RuntimeLoader::GetInstance()->DispatchMoveEvent(
-                  window_id, (int)f.origin.x, (int)f.origin.y);
-            }
-          }];
+                      object:window
+                       queue:nil
+                  usingBlock:^(NSNotification* note) {
+                    NSWindow* w = [note object];
+                    if (w) {
+                      NSRect f = [w frame];
+                      RuntimeLoader::GetInstance()->DispatchMoveEvent(
+                          window_id, (int)f.origin.x, (int)f.origin.y);
+                    }
+                  }];
 
       MacWindowState state;
       state.window_id = window_id;
@@ -796,7 +981,8 @@ void WKWebViewBackend::Navigate(uint32_t window_id, const std::string& url) {
     @autoreleasepool {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
-      if (!state) return;
+      if (!state)
+        return;
 
       if (urlCopy.find("data:text/html,") == 0) {
         NSString* html = [NSString stringWithUTF8String:urlCopy.c_str() + 15];
@@ -805,7 +991,8 @@ void WKWebViewBackend::Navigate(uint32_t window_id, const std::string& url) {
         return;
       }
 
-      NSURL* nsurl = [NSURL URLWithString:[NSString stringWithUTF8String:urlCopy.c_str()]];
+      NSURL* nsurl =
+          [NSURL URLWithString:[NSString stringWithUTF8String:urlCopy.c_str()]];
       if (nsurl && nsurl.scheme && nsurl.scheme.length > 0) {
         NSURLRequest* request = [NSURLRequest requestWithURL:nsurl];
         [state->webview loadRequest:request];
@@ -827,21 +1014,25 @@ void WKWebViewBackend::SetTitle(uint32_t window_id, const std::string& title) {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
       if (state) {
-        [state->window setTitle:[NSString stringWithUTF8String:titleCopy.c_str()]];
+        [state->window
+            setTitle:[NSString stringWithUTF8String:titleCopy.c_str()]];
       }
     }
   });
 }
 
-void WKWebViewBackend::ExecuteJs(uint32_t window_id, const std::string& script) {
+void WKWebViewBackend::ExecuteJs(uint32_t window_id,
+                                 const std::string& script) {
   std::string scriptCopy = script;
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
       if (state) {
-        [state->webview evaluateJavaScript:[NSString stringWithUTF8String:scriptCopy.c_str()]
-                         completionHandler:nil];
+        [state->webview
+            evaluateJavaScript:[NSString
+                                   stringWithUTF8String:scriptCopy.c_str()]
+             completionHandler:nil];
       }
     }
   });
@@ -863,7 +1054,8 @@ void WKWebViewBackend::Quit() {
   });
 }
 
-void WKWebViewBackend::SetWindowSize(uint32_t window_id, int width, int height) {
+void WKWebViewBackend::SetWindowSize(uint32_t window_id, int width,
+                                     int height) {
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
       std::lock_guard<std::mutex> lock(windows_mutex_);
@@ -877,7 +1069,8 @@ void WKWebViewBackend::SetWindowSize(uint32_t window_id, int width, int height) 
   });
 }
 
-void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width, int* height) {
+void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width,
+                                     int* height) {
   __block int w = 0, h = 0;
   dispatch_sync(dispatch_get_main_queue(), ^{
     std::lock_guard<std::mutex> lock(windows_mutex_);
@@ -888,8 +1081,10 @@ void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width, int* height
       h = static_cast<int>(frame.size.height);
     }
   });
-  if (width) *width = w;
-  if (height) *height = h;
+  if (width)
+    *width = w;
+  if (height)
+    *height = h;
 }
 
 void WKWebViewBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
@@ -916,11 +1111,14 @@ void WKWebViewBackend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
       NSRect frame = [state->window frame];
       NSRect screenFrame = [[state->window screen] frame];
       px = static_cast<int>(frame.origin.x);
-      py = static_cast<int>(screenFrame.size.height - frame.origin.y - frame.size.height);
+      py = static_cast<int>(screenFrame.size.height - frame.origin.y -
+                            frame.size.height);
     }
   });
-  if (x) *x = px;
-  if (y) *y = py;
+  if (x)
+    *x = px;
+  if (y)
+    *y = py;
 }
 
 void WKWebViewBackend::SetResizable(uint32_t window_id, bool resizable) {
@@ -959,7 +1157,8 @@ void WKWebViewBackend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
       if (state) {
-        [state->window setLevel:always_on_top ? NSFloatingWindowLevel : NSNormalWindowLevel];
+        [state->window setLevel:always_on_top ? NSFloatingWindowLevel
+                                              : NSNormalWindowLevel];
       }
     }
   });
@@ -1032,7 +1231,9 @@ void WKWebViewBackend::PostUiTask(void (*task)(void*), void* data) {
   });
 }
 
-void WKWebViewBackend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) {
+void WKWebViewBackend::InvokeJsCallback(uint32_t window_id,
+                                        uint64_t callback_id,
+                                        wef::ValuePtr args) {
   std::string argsJson = json::Serialize(args);
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
@@ -1040,17 +1241,17 @@ void WKWebViewBackend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id
       // window_id == 0 means broadcast to all windows
       if (window_id == 0) {
         for (auto& [wid, state] : windows_) {
-          NSString* script = [NSString stringWithFormat:
-              @"window.__wefInvokeCallback(%llu, %s);",
-              callback_id, argsJson.c_str()];
+          NSString* script = [NSString
+              stringWithFormat:@"window.__wefInvokeCallback(%llu, %s);",
+                               callback_id, argsJson.c_str()];
           [state.webview evaluateJavaScript:script completionHandler:nil];
         }
       } else {
         auto* state = GetWindow(window_id);
         if (state) {
-          NSString* script = [NSString stringWithFormat:
-              @"window.__wefInvokeCallback(%llu, %s);",
-              callback_id, argsJson.c_str()];
+          NSString* script = [NSString
+              stringWithFormat:@"window.__wefInvokeCallback(%llu, %s);",
+                               callback_id, argsJson.c_str()];
           [state->webview evaluateJavaScript:script completionHandler:nil];
         }
       }
@@ -1058,21 +1259,24 @@ void WKWebViewBackend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id
   });
 }
 
-void WKWebViewBackend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) {
+void WKWebViewBackend::ReleaseJsCallback(uint32_t window_id,
+                                         uint64_t callback_id) {
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       if (window_id == 0) {
         for (auto& [wid, state] : windows_) {
-          NSString* script = [NSString stringWithFormat:
-              @"window.__wefReleaseCallback(%llu);", callback_id];
+          NSString* script =
+              [NSString stringWithFormat:@"window.__wefReleaseCallback(%llu);",
+                                         callback_id];
           [state.webview evaluateJavaScript:script completionHandler:nil];
         }
       } else {
         auto* state = GetWindow(window_id);
         if (state) {
-          NSString* script = [NSString stringWithFormat:
-              @"window.__wefReleaseCallback(%llu);", callback_id];
+          NSString* script =
+              [NSString stringWithFormat:@"window.__wefReleaseCallback(%llu);",
+                                         callback_id];
           [state->webview evaluateJavaScript:script completionHandler:nil];
         }
       }
@@ -1081,24 +1285,26 @@ void WKWebViewBackend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_i
 }
 
 void WKWebViewBackend::RespondToJsCall(uint32_t window_id, uint64_t call_id,
-                                        wef::ValuePtr result, wef::ValuePtr error) {
+                                       wef::ValuePtr result,
+                                       wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
   std::string errorJson = error ? json::Serialize(error) : "null";
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
-      if (!state) return;
+      if (!state)
+        return;
 
       NSString* script;
       if (error) {
-        script = [NSString stringWithFormat:
-            @"window.__wefRespond(%llu, null, %s);",
-            call_id, errorJson.c_str()];
+        script =
+            [NSString stringWithFormat:@"window.__wefRespond(%llu, null, %s);",
+                                       call_id, errorJson.c_str()];
       } else {
-        script = [NSString stringWithFormat:
-            @"window.__wefRespond(%llu, %s, null);",
-            call_id, resultJson.c_str()];
+        script =
+            [NSString stringWithFormat:@"window.__wefRespond(%llu, %s, null);",
+                                       call_id, resultJson.c_str()];
       }
       [state->webview evaluateJavaScript:script completionHandler:nil];
     }
@@ -1112,7 +1318,8 @@ void WKWebViewBackend::Run() {
 }
 
 void WKWebViewBackend::HandleJsMessage(uint32_t window_id, uint64_t call_id,
-                                        const std::string& method, wef::ValuePtr args) {
+                                       const std::string& method,
+                                       wef::ValuePtr args) {
   RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
 }
 
@@ -1141,7 +1348,8 @@ static void* g_webview_menu_click_data = nullptr;
   NSString* itemId = [item representedObject];
   if (itemId && g_webview_menu_click_fn) {
     uint32_t wid = WefIdForNSWindow([NSApp keyWindow]);
-    g_webview_menu_click_fn(g_webview_menu_click_data, wid, [itemId UTF8String]);
+    g_webview_menu_click_fn(g_webview_menu_click_data, wid,
+                            [itemId UTF8String]);
   }
 }
 @end
@@ -1152,7 +1360,8 @@ static void ParseAccelerator(const std::string& accel, NSString** outKey,
   *outMask = 0;
 
   std::string lower = accel;
-  for (auto& c : lower) c = tolower(c);
+  for (auto& c : lower)
+    c = tolower(c);
 
   size_t pos = 0;
   std::vector<std::string> parts;
@@ -1161,7 +1370,8 @@ static void ParseAccelerator(const std::string& accel, NSString** outKey,
     parts.push_back(remaining.substr(0, pos));
     remaining = remaining.substr(pos + 1);
   }
-  if (!remaining.empty()) parts.push_back(remaining);
+  if (!remaining.empty())
+    parts.push_back(remaining);
 
   for (const auto& part : parts) {
     if (part == "cmd" || part == "command" || part == "cmdorctrl" ||
@@ -1186,52 +1396,83 @@ static NSMenuItem* CreateRoleMenuItem(const std::string& role) {
   NSEventModifierFlags mask = NSEventModifierFlagCommand;
 
   if (role == "quit") {
-    title = @"Quit"; action = @selector(terminate:); keyEquiv = @"q";
+    title = @"Quit";
+    action = @selector(terminate:);
+    keyEquiv = @"q";
   } else if (role == "copy") {
-    title = @"Copy"; action = @selector(copy:); keyEquiv = @"c";
+    title = @"Copy";
+    action = @selector(copy:);
+    keyEquiv = @"c";
   } else if (role == "paste") {
-    title = @"Paste"; action = @selector(paste:); keyEquiv = @"v";
+    title = @"Paste";
+    action = @selector(paste:);
+    keyEquiv = @"v";
   } else if (role == "cut") {
-    title = @"Cut"; action = @selector(cut:); keyEquiv = @"x";
+    title = @"Cut";
+    action = @selector(cut:);
+    keyEquiv = @"x";
   } else if (role == "selectall" || role == "selectAll") {
-    title = @"Select All"; action = @selector(selectAll:); keyEquiv = @"a";
+    title = @"Select All";
+    action = @selector(selectAll:);
+    keyEquiv = @"a";
   } else if (role == "undo") {
-    title = @"Undo"; action = @selector(undo:); keyEquiv = @"z";
+    title = @"Undo";
+    action = @selector(undo:);
+    keyEquiv = @"z";
   } else if (role == "redo") {
-    title = @"Redo"; action = @selector(redo:); keyEquiv = @"Z";
+    title = @"Redo";
+    action = @selector(redo:);
+    keyEquiv = @"Z";
     mask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   } else if (role == "minimize") {
-    title = @"Minimize"; action = @selector(performMiniaturize:); keyEquiv = @"m";
+    title = @"Minimize";
+    action = @selector(performMiniaturize:);
+    keyEquiv = @"m";
   } else if (role == "zoom") {
-    title = @"Zoom"; action = @selector(performZoom:);
+    title = @"Zoom";
+    action = @selector(performZoom:);
   } else if (role == "close") {
-    title = @"Close"; action = @selector(performClose:); keyEquiv = @"w";
+    title = @"Close";
+    action = @selector(performClose:);
+    keyEquiv = @"w";
   } else if (role == "about") {
-    title = @"About"; action = @selector(orderFrontStandardAboutPanel:);
+    title = @"About";
+    action = @selector(orderFrontStandardAboutPanel:);
   } else if (role == "hide") {
-    title = @"Hide"; action = @selector(hide:); keyEquiv = @"h";
+    title = @"Hide";
+    action = @selector(hide:);
+    keyEquiv = @"h";
   } else if (role == "hideothers" || role == "hideOthers") {
-    title = @"Hide Others"; action = @selector(hideOtherApplications:);
-    keyEquiv = @"h"; mask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+    title = @"Hide Others";
+    action = @selector(hideOtherApplications:);
+    keyEquiv = @"h";
+    mask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
   } else if (role == "unhide") {
-    title = @"Show All"; action = @selector(unhideAllApplications:);
+    title = @"Show All";
+    action = @selector(unhideAllApplications:);
   } else if (role == "front") {
-    title = @"Bring All to Front"; action = @selector(arrangeInFront:);
+    title = @"Bring All to Front";
+    action = @selector(arrangeInFront:);
   } else if (role == "togglefullscreen" || role == "toggleFullScreen") {
-    title = @"Toggle Full Screen"; action = @selector(toggleFullScreen:);
-    keyEquiv = @"f"; mask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
+    title = @"Toggle Full Screen";
+    action = @selector(toggleFullScreen:);
+    keyEquiv = @"f";
+    mask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
   } else {
     return nil;
   }
 
-  NSMenuItem* item = [[NSMenuItem alloc]
-      initWithTitle:title action:action keyEquivalent:keyEquiv];
+  NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:title
+                                                action:action
+                                         keyEquivalent:keyEquiv];
   [item setKeyEquivalentModifierMask:mask];
   return item;
 }
 
-static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api) {
-  if (!val || !api->value_is_list(val)) return nil;
+static NSMenu* BuildMenuFromValue(wef_value_t* val,
+                                  const wef_backend_api_t* api) {
+  if (!val || !api->value_is_list(val))
+    return nil;
 
   NSMenu* menu = [[NSMenu alloc] init];
   [menu setAutoenablesItems:NO];
@@ -1239,7 +1480,8 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
   size_t count = api->value_list_size(val);
   for (size_t i = 0; i < count; ++i) {
     wef_value_t* itemVal = api->value_list_get(val, i);
-    if (!itemVal || !api->value_is_dict(itemVal)) continue;
+    if (!itemVal || !api->value_is_dict(itemVal))
+      continue;
 
     // Separator
     wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
@@ -1251,7 +1493,8 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
         api->value_free_string(typeStr);
         continue;
       }
-      if (typeStr) api->value_free_string(typeStr);
+      if (typeStr)
+        api->value_free_string(typeStr);
     }
 
     // Role
@@ -1261,7 +1504,8 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
       char* roleStr = api->value_get_string(roleVal, &len);
       if (roleStr) {
         NSMenuItem* roleItem = CreateRoleMenuItem(roleStr);
-        if (roleItem) [menu addItem:roleItem];
+        if (roleItem)
+          [menu addItem:roleItem];
         api->value_free_string(roleStr);
         continue;
       }
@@ -1269,10 +1513,12 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
 
     // Label
     wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
-    if (!labelVal || !api->value_is_string(labelVal)) continue;
+    if (!labelVal || !api->value_is_string(labelVal))
+      continue;
     size_t labelLen = 0;
     char* labelStr = api->value_get_string(labelVal, &labelLen);
-    if (!labelStr) continue;
+    if (!labelStr)
+      continue;
     NSString* label = [NSString stringWithUTF8String:labelStr];
     api->value_free_string(labelStr);
 
@@ -1301,8 +1547,10 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
       }
     }
 
-    NSMenuItem* nsItem = [[NSMenuItem alloc]
-        initWithTitle:label action:@selector(menuItemClicked:) keyEquivalent:keyEquiv];
+    NSMenuItem* nsItem =
+        [[NSMenuItem alloc] initWithTitle:label
+                                   action:@selector(menuItemClicked:)
+                            keyEquivalent:keyEquiv];
     [nsItem setKeyEquivalentModifierMask:modMask];
     [nsItem setTarget:[WefMenuTarget shared]];
 
@@ -1330,10 +1578,10 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api
 }
 
 void WKWebViewBackend::SetApplicationMenu(uint32_t window_id,
-                                           wef_value_t* menu_template,
-                                           const wef_backend_api_t* api,
-                                           wef_menu_click_fn on_click,
-                                           void* on_click_data) {
+                                          wef_value_t* menu_template,
+                                          const wef_backend_api_t* api,
+                                          wef_menu_click_fn on_click,
+                                          void* on_click_data) {
   g_webview_menu_click_fn = on_click;
   g_webview_menu_click_data = on_click_data;
 
@@ -1358,8 +1606,7 @@ void WKWebViewBackend::SetApplicationMenu(uint32_t window_id,
   });
 }
 
-void WKWebViewBackend::ShowContextMenu(uint32_t window_id,
-                                       int x, int y,
+void WKWebViewBackend::ShowContextMenu(uint32_t window_id, int x, int y,
                                        wef_value_t* menu_template,
                                        const wef_backend_api_t* api,
                                        wef_menu_click_fn on_click,
@@ -1369,18 +1616,22 @@ void WKWebViewBackend::ShowContextMenu(uint32_t window_id,
 
   dispatch_async(dispatch_get_main_queue(), ^{
     NSMenu* menu = BuildMenuFromValue(menu_template, api);
-    if (!menu) return;
+    if (!menu)
+      return;
 
     NSWindow* win = nil;
     {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
-      if (state) win = state->window;
+      if (state)
+        win = state->window;
     }
-    if (!win) return;
+    if (!win)
+      return;
 
     NSView* view = [win contentView];
-    // Convert from top-left origin (wef coordinates) to bottom-left origin (NSView)
+    // Convert from top-left origin (wef coordinates) to bottom-left origin
+    // (NSView)
     NSPoint loc = NSMakePoint(x, [view frame].size.height - y);
     [menu popUpMenuPositioningItem:nil atLocation:loc inView:view];
   });
@@ -1405,9 +1656,11 @@ void WKWebViewBackend::OpenDevTools(uint32_t window_id) {
 }
 
 void WKWebViewBackend::ShowDialog(uint32_t window_id, int dialog_type,
-                                   const std::string& title, const std::string& message,
-                                   const std::string& default_value,
-                                   wef_dialog_result_fn callback, void* callback_data) {
+                                  const std::string& title,
+                                  const std::string& message,
+                                  const std::string& default_value,
+                                  wef_dialog_result_fn callback,
+                                  void* callback_data) {
   NSString* nsTitle = [NSString stringWithUTF8String:title.c_str()];
   NSString* nsMessage = [NSString stringWithUTF8String:message.c_str()];
   NSString* nsDefault = [NSString stringWithUTF8String:default_value.c_str()];
@@ -1427,7 +1680,8 @@ void WKWebViewBackend::ShowDialog(uint32_t window_id, int dialog_type,
     } else if (dialog_type == WEF_DIALOG_PROMPT) {
       [alert addButtonWithTitle:@"OK"];
       [alert addButtonWithTitle:@"Cancel"];
-      inputField = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+      inputField =
+          [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
       [inputField setStringValue:nsDefault];
       [alert setAccessoryView:inputField];
       [alert layout];

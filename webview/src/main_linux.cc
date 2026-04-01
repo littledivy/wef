@@ -30,12 +30,9 @@ int main(int argc, char* argv[]) {
 
   if (runtimePath.empty()) {
     const char* searchPaths[] = {
-      "./libruntime.so",
-      "./target/debug/libhello.so",
-      "./target/release/libhello.so",
-      "/usr/lib/wef/libruntime.so",
-      "/usr/local/lib/wef/libruntime.so"
-    };
+        "./libruntime.so", "./target/debug/libhello.so",
+        "./target/release/libhello.so", "/usr/lib/wef/libruntime.so",
+        "/usr/local/lib/wef/libruntime.so"};
     for (const char* path : searchPaths) {
       if (access(path, F_OK) == 0) {
         runtimePath = path;
@@ -45,7 +42,9 @@ int main(int argc, char* argv[]) {
   }
 
   if (runtimePath.empty()) {
-    std::cerr << "No runtime library found. Set WEF_RUNTIME_PATH or use --runtime <path>" << std::endl;
+    std::cerr << "No runtime library found. Set WEF_RUNTIME_PATH or use "
+                 "--runtime <path>"
+              << std::endl;
     return 1;
   }
 

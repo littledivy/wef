@@ -24,9 +24,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     for (int i = 1; i < argc; ++i) {
       if (wcscmp(argv[i], L"--runtime") == 0 && i + 1 < argc) {
         ++i;
-        int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);
+        int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0,
+                                       nullptr, nullptr);
         runtimePath.resize(size - 1);
-        WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, &runtimePath[0], size, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, &runtimePath[0], size,
+                            nullptr, nullptr);
       }
     }
     LocalFree(argv);
@@ -40,11 +42,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   }
 
   if (runtimePath.empty()) {
-    const char* searchPaths[] = {
-      ".\\runtime.dll",
-      ".\\target\\debug\\hello.dll",
-      ".\\target\\release\\hello.dll"
-    };
+    const char* searchPaths[] = {".\\runtime.dll",
+                                 ".\\target\\debug\\hello.dll",
+                                 ".\\target\\release\\hello.dll"};
     for (const char* path : searchPaths) {
       if (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) {
         runtimePath = path;
@@ -55,9 +55,9 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   if (runtimePath.empty()) {
     MessageBoxA(nullptr,
-        "No runtime library found.\nSet WEF_RUNTIME_PATH or use --runtime <path>",
-        "WEF Webview Error",
-        MB_OK | MB_ICONERROR);
+                "No runtime library found.\nSet WEF_RUNTIME_PATH or use "
+                "--runtime <path>",
+                "WEF Webview Error", MB_OK | MB_ICONERROR);
     CoUninitialize();
     return 1;
   }
@@ -69,19 +69,16 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   if (!loader->Load(runtimePath)) {
     MessageBoxA(nullptr,
-        ("Failed to load runtime from: " + runtimePath).c_str(),
-        "WEF Webview Error",
-        MB_OK | MB_ICONERROR);
+                ("Failed to load runtime from: " + runtimePath).c_str(),
+                "WEF Webview Error", MB_OK | MB_ICONERROR);
     delete backend;
     CoUninitialize();
     return 1;
   }
 
   if (!loader->Start()) {
-    MessageBoxA(nullptr,
-        "Failed to start runtime",
-        "WEF Webview Error",
-        MB_OK | MB_ICONERROR);
+    MessageBoxA(nullptr, "Failed to start runtime", "WEF Webview Error",
+                MB_OK | MB_ICONERROR);
     delete backend;
     CoUninitialize();
     return 1;

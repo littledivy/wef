@@ -293,7 +293,8 @@ pub struct WefBackendApi {
     ),
   >,
   pub open_devtools: Option<unsafe extern "C" fn(*mut c_void, u32)>,
-  pub set_js_namespace: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+  pub set_js_namespace:
+    Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
   pub show_dialog: Option<
     unsafe extern "C" fn(
       *mut c_void,               // backend_data
@@ -455,9 +456,7 @@ pub unsafe extern "C" fn value_get_string(
       if !len.is_null() {
         *len = s.len();
       }
-      CString::new(s.as_str())
-        .unwrap_or_default()
-        .into_raw()
+      CString::new(s.as_str()).unwrap_or_default().into_raw()
     }
     _ => {
       if !len.is_null() {
@@ -570,10 +569,7 @@ pub unsafe extern "C" fn value_dict_keys(
     }
   }
 }
-pub unsafe extern "C" fn value_free_keys(
-  keys: *mut *mut c_char,
-  count: usize,
-) {
+pub unsafe extern "C" fn value_free_keys(keys: *mut *mut c_char, count: usize) {
   if keys.is_null() {
     return;
   }
@@ -958,8 +954,7 @@ pub struct PendingDialog {
 
 // --- Menu types ---
 
-pub type WefMenuClickFn =
-  unsafe extern "C" fn(*mut c_void, u32, *const c_char);
+pub type WefMenuClickFn = unsafe extern "C" fn(*mut c_void, u32, *const c_char);
 
 pub enum ParsedMenuItem {
   Item {
@@ -1110,7 +1105,9 @@ fn register_menu_callbacks(
           },
         );
       }
-      ParsedMenuItem::Submenu { items: children, .. } => {
+      ParsedMenuItem::Submenu {
+        items: children, ..
+      } => {
         register_menu_callbacks(children, callback, callback_data, window_id);
       }
       _ => {}
@@ -1127,10 +1124,7 @@ fn build_muda_menu(items: &[ParsedMenuItem]) -> muda::Menu {
   menu
 }
 
-fn append_muda_item_to_menu(
-  menu: &muda::Menu,
-  item: &ParsedMenuItem,
-) {
+fn append_muda_item_to_menu(menu: &muda::Menu, item: &ParsedMenuItem) {
   match item {
     ParsedMenuItem::Submenu { label, items } => {
       let submenu = muda::Submenu::new(label, true);
@@ -1147,8 +1141,7 @@ fn append_muda_item_to_menu(
     } => {
       let accel: Option<muda::accelerator::Accelerator> =
         accelerator.as_deref().and_then(|s| s.parse().ok());
-      let item =
-        muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
+      let item = muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
       let _ = menu.append(&item);
     }
     ParsedMenuItem::Separator => {
@@ -1162,10 +1155,7 @@ fn append_muda_item_to_menu(
   }
 }
 
-fn append_muda_item_to_submenu(
-  submenu: &muda::Submenu,
-  item: &ParsedMenuItem,
-) {
+fn append_muda_item_to_submenu(submenu: &muda::Submenu, item: &ParsedMenuItem) {
   match item {
     ParsedMenuItem::Submenu {
       label,
@@ -1185,8 +1175,7 @@ fn append_muda_item_to_submenu(
     } => {
       let accel: Option<muda::accelerator::Accelerator> =
         accelerator.as_deref().and_then(|s| s.parse().ok());
-      let item =
-        muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
+      let item = muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
       let _ = submenu.append(&item);
     }
     ParsedMenuItem::Separator => {
@@ -1253,8 +1242,7 @@ fn build_muda_context_menu(items: &[ParsedMenuItem]) -> muda::Menu {
       } => {
         let accel: Option<muda::accelerator::Accelerator> =
           accelerator.as_deref().and_then(|s| s.parse().ok());
-        let item =
-          muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
+        let item = muda::MenuItem::with_id(id.as_str(), label, *enabled, accel);
         let _ = menu.append(&item);
       }
       ParsedMenuItem::Separator => {
@@ -2143,9 +2131,7 @@ pub fn handle_common_event<B: BackendAccess>(
       }
       true
     }
-    CommonEvent::SetApplicationMenu { window_id: eid }
-      if *eid == window_id =>
-    {
+    CommonEvent::SetApplicationMenu { window_id: eid } if *eid == window_id => {
       if let Some(state) = B::get() {
         state.common().with_window(window_id, |ws| {
           if let Some(pending) = ws.pending_app_menu.lock().unwrap().take() {
@@ -2166,7 +2152,9 @@ pub fn handle_common_event<B: BackendAccess>(
               if let Ok(wh) = window.window_handle() {
                 if let RawWindowHandle::Win32(handle) = wh.as_raw() {
                   let hwnd = handle.hwnd.get() as isize;
-                  unsafe { let _ = menu.init_for_hwnd(hwnd); }
+                  unsafe {
+                    let _ = menu.init_for_hwnd(hwnd);
+                  }
                 }
               }
             }
@@ -2185,13 +2173,10 @@ pub fn handle_common_event<B: BackendAccess>(
       }
       true
     }
-    CommonEvent::ShowContextMenu { window_id: eid }
-      if *eid == window_id =>
-    {
+    CommonEvent::ShowContextMenu { window_id: eid } if *eid == window_id => {
       if let Some(state) = B::get() {
         state.common().with_window(window_id, |ws| {
-          if let Some(pending) =
-            ws.pending_context_menu.lock().unwrap().take()
+          if let Some(pending) = ws.pending_context_menu.lock().unwrap().take()
           {
             register_menu_callbacks(
               &pending.items,
@@ -2200,12 +2185,11 @@ pub fn handle_common_event<B: BackendAccess>(
               window_id,
             );
             let menu = build_muda_context_menu(&pending.items);
-            let position = muda::dpi::Position::Logical(
-              muda::dpi::LogicalPosition::new(
+            let position =
+              muda::dpi::Position::Logical(muda::dpi::LogicalPosition::new(
                 pending.x as f64,
                 pending.y as f64,
-              ),
-            );
+              ));
 
             #[cfg(target_os = "macos")]
             {

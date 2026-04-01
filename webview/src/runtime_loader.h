@@ -25,11 +25,19 @@ class RuntimeLoader {
 
   void Shutdown();
 
-  void SetBackend(WefBackend* backend) { backend_ = backend; }
-  WefBackend* GetBackend() { return backend_; }
-  const wef_backend_api_t& GetBackendApi() const { return backend_api_; }
+  void SetBackend(WefBackend* backend) {
+    backend_ = backend;
+  }
+  WefBackend* GetBackend() {
+    return backend_;
+  }
+  const wef_backend_api_t& GetBackendApi() const {
+    return backend_api_;
+  }
 
-  uint32_t AllocateWindowId() { return next_window_id_.fetch_add(1); }
+  uint32_t AllocateWindowId() {
+    return next_window_id_.fetch_add(1);
+  }
 
   void StoreCallWindow(uint64_t call_id, uint32_t window_id) {
     std::lock_guard<std::mutex> lock(call_map_mutex_);
@@ -47,12 +55,13 @@ class RuntimeLoader {
     return 0;
   }
 
-  void OnJsCall(uint32_t window_id, uint64_t call_id, const std::string& method_path,
-                wef::ValuePtr args);
+  void OnJsCall(uint32_t window_id, uint64_t call_id,
+                const std::string& method_path, wef::ValuePtr args);
 
   void PollPendingJsCalls();
 
-  void JsCallRespond(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error);
+  void JsCallRespond(uint32_t window_id, uint64_t call_id, wef::ValuePtr result,
+                     wef::ValuePtr error);
 
   void SetJsCallHandler(wef_js_call_fn handler, void* user_data) {
     std::lock_guard<std::mutex> lock(handler_mutex_);
@@ -66,11 +75,13 @@ class RuntimeLoader {
     keyboard_user_data_ = user_data;
   }
 
-  void DispatchKeyboardEvent(uint32_t window_id, int state, const char* key, const char* code,
-                             uint32_t modifiers, bool repeat) {
+  void DispatchKeyboardEvent(uint32_t window_id, int state, const char* key,
+                             const char* code, uint32_t modifiers,
+                             bool repeat) {
     std::lock_guard<std::mutex> lock(keyboard_mutex_);
     if (keyboard_handler_) {
-      keyboard_handler_(keyboard_user_data_, window_id, state, key, code, modifiers, repeat);
+      keyboard_handler_(keyboard_user_data_, window_id, state, key, code,
+                        modifiers, repeat);
     }
   }
 
@@ -80,11 +91,13 @@ class RuntimeLoader {
     mouse_click_user_data_ = user_data;
   }
 
-  void DispatchMouseClickEvent(uint32_t window_id, int state, int button, double x, double y,
-                               uint32_t modifiers, int32_t click_count) {
+  void DispatchMouseClickEvent(uint32_t window_id, int state, int button,
+                               double x, double y, uint32_t modifiers,
+                               int32_t click_count) {
     std::lock_guard<std::mutex> lock(mouse_mutex_);
     if (mouse_click_handler_) {
-      mouse_click_handler_(mouse_click_user_data_, window_id, state, button, x, y, modifiers, click_count);
+      mouse_click_handler_(mouse_click_user_data_, window_id, state, button, x,
+                           y, modifiers, click_count);
     }
   }
 
@@ -94,7 +107,8 @@ class RuntimeLoader {
     mouse_move_user_data_ = user_data;
   }
 
-  void DispatchMouseMoveEvent(uint32_t window_id, double x, double y, uint32_t modifiers) {
+  void DispatchMouseMoveEvent(uint32_t window_id, double x, double y,
+                              uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(mouse_move_mutex_);
     if (mouse_move_handler_) {
       mouse_move_handler_(mouse_move_user_data_, window_id, x, y, modifiers);
@@ -107,25 +121,29 @@ class RuntimeLoader {
     wheel_user_data_ = user_data;
   }
 
-  void DispatchWheelEvent(uint32_t window_id, double delta_x, double delta_y, double x, double y,
-                          uint32_t modifiers, int32_t delta_mode) {
+  void DispatchWheelEvent(uint32_t window_id, double delta_x, double delta_y,
+                          double x, double y, uint32_t modifiers,
+                          int32_t delta_mode) {
     std::lock_guard<std::mutex> lock(wheel_mutex_);
     if (wheel_handler_) {
-      wheel_handler_(wheel_user_data_, window_id, delta_x, delta_y, x, y, modifiers, delta_mode);
+      wheel_handler_(wheel_user_data_, window_id, delta_x, delta_y, x, y,
+                     modifiers, delta_mode);
     }
   }
 
-  void SetCursorEnterLeaveHandler(wef_cursor_enter_leave_fn handler, void* user_data) {
+  void SetCursorEnterLeaveHandler(wef_cursor_enter_leave_fn handler,
+                                  void* user_data) {
     std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
     cursor_enter_leave_handler_ = handler;
     cursor_enter_leave_user_data_ = user_data;
   }
 
-  void DispatchCursorEnterLeaveEvent(uint32_t window_id, int entered, double x, double y,
-                                     uint32_t modifiers) {
+  void DispatchCursorEnterLeaveEvent(uint32_t window_id, int entered, double x,
+                                     double y, uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
     if (cursor_enter_leave_handler_) {
-      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, window_id, entered, x, y, modifiers);
+      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, window_id,
+                                  entered, x, y, modifiers);
     }
   }
 
@@ -168,7 +186,8 @@ class RuntimeLoader {
     }
   }
 
-  void SetCloseRequestedHandler(wef_close_requested_fn handler, void* user_data) {
+  void SetCloseRequestedHandler(wef_close_requested_fn handler,
+                                void* user_data) {
     std::lock_guard<std::mutex> lock(close_requested_mutex_);
     close_requested_handler_ = handler;
     close_requested_user_data_ = user_data;
@@ -308,9 +327,11 @@ class WefBackend {
   virtual void Run() = 0;
 
   // JS interop (broadcast to all windows for callback operations)
-  virtual void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) = 0;
+  virtual void InvokeJsCallback(uint32_t window_id, uint64_t callback_id,
+                                wef::ValuePtr args) = 0;
   virtual void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) = 0;
-  virtual void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) = 0;
+  virtual void RespondToJsCall(uint32_t window_id, uint64_t call_id,
+                               wef::ValuePtr result, wef::ValuePtr error) = 0;
 
   virtual void SetApplicationMenu(uint32_t window_id,
                                   wef_value_t* menu_template,
@@ -318,8 +339,7 @@ class WefBackend {
                                   wef_menu_click_fn on_click,
                                   void* on_click_data) = 0;
 
-  virtual void ShowContextMenu(uint32_t window_id,
-                               int x, int y,
+  virtual void ShowContextMenu(uint32_t window_id, int x, int y,
                                wef_value_t* menu_template,
                                const wef_backend_api_t* api,
                                wef_menu_click_fn on_click,
@@ -330,9 +350,10 @@ class WefBackend {
   virtual void ShowDialog(uint32_t window_id, int dialog_type,
                           const std::string& title, const std::string& message,
                           const std::string& default_value,
-                          wef_dialog_result_fn callback, void* callback_data) = 0;
+                          wef_dialog_result_fn callback,
+                          void* callback_data) = 0;
 };
 
 WefBackend* CreateWefBackend();
 
-#endif // WEF_RUNTIME_LOADER_H_
+#endif  // WEF_RUNTIME_LOADER_H_

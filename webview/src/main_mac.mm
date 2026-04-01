@@ -8,13 +8,13 @@
 #include <string>
 
 @interface AppDelegate : NSObject <NSApplicationDelegate>
-@property (nonatomic, assign) WefBackend* backend;
-@property (nonatomic, copy) NSString* runtimePath;
+@property(nonatomic, assign) WefBackend* backend;
+@property(nonatomic, copy) NSString* runtimePath;
 @end
 
 @implementation AppDelegate
 
-- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+- (void)applicationDidFinishLaunching:(NSNotification*)notification {
   self.backend = CreateWefBackend();
 
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
@@ -28,10 +28,11 @@
     NSString* bundlePath = [bundle bundlePath];
 
     NSArray* searchPaths = @[
-      [bundlePath stringByAppendingPathComponent:@"Contents/Frameworks/libruntime.dylib"],
-      [bundlePath stringByAppendingPathComponent:@"Contents/MacOS/libruntime.dylib"],
-      @"./libruntime.dylib",
-      @"./target/debug/libhello.dylib",
+      [bundlePath stringByAppendingPathComponent:
+                      @"Contents/Frameworks/libruntime.dylib"],
+      [bundlePath
+          stringByAppendingPathComponent:@"Contents/MacOS/libruntime.dylib"],
+      @"./libruntime.dylib", @"./target/debug/libhello.dylib",
       @"./target/release/libhello.dylib"
     ];
 
@@ -49,7 +50,9 @@
   }
 
   if (runtimePath.empty()) {
-    std::cerr << "No runtime library found. Set WEF_RUNTIME_PATH or place libruntime.dylib in the app bundle." << std::endl;
+    std::cerr << "No runtime library found. Set WEF_RUNTIME_PATH or place "
+                 "libruntime.dylib in the app bundle."
+              << std::endl;
     [NSApp terminate:nil];
     return;
   }
@@ -65,16 +68,15 @@
     [NSApp terminate:nil];
     return;
   }
-
 }
 
-- (void)applicationWillTerminate:(NSNotification *)notification {
+- (void)applicationWillTerminate:(NSNotification*)notification {
   RuntimeLoader::GetInstance()->Shutdown();
   delete self.backend;
   self.backend = nullptr;
 }
 
-- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication *)sender {
+- (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
   return YES;
 }
 
@@ -136,8 +138,8 @@ static bool is_cli_worker_command(int argc, char* argv[]) {
 }
 
 static bool is_forked_worker() {
-  return getenv("NODE_CHANNEL_FD") != nullptr
-      || getenv("NEXT_PRIVATE_WORKER") != nullptr;
+  return getenv("NODE_CHANNEL_FD") != nullptr ||
+         getenv("NEXT_PRIVATE_WORKER") != nullptr;
 }
 
 int main(int argc, char* argv[]) {
@@ -168,10 +170,10 @@ int main(int argc, char* argv[]) {
     [NSApp setMainMenu:menubar];
 
     NSMenu* appMenu = [[NSMenu alloc] init];
-    NSMenuItem* quitItem = [[NSMenuItem alloc]
-        initWithTitle:@"Quit"
-               action:@selector(terminate:)
-        keyEquivalent:@"q"];
+    NSMenuItem* quitItem =
+        [[NSMenuItem alloc] initWithTitle:@"Quit"
+                                   action:@selector(terminate:)
+                            keyEquivalent:@"q"];
     [appMenu addItem:quitItem];
     [appMenuItem setSubmenu:appMenu];
 

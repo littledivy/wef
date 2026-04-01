@@ -3,28 +3,31 @@ use wef::{Value, Window};
 fn hello_main() {
   let rt = tokio::runtime::Runtime::new().unwrap();
   rt.block_on(async {
-        let _win = Window::new(800, 600)
-            .title("WEF - Bindings Demo")
-            .bind("greet", |call| {
-                let name = call.args.get(0)
-                    .and_then(|v| v.as_string())
-                    .unwrap_or("World")
-                    .to_string();
-                call.resolve(Value::String(format!("Hello, {}!", name)));
-            })
-            .bind("add", |call| {
-                let a = call.args.get(0).and_then(|v| v.as_int()).unwrap_or(0);
-                let b = call.args.get(1).and_then(|v| v.as_int()).unwrap_or(0);
-                call.resolve(Value::Int(a + b));
-            })
-            .bind("getInfo", |call| {
-                let mut info = std::collections::HashMap::new();
-                info.insert("name".to_string(), Value::String("WEF".to_string()));
-                info.insert("version".to_string(), Value::String("0.1.0".to_string()));
-                info.insert("rust".to_string(), Value::Bool(true));
-                call.resolve(Value::Dict(info));
-            })
-            .load(r#"data:text/html,<!DOCTYPE html>
+    let _win = Window::new(800, 600)
+      .title("WEF - Bindings Demo")
+      .bind("greet", |call| {
+        let name = call
+          .args
+          .get(0)
+          .and_then(|v| v.as_string())
+          .unwrap_or("World")
+          .to_string();
+        call.resolve(Value::String(format!("Hello, {}!", name)));
+      })
+      .bind("add", |call| {
+        let a = call.args.get(0).and_then(|v| v.as_int()).unwrap_or(0);
+        let b = call.args.get(1).and_then(|v| v.as_int()).unwrap_or(0);
+        call.resolve(Value::Int(a + b));
+      })
+      .bind("getInfo", |call| {
+        let mut info = std::collections::HashMap::new();
+        info.insert("name".to_string(), Value::String("WEF".to_string()));
+        info.insert("version".to_string(), Value::String("0.1.0".to_string()));
+        info.insert("rust".to_string(), Value::Bool(true));
+        call.resolve(Value::Dict(info));
+      })
+      .load(
+        r#"data:text/html,<!DOCTYPE html>
 <html>
 <head>
     <meta charset="utf-8">
@@ -102,10 +105,11 @@ fn hello_main() {
         out.innerHTML = 'Ready! Click buttons above.\n';
     </script>
 </body>
-</html>"#);
+</html>"#,
+      );
 
-        wef::run().await;
-    });
+    wef::run().await;
+  });
 }
 
 wef::main!(hello_main);

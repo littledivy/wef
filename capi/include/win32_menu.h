@@ -18,7 +18,7 @@ struct MenuState {
   wef_menu_click_fn on_click = nullptr;
   void* on_click_data = nullptr;
   uint32_t window_id = 0;
-  UINT next_command_id = 0x8000; // Start above standard IDs
+  UINT next_command_id = 0x8000;  // Start above standard IDs
 
   UINT AllocCommandId(const std::string& item_id) {
     UINT id = next_command_id++;
@@ -45,7 +45,8 @@ inline std::map<HWND, MenuState>& GetMenuStates() {
 inline std::string FormatAccelerator(const std::string& accel) {
   std::string result;
   std::string lower = accel;
-  for (auto& c : lower) c = static_cast<char>(tolower(c));
+  for (auto& c : lower)
+    c = static_cast<char>(tolower(c));
 
   size_t pos = 0;
   std::vector<std::string> parts;
@@ -54,11 +55,14 @@ inline std::string FormatAccelerator(const std::string& accel) {
     parts.push_back(remaining.substr(0, pos));
     remaining = remaining.substr(pos + 1);
   }
-  if (!remaining.empty()) parts.push_back(remaining);
+  if (!remaining.empty())
+    parts.push_back(remaining);
 
   for (const auto& part : parts) {
-    if (!result.empty()) result += "+";
-    if (part == "cmd" || part == "command" || part == "cmdorctrl" || part == "commandorcontrol") {
+    if (!result.empty())
+      result += "+";
+    if (part == "cmd" || part == "command" || part == "cmdorctrl" ||
+        part == "commandorcontrol") {
       result += "Ctrl";
     } else if (part == "shift") {
       result += "Shift";
@@ -69,7 +73,8 @@ inline std::string FormatAccelerator(const std::string& accel) {
     } else {
       // Capitalize the key
       std::string key = part;
-      if (!key.empty()) key[0] = static_cast<char>(toupper(key[0]));
+      if (!key.empty())
+        key[0] = static_cast<char>(toupper(key[0]));
       result += key;
     }
   }
@@ -77,21 +82,24 @@ inline std::string FormatAccelerator(const std::string& accel) {
 }
 
 // Create a role-based menu item (standard operations).
-inline bool CreateRoleMenuItem(HMENU menu, const std::string& role, MenuState& state) {
-
-  struct RoleEntry { const char* role; const char* label; };
+inline bool CreateRoleMenuItem(HMENU menu, const std::string& role,
+                               MenuState& state) {
+  struct RoleEntry {
+    const char* role;
+    const char* label;
+  };
   static const RoleEntry roles[] = {
-    {"quit", "E&xit"},
-    {"copy", "&Copy"},
-    {"paste", "&Paste"},
-    {"cut", "Cu&t"},
-    {"selectall", "&Select All"},
-    {"selectAll", "&Select All"},
-    {"undo", "&Undo"},
-    {"redo", "&Redo"},
-    {"minimize", "Mi&nimize"},
-    {"close", "&Close"},
-    {"about", "&About"},
+      {"quit", "E&xit"},
+      {"copy", "&Copy"},
+      {"paste", "&Paste"},
+      {"cut", "Cu&t"},
+      {"selectall", "&Select All"},
+      {"selectAll", "&Select All"},
+      {"undo", "&Undo"},
+      {"redo", "&Redo"},
+      {"minimize", "Mi&nimize"},
+      {"close", "&Close"},
+      {"about", "&About"},
   };
 
   for (const auto& entry : roles) {
@@ -106,19 +114,25 @@ inline bool CreateRoleMenuItem(HMENU menu, const std::string& role, MenuState& s
 
 // Helper to free a wef_value_t* if non-null.
 inline void FreeVal(const wef_backend_api_t* api, wef_value_t* v) {
-  if (v) api->value_free(v);
+  if (v)
+    api->value_free(v);
 }
 
 // Recursively build an HMENU from a wef_value_t list.
-inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, MenuState& state) {
-  if (!val || !api->value_is_list(val)) return nullptr;
+inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api,
+                                MenuState& state) {
+  if (!val || !api->value_is_list(val))
+    return nullptr;
 
   HMENU menu = CreateMenu();
   size_t count = api->value_list_size(val);
 
   for (size_t i = 0; i < count; ++i) {
     wef_value_t* itemVal = api->value_list_get(val, i);
-    if (!itemVal || !api->value_is_dict(itemVal)) { FreeVal(api, itemVal); continue; }
+    if (!itemVal || !api->value_is_dict(itemVal)) {
+      FreeVal(api, itemVal);
+      continue;
+    }
 
     // Check for separator
     wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
@@ -132,7 +146,8 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, 
         FreeVal(api, itemVal);
         continue;
       }
-      if (typeStr) api->value_free_string(typeStr);
+      if (typeStr)
+        api->value_free_string(typeStr);
     }
 
     // Check for role
@@ -151,12 +166,19 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, 
 
     // Regular item or submenu — needs a label
     wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
-    if (!labelVal || !api->value_is_string(labelVal)) { FreeVal(api, labelVal); FreeVal(api, itemVal); continue; }
+    if (!labelVal || !api->value_is_string(labelVal)) {
+      FreeVal(api, labelVal);
+      FreeVal(api, itemVal);
+      continue;
+    }
 
     size_t labelLen = 0;
     char* labelStr = api->value_get_string(labelVal, &labelLen);
     FreeVal(api, labelVal);
-    if (!labelStr) { FreeVal(api, itemVal); continue; }
+    if (!labelStr) {
+      FreeVal(api, itemVal);
+      continue;
+    }
     std::string label = labelStr;
     api->value_free_string(labelStr);
 
@@ -178,7 +200,8 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, 
       HMENU submenu = BuildMenuFromValue(submenuVal, api, state);
       FreeVal(api, submenuVal);
       if (submenu) {
-        AppendMenuA(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu), label.c_str());
+        AppendMenuA(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(submenu),
+                    label.c_str());
       }
       FreeVal(api, itemVal);
       continue;
@@ -202,7 +225,8 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, 
 
     UINT flags = MF_STRING;
     wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
-    if (enabledVal && api->value_is_bool(enabledVal) && !api->value_get_bool(enabledVal)) {
+    if (enabledVal && api->value_is_bool(enabledVal) &&
+        !api->value_get_bool(enabledVal)) {
       flags |= MF_GRAYED;
     }
     FreeVal(api, enabledVal);
@@ -217,11 +241,11 @@ inline HMENU BuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api, 
 // Set the application menu on a given HWND.
 // Call this from the UI thread.
 inline void SetApplicationMenu(HWND hwnd, wef_value_t* menu_template,
-                                const wef_backend_api_t* api,
-                                wef_menu_click_fn on_click,
-                                void* on_click_data,
-                                uint32_t window_id = 0) {
-  if (!menu_template || !hwnd) return;
+                               const wef_backend_api_t* api,
+                               wef_menu_click_fn on_click, void* on_click_data,
+                               uint32_t window_id = 0) {
+  if (!menu_template || !hwnd)
+    return;
 
   MenuState& state = GetMenuStates()[hwnd];
   state.command_to_id.clear();
@@ -249,7 +273,8 @@ inline bool HandleMenuCommand(HWND hwnd, WPARAM wParam) {
   UINT cmd = LOWORD(wParam);
   auto& states = GetMenuStates();
   auto it = states.find(hwnd);
-  if (it == states.end()) return false;
+  if (it == states.end())
+    return false;
   MenuState& state = it->second;
   auto cmd_it = state.command_to_id.find(cmd);
   if (cmd_it != state.command_to_id.end()) {
@@ -261,13 +286,12 @@ inline bool HandleMenuCommand(HWND hwnd, WPARAM wParam) {
 
 // Show a context menu at the given position (client coordinates).
 // The menu is built from the same wef_value_t template as application menus.
-inline void ShowContextMenu(HWND hwnd, int x, int y,
-                            wef_value_t* menu_template,
+inline void ShowContextMenu(HWND hwnd, int x, int y, wef_value_t* menu_template,
                             const wef_backend_api_t* api,
-                            wef_menu_click_fn on_click,
-                            void* on_click_data,
+                            wef_menu_click_fn on_click, void* on_click_data,
                             uint32_t window_id = 0) {
-  if (!menu_template || !hwnd) return;
+  if (!menu_template || !hwnd)
+    return;
 
   MenuState state;
   state.on_click = on_click;
@@ -275,7 +299,8 @@ inline void ShowContextMenu(HWND hwnd, int x, int y,
   state.window_id = window_id;
 
   HMENU popup = BuildMenuFromValue(menu_template, api, state);
-  if (!popup) return;
+  if (!popup)
+    return;
 
   // Convert client coordinates to screen coordinates
   POINT pt = {x, y};
@@ -293,6 +318,6 @@ inline void ShowContextMenu(HWND hwnd, int x, int y,
   DestroyMenu(popup);
 }
 
-} // namespace win32_menu
+}  // namespace win32_menu
 
-#endif // WEF_WIN32_MENU_H_
+#endif  // WEF_WIN32_MENU_H_

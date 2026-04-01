@@ -200,17 +200,17 @@ fn op_get_processes(state: &mut OpState) -> String {
   let sys = state.borrow_mut::<System>();
   sys.refresh_processes(ProcessesToUpdate::All, true);
   let mut procs: Vec<serde_json::Value> = sys
-        .processes()
-        .values()
-        .map(|p| {
-            serde_json::json!({
-                "pid": p.pid().as_u32(),
-                "name": p.name().to_string_lossy(),
-                "cpuUsage": (p.cpu_usage() * 100.0).round() / 100.0,
-                "memoryMb": (p.memory() as f64 / (1024.0 * 1024.0) * 100.0).round() / 100.0,
-            })
-        })
-        .collect();
+    .processes()
+    .values()
+    .map(|p| {
+      serde_json::json!({
+          "pid": p.pid().as_u32(),
+          "name": p.name().to_string_lossy(),
+          "cpuUsage": (p.cpu_usage() * 100.0).round() / 100.0,
+          "memoryMb": (p.memory() as f64 / (1024.0 * 1024.0) * 100.0).round() / 100.0,
+      })
+    })
+    .collect();
   procs.sort_by(|a, b| {
     b["cpuUsage"]
       .as_f64()

@@ -10,8 +10,7 @@ WefPathObject::WefPathObject(std::vector<std::string> path,
 
 bool WefPathObject::Get(const CefString& name,
                         const CefRefPtr<CefV8Value> object,
-                        CefRefPtr<CefV8Value>& retval,
-                        CefString& exception) {
+                        CefRefPtr<CefV8Value>& retval, CefString& exception) {
   std::string prop = name.ToString();
 
   if (prop == "then" || prop == "catch" || prop == "finally" ||
@@ -37,23 +36,19 @@ bool WefPathObject::Set(const CefString& name,
   return true;
 }
 
-bool WefPathObject::Get(int index,
-                        const CefRefPtr<CefV8Value> object,
-                        CefRefPtr<CefV8Value>& retval,
-                        CefString& exception) {
+bool WefPathObject::Get(int index, const CefRefPtr<CefV8Value> object,
+                        CefRefPtr<CefV8Value>& retval, CefString& exception) {
   return false;
 }
 
-bool WefPathObject::Set(int index,
-                        const CefRefPtr<CefV8Value> object,
+bool WefPathObject::Set(int index, const CefRefPtr<CefV8Value> object,
                         const CefRefPtr<CefV8Value> value,
                         CefString& exception) {
   exception = "Cannot set index properties on Wef object";
   return true;
 }
 
-bool WefPathObject::Execute(const CefString& name,
-                            CefRefPtr<CefV8Value> object,
+bool WefPathObject::Execute(const CefString& name, CefRefPtr<CefV8Value> object,
                             const CefV8ValueList& arguments,
                             CefRefPtr<CefV8Value>& retval,
                             CefString& exception) {
@@ -77,14 +72,16 @@ bool WefPathObject::Execute(const CefString& name,
     return true;
   }
 
-  CefRefPtr<PromiseResolver> resolver = new PromiseResolver(call_id, retval, context);
+  CefRefPtr<PromiseResolver> resolver =
+      new PromiseResolver(call_id, retval, context);
 
   g_render_handler->StorePendingCall(call_id, resolver);
 
   CefRefPtr<CefListValue> argsList = CefListValue::Create();
   for (size_t i = 0; i < arguments.size(); ++i) {
     if (arguments[i]->IsFunction()) {
-      uint64_t callback_id = g_render_handler->StoreCallback(arguments[i], context);
+      uint64_t callback_id =
+          g_render_handler->StoreCallback(arguments[i], context);
 
       CefRefPtr<CefDictionaryValue> callbackRef = CefDictionaryValue::Create();
       callbackRef->SetString("__callback__", std::to_string(callback_id));
@@ -99,7 +96,8 @@ bool WefPathObject::Execute(const CefString& name,
 
   std::string method_path;
   for (size_t i = 0; i < path_.size(); ++i) {
-    if (i > 0) method_path += ".";
+    if (i > 0)
+      method_path += ".";
     method_path += path_[i];
   }
 
@@ -114,12 +112,14 @@ bool WefPathObject::Execute(const CefString& name,
   return true;
 }
 
-PromiseResolver::PromiseResolver(uint64_t call_id, CefRefPtr<CefV8Value> promise,
+PromiseResolver::PromiseResolver(uint64_t call_id,
+                                 CefRefPtr<CefV8Value> promise,
                                  CefRefPtr<CefV8Context> context)
     : promise_(promise), context_(context) {}
 
 void PromiseResolver::Resolve(CefRefPtr<CefV8Value> value) {
-  if (!promise_ || !context_) return;
+  if (!promise_ || !context_)
+    return;
 
   context_->Enter();
   promise_->ResolvePromise(value);
@@ -127,7 +127,8 @@ void PromiseResolver::Resolve(CefRefPtr<CefV8Value> value) {
 }
 
 void PromiseResolver::Reject(const std::string& error) {
-  if (!promise_ || !context_) return;
+  if (!promise_ || !context_)
+    return;
 
   context_->Enter();
   promise_->RejectPromise(error);
@@ -139,8 +140,7 @@ WefRenderProcessHandler::WefRenderProcessHandler() {
 }
 
 void WefRenderProcessHandler::OnBrowserCreated(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefDictionaryValue> extra_info) {
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefDictionaryValue> extra_info) {
   if (extra_info && extra_info->HasKey("wef_js_namespace")) {
     browser_namespaces_[browser->GetIdentifier()] =
         extra_info->GetString("wef_js_namespace").ToString();
@@ -148,10 +148,8 @@ void WefRenderProcessHandler::OnBrowserCreated(
 }
 
 void WefRenderProcessHandler::OnContextCreated(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame,
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
     CefRefPtr<CefV8Context> context) {
-
   CefRefPtr<CefV8Value> global = context->GetGlobal();
 
   std::string ns = "Wef";
@@ -167,17 +165,12 @@ void WefRenderProcessHandler::OnContextCreated(
 }
 
 void WefRenderProcessHandler::OnContextReleased(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame,
-    CefRefPtr<CefV8Context> context) {
-}
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+    CefRefPtr<CefV8Context> context) {}
 
 bool WefRenderProcessHandler::OnProcessMessageReceived(
-    CefRefPtr<CefBrowser> browser,
-    CefRefPtr<CefFrame> frame,
-    CefProcessId source_process,
-    CefRefPtr<CefProcessMessage> message) {
-
+    CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+    CefProcessId source_process, CefRefPtr<CefProcessMessage> message) {
   const std::string& name = message->GetName().ToString();
 
   if (name == "wef_response") {
@@ -217,7 +210,8 @@ bool WefRenderProcessHandler::OnProcessMessageReceived(
       if (cb.context && cb.context->Enter()) {
         CefV8ValueList v8Args;
         for (size_t i = 0; i < callbackArgs->GetSize(); ++i) {
-          v8Args.push_back(CefValueToV8Value(callbackArgs->GetValue(i), cb.context));
+          v8Args.push_back(
+              CefValueToV8Value(callbackArgs->GetValue(i), cb.context));
         }
 
         cb.func->ExecuteFunction(nullptr, v8Args);
@@ -238,13 +232,13 @@ bool WefRenderProcessHandler::OnProcessMessageReceived(
   return false;
 }
 
-void WefRenderProcessHandler::StorePendingCall(uint64_t call_id,
-                                               CefRefPtr<PromiseResolver> resolver) {
+void WefRenderProcessHandler::StorePendingCall(
+    uint64_t call_id, CefRefPtr<PromiseResolver> resolver) {
   pending_calls_[call_id] = resolver;
 }
 
-uint64_t WefRenderProcessHandler::StoreCallback(CefRefPtr<CefV8Value> func,
-                                                CefRefPtr<CefV8Context> context) {
+uint64_t WefRenderProcessHandler::StoreCallback(
+    CefRefPtr<CefV8Value> func, CefRefPtr<CefV8Context> context) {
   uint64_t id = next_callback_id_++;
   stored_callbacks_[id] = {func, context};
   return id;
@@ -299,8 +293,7 @@ CefRefPtr<CefValue> WefRenderProcessHandler::V8ValueToCefValue(
 }
 
 CefRefPtr<CefV8Value> WefRenderProcessHandler::CefValueToV8Value(
-    CefRefPtr<CefValue> value,
-    CefRefPtr<CefV8Context> context) {
+    CefRefPtr<CefValue> value, CefRefPtr<CefV8Context> context) {
   if (!value) {
     return CefV8Value::CreateNull();
   }
@@ -339,9 +332,11 @@ CefRefPtr<CefV8Value> WefRenderProcessHandler::CefValueToV8Value(
     case VTYPE_LIST: {
       CefRefPtr<CefListValue> list = value->GetList();
       size_t size = list->GetSize();
-      CefRefPtr<CefV8Value> arr = CefV8Value::CreateArray(static_cast<int>(size));
+      CefRefPtr<CefV8Value> arr =
+          CefV8Value::CreateArray(static_cast<int>(size));
       for (size_t i = 0; i < size; ++i) {
-        arr->SetValue(static_cast<int>(i), CefValueToV8Value(list->GetValue(i), context));
+        arr->SetValue(static_cast<int>(i),
+                      CefValueToV8Value(list->GetValue(i), context));
       }
       return arr;
     }

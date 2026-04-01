@@ -36,17 +36,9 @@ struct BinaryData {
 
 struct Value {
   ValueType type;
-  std::variant<
-    std::nullptr_t,
-    bool,
-    int,
-    double,
-    std::string,
-    BinaryData,
-    ValueList,
-    ValueDict,
-    uint64_t
-  > data;
+  std::variant<std::nullptr_t, bool, int, double, std::string, BinaryData,
+               ValueList, ValueDict, uint64_t>
+      data;
 
   Value() : type(ValueType::Null), data(nullptr) {}
 
@@ -118,15 +110,33 @@ struct Value {
     return v;
   }
 
-  bool IsNull() const { return type == ValueType::Null; }
-  bool IsBool() const { return type == ValueType::Bool; }
-  bool IsInt() const { return type == ValueType::Int; }
-  bool IsDouble() const { return type == ValueType::Double; }
-  bool IsString() const { return type == ValueType::String; }
-  bool IsBinary() const { return type == ValueType::Binary; }
-  bool IsList() const { return type == ValueType::List; }
-  bool IsDict() const { return type == ValueType::Dict; }
-  bool IsCallback() const { return type == ValueType::Callback; }
+  bool IsNull() const {
+    return type == ValueType::Null;
+  }
+  bool IsBool() const {
+    return type == ValueType::Bool;
+  }
+  bool IsInt() const {
+    return type == ValueType::Int;
+  }
+  bool IsDouble() const {
+    return type == ValueType::Double;
+  }
+  bool IsString() const {
+    return type == ValueType::String;
+  }
+  bool IsBinary() const {
+    return type == ValueType::Binary;
+  }
+  bool IsList() const {
+    return type == ValueType::List;
+  }
+  bool IsDict() const {
+    return type == ValueType::Dict;
+  }
+  bool IsCallback() const {
+    return type == ValueType::Callback;
+  }
 
   bool GetBool() const {
     return type == ValueType::Bool ? std::get<bool>(data) : false;
@@ -173,7 +183,7 @@ struct Value {
   }
 };
 
-}
+}  // namespace wef
 
 struct wef_value {
   wef::ValuePtr value;
@@ -181,7 +191,8 @@ struct wef_value {
   uint64_t callback_id;
 
   wef_value() : is_callback(false), callback_id(0) {}
-  explicit wef_value(wef::ValuePtr v) : value(v), is_callback(false), callback_id(0) {
+  explicit wef_value(wef::ValuePtr v)
+      : value(v), is_callback(false), callback_id(0) {
     if (v && v->IsCallback()) {
       is_callback = true;
       callback_id = v->GetCallbackId();
@@ -197,4 +208,4 @@ struct wef_value {
   }
 };
 
-#endif // WEF_VALUE_H_
+#endif  // WEF_VALUE_H_

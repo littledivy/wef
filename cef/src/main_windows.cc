@@ -32,7 +32,8 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
 
     // Find the wef window_id from the top-level HWND
     HWND topLevel = mhs->hwnd ? GetAncestor(mhs->hwnd, GA_ROOT) : nullptr;
-    uint32_t window_id = topLevel ? loader->GetWefIdForNativeHandle((void*)topLevel) : 0;
+    uint32_t window_id =
+        topLevel ? loader->GetWefIdForNativeHandle((void*)topLevel) : 0;
 
     POINT pt = mhs->pt;
     if (mhs->hwnd) {
@@ -42,35 +43,45 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
     double y = static_cast<double>(pt.y);
 
     uint32_t modifiers = 0;
-    if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= WEF_MOD_SHIFT;
-    if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= WEF_MOD_CONTROL;
-    if (GetKeyState(VK_MENU) & 0x8000) modifiers |= WEF_MOD_ALT;
-    if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) modifiers |= WEF_MOD_META;
+    if (GetKeyState(VK_SHIFT) & 0x8000)
+      modifiers |= WEF_MOD_SHIFT;
+    if (GetKeyState(VK_CONTROL) & 0x8000)
+      modifiers |= WEF_MOD_CONTROL;
+    if (GetKeyState(VK_MENU) & 0x8000)
+      modifiers |= WEF_MOD_ALT;
+    if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000)
+      modifiers |= WEF_MOD_META;
 
     switch (wParam) {
       case WM_LBUTTONDOWN:
-        loader->DispatchMouseClickEvent(
-            window_id, WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
+        loader->DispatchMouseClickEvent(window_id, WEF_MOUSE_PRESSED,
+                                        WEF_MOUSE_BUTTON_LEFT, x, y, modifiers,
+                                        1);
         break;
       case WM_LBUTTONUP:
-        loader->DispatchMouseClickEvent(
-            window_id, WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_LEFT, x, y, modifiers, 1);
+        loader->DispatchMouseClickEvent(window_id, WEF_MOUSE_RELEASED,
+                                        WEF_MOUSE_BUTTON_LEFT, x, y, modifiers,
+                                        1);
         break;
       case WM_RBUTTONDOWN:
-        loader->DispatchMouseClickEvent(
-            window_id, WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
+        loader->DispatchMouseClickEvent(window_id, WEF_MOUSE_PRESSED,
+                                        WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers,
+                                        1);
         break;
       case WM_RBUTTONUP:
-        loader->DispatchMouseClickEvent(
-            window_id, WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers, 1);
+        loader->DispatchMouseClickEvent(window_id, WEF_MOUSE_RELEASED,
+                                        WEF_MOUSE_BUTTON_RIGHT, x, y, modifiers,
+                                        1);
         break;
       case WM_MBUTTONDOWN:
-        loader->DispatchMouseClickEvent(
-            window_id, WEF_MOUSE_PRESSED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
+        loader->DispatchMouseClickEvent(window_id, WEF_MOUSE_PRESSED,
+                                        WEF_MOUSE_BUTTON_MIDDLE, x, y,
+                                        modifiers, 1);
         break;
       case WM_MBUTTONUP:
-        loader->DispatchMouseClickEvent(
-            window_id, WEF_MOUSE_RELEASED, WEF_MOUSE_BUTTON_MIDDLE, x, y, modifiers, 1);
+        loader->DispatchMouseClickEvent(window_id, WEF_MOUSE_RELEASED,
+                                        WEF_MOUSE_BUTTON_MIDDLE, x, y,
+                                        modifiers, 1);
         break;
       case WM_MOUSEMOVE:
         loader->DispatchMouseMoveEvent(window_id, x, y, modifiers);
@@ -80,8 +91,8 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
         MOUSEHOOKSTRUCTEX* mhsx = reinterpret_cast<MOUSEHOOKSTRUCTEX*>(lParam);
         short delta = HIWORD(mhsx->mouseData);
         double delta_y = static_cast<double>(delta) / WHEEL_DELTA;
-        loader->DispatchWheelEvent(
-            window_id, 0.0, delta_y, x, y, modifiers, WEF_WHEEL_DELTA_LINE);
+        loader->DispatchWheelEvent(window_id, 0.0, delta_y, x, y, modifiers,
+                                   WEF_WHEEL_DELTA_LINE);
         break;
       }
     }
@@ -90,8 +101,10 @@ static LRESULT CALLBACK MouseProc(int nCode, WPARAM wParam, LPARAM lParam) {
 }
 
 void InstallNativeMouseMonitor() {
-  if (g_mouse_hook) return;
-  g_mouse_hook = SetWindowsHookExW(WH_MOUSE, MouseProc, nullptr, GetCurrentThreadId());
+  if (g_mouse_hook)
+    return;
+  g_mouse_hook =
+      SetWindowsHookExW(WH_MOUSE, MouseProc, nullptr, GetCurrentThreadId());
 }
 
 void RemoveNativeMouseMonitor() {
@@ -128,8 +141,8 @@ static int run_headless(const std::string& runtimePath) {
 static bool is_forked_worker() {
   // Windows equivalent of checking NODE_CHANNEL_FD / NEXT_PRIVATE_WORKER
   char buf[2];
-  return GetEnvironmentVariableA("NODE_CHANNEL_FD", buf, sizeof(buf)) > 0
-      || GetEnvironmentVariableA("NEXT_PRIVATE_WORKER", buf, sizeof(buf)) > 0;
+  return GetEnvironmentVariableA("NODE_CHANNEL_FD", buf, sizeof(buf)) > 0 ||
+         GetEnvironmentVariableA("NEXT_PRIVATE_WORKER", buf, sizeof(buf)) > 0;
 }
 
 static bool is_cli_worker_command(int argc, LPWSTR* argv) {
@@ -145,9 +158,9 @@ static bool is_cli_worker_command(int argc, LPWSTR* argv) {
   return false;
 }
 
-// Combined app that handles both browser and renderer processes (single-exe model)
-class WefCombinedApp : public CefApp,
-                       public CefBrowserProcessHandler {
+// Combined app that handles both browser and renderer processes (single-exe
+// model)
+class WefCombinedApp : public CefApp, public CefBrowserProcessHandler {
  public:
   WefCombinedApp() : renderer_app_(new WefRendererApp()) {}
 
@@ -182,18 +195,17 @@ class WefCombinedApp : public CefApp,
       // Defer Start() to the next message loop iteration.
       // OnContextInitialized runs during CefInitialize(), before
       // CefRunMessageLoop() has started.
-      CefPostTask(TID_UI, base::BindOnce([]() {
-        RuntimeLoader::GetInstance()->Start();
-      }));
+      CefPostTask(TID_UI, base::BindOnce(
+                              []() { RuntimeLoader::GetInstance()->Start(); }));
     } else {
       // No runtime: create a default window for demo
       uint32_t wef_id = RuntimeLoader::GetInstance()->AllocateWindowId();
       g_pending_wef_ids.push(wef_id);
       CefBrowserSettings browser_settings;
       CefRefPtr<CefBrowserView> browser_view =
-          CefBrowserView::CreateBrowserView(
-              handler, "https://example.com", browser_settings,
-              nullptr, nullptr, nullptr);
+          CefBrowserView::CreateBrowserView(handler, "https://example.com",
+                                            browser_settings, nullptr, nullptr,
+                                            nullptr);
       CefWindow::CreateTopLevelWindow(
           new WefWindowDelegate(browser_view, wef_id));
     }
@@ -222,9 +234,11 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     for (int i = 1; i < argc; ++i) {
       if (wcscmp(argv[i], L"--runtime") == 0 && i + 1 < argc) {
         ++i;
-        int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0, nullptr, nullptr);
+        int size = WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, nullptr, 0,
+                                       nullptr, nullptr);
         g_runtime_path.resize(size - 1);
-        WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, &g_runtime_path[0], size, nullptr, nullptr);
+        WideCharToMultiByte(CP_UTF8, 0, argv[i], -1, &g_runtime_path[0], size,
+                            nullptr, nullptr);
       }
     }
   }
@@ -238,10 +252,12 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
   // Check for headless / forked worker mode (skip CEF entirely)
   if (is_forked_worker() || (argv && is_cli_worker_command(argc, argv))) {
-    if (argv) LocalFree(argv);
+    if (argv)
+      LocalFree(argv);
     return run_headless(g_runtime_path);
   }
-  if (argv) LocalFree(argv);
+  if (argv)
+    LocalFree(argv);
 
   CefSettings settings;
   settings.no_sandbox = true;
@@ -249,7 +265,8 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
   // Set cache path
   char tempPath[MAX_PATH];
   GetTempPathA(MAX_PATH, tempPath);
-  std::string cache_path = std::string(tempPath) + "wef_cef_" + std::to_string(GetCurrentProcessId());
+  std::string cache_path = std::string(tempPath) + "wef_cef_" +
+                           std::to_string(GetCurrentProcessId());
   CefString(&settings.root_cache_path) = cache_path;
 
   if (!CefInitialize(main_args, settings, app.get(), nullptr)) {

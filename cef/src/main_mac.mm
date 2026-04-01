@@ -45,7 +45,8 @@
 @end
 
 @implementation WefAppDelegate
-- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication*)sender {
+- (NSApplicationTerminateReply)applicationShouldTerminate:
+    (NSApplication*)sender {
   return NSTerminateNow;
 }
 
@@ -102,8 +103,8 @@ static bool is_cli_worker_command(int argc, char* argv[]) {
 }
 
 static bool is_forked_worker() {
-  return getenv("NODE_CHANNEL_FD") != nullptr
-      || getenv("NEXT_PRIVATE_WORKER") != nullptr;
+  return getenv("NODE_CHANNEL_FD") != nullptr ||
+         getenv("NEXT_PRIVATE_WORKER") != nullptr;
 }
 
 int main(int argc, char* argv[]) {

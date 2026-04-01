@@ -21,7 +21,8 @@ struct wef_value {
   uint64_t callback_id;
 
   wef_value() : is_callback(false), callback_id(0) {}
-  explicit wef_value(CefRefPtr<CefValue> v) : value(v), is_callback(false), callback_id(0) {}
+  explicit wef_value(CefRefPtr<CefValue> v)
+      : value(v), is_callback(false), callback_id(0) {}
   static wef_value* CreateCallback(uint64_t id) {
     wef_value* v = new wef_value();
     v->is_callback = true;
@@ -40,9 +41,13 @@ class RuntimeLoader {
 
   void Shutdown();
 
-  const wef_backend_api_t& GetBackendApi() const { return backend_api_; }
+  const wef_backend_api_t& GetBackendApi() const {
+    return backend_api_;
+  }
 
-  uint32_t AllocateWindowId() { return next_window_id_.fetch_add(1); }
+  uint32_t AllocateWindowId() {
+    return next_window_id_.fetch_add(1);
+  }
 
   void RegisterBrowser(uint32_t window_id, CefRefPtr<CefBrowser> browser) {
     std::lock_guard<std::mutex> lock(windows_mutex_);
@@ -54,9 +59,9 @@ class RuntimeLoader {
   // Block until the browser for window_id has been registered (with timeout).
   bool WaitForBrowser(uint32_t window_id, int timeout_ms = 5000) {
     std::unique_lock<std::mutex> lock(windows_mutex_);
-    return browser_ready_cv_.wait_for(lock, std::chrono::milliseconds(timeout_ms), [&]() {
-      return browsers_.find(window_id) != browsers_.end();
-    });
+    return browser_ready_cv_.wait_for(
+        lock, std::chrono::milliseconds(timeout_ms),
+        [&]() { return browsers_.find(window_id) != browsers_.end(); });
   }
 
   void UnregisterBrowser(uint32_t window_id) {
@@ -75,7 +80,8 @@ class RuntimeLoader {
   }
 
   uint32_t GetWefIdForBrowser(CefRefPtr<CefBrowser> browser) {
-    if (!browser) return 0;
+    if (!browser)
+      return 0;
     std::lock_guard<std::mutex> lock(windows_mutex_);
     auto it = browser_id_to_wef_id_.find(browser->GetIdentifier());
     return it != browser_id_to_wef_id_.end() ? it->second : 0;
@@ -140,7 +146,7 @@ class RuntimeLoader {
     return it != native_handle_to_wef_id_.end() ? it->second : 0;
   }
 
-  template<typename F>
+  template <typename F>
   void ForEachBrowser(F&& fn) {
     std::lock_guard<std::mutex> lock(windows_mutex_);
     for (auto& [wid, browser] : browsers_) {
@@ -148,8 +154,8 @@ class RuntimeLoader {
     }
   }
 
-  void OnJsCall(uint32_t window_id, uint64_t call_id, const std::string& method_path,
-                CefRefPtr<CefListValue> args);
+  void OnJsCall(uint32_t window_id, uint64_t call_id,
+                const std::string& method_path, CefRefPtr<CefListValue> args);
 
   void PollPendingJsCalls();
 
@@ -165,11 +171,13 @@ class RuntimeLoader {
     keyboard_user_data_ = user_data;
   }
 
-  void DispatchKeyboardEvent(uint32_t window_id, int state, const char* key, const char* code,
-                             uint32_t modifiers, bool repeat) {
+  void DispatchKeyboardEvent(uint32_t window_id, int state, const char* key,
+                             const char* code, uint32_t modifiers,
+                             bool repeat) {
     std::lock_guard<std::mutex> lock(keyboard_mutex_);
     if (keyboard_handler_) {
-      keyboard_handler_(keyboard_user_data_, window_id, state, key, code, modifiers, repeat);
+      keyboard_handler_(keyboard_user_data_, window_id, state, key, code,
+                        modifiers, repeat);
     }
   }
 
@@ -179,11 +187,13 @@ class RuntimeLoader {
     mouse_click_user_data_ = user_data;
   }
 
-  void DispatchMouseClickEvent(uint32_t window_id, int state, int button, double x, double y,
-                               uint32_t modifiers, int32_t click_count) {
+  void DispatchMouseClickEvent(uint32_t window_id, int state, int button,
+                               double x, double y, uint32_t modifiers,
+                               int32_t click_count) {
     std::lock_guard<std::mutex> lock(mouse_mutex_);
     if (mouse_click_handler_) {
-      mouse_click_handler_(mouse_click_user_data_, window_id, state, button, x, y, modifiers, click_count);
+      mouse_click_handler_(mouse_click_user_data_, window_id, state, button, x,
+                           y, modifiers, click_count);
     }
   }
 
@@ -193,7 +203,8 @@ class RuntimeLoader {
     mouse_move_user_data_ = user_data;
   }
 
-  void DispatchMouseMoveEvent(uint32_t window_id, double x, double y, uint32_t modifiers) {
+  void DispatchMouseMoveEvent(uint32_t window_id, double x, double y,
+                              uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(mouse_move_mutex_);
     if (mouse_move_handler_) {
       mouse_move_handler_(mouse_move_user_data_, window_id, x, y, modifiers);
@@ -206,25 +217,29 @@ class RuntimeLoader {
     wheel_user_data_ = user_data;
   }
 
-  void DispatchWheelEvent(uint32_t window_id, double delta_x, double delta_y, double x, double y,
-                          uint32_t modifiers, int32_t delta_mode) {
+  void DispatchWheelEvent(uint32_t window_id, double delta_x, double delta_y,
+                          double x, double y, uint32_t modifiers,
+                          int32_t delta_mode) {
     std::lock_guard<std::mutex> lock(wheel_mutex_);
     if (wheel_handler_) {
-      wheel_handler_(wheel_user_data_, window_id, delta_x, delta_y, x, y, modifiers, delta_mode);
+      wheel_handler_(wheel_user_data_, window_id, delta_x, delta_y, x, y,
+                     modifiers, delta_mode);
     }
   }
 
-  void SetCursorEnterLeaveHandler(wef_cursor_enter_leave_fn handler, void* user_data) {
+  void SetCursorEnterLeaveHandler(wef_cursor_enter_leave_fn handler,
+                                  void* user_data) {
     std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
     cursor_enter_leave_handler_ = handler;
     cursor_enter_leave_user_data_ = user_data;
   }
 
-  void DispatchCursorEnterLeaveEvent(uint32_t window_id, int entered, double x, double y,
-                                     uint32_t modifiers) {
+  void DispatchCursorEnterLeaveEvent(uint32_t window_id, int entered, double x,
+                                     double y, uint32_t modifiers) {
     std::lock_guard<std::mutex> lock(cursor_enter_leave_mutex_);
     if (cursor_enter_leave_handler_) {
-      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, window_id, entered, x, y, modifiers);
+      cursor_enter_leave_handler_(cursor_enter_leave_user_data_, window_id,
+                                  entered, x, y, modifiers);
     }
   }
 
@@ -267,7 +282,8 @@ class RuntimeLoader {
     }
   }
 
-  void SetCloseRequestedHandler(wef_close_requested_fn handler, void* user_data) {
+  void SetCloseRequestedHandler(wef_close_requested_fn handler,
+                                void* user_data) {
     std::lock_guard<std::mutex> lock(close_requested_mutex_);
     close_requested_handler_ = handler;
     close_requested_user_data_ = user_data;
@@ -311,8 +327,10 @@ class RuntimeLoader {
   std::atomic<bool> running_{false};
 
   std::map<uint32_t, CefRefPtr<CefBrowser>> browsers_;
-  std::map<int, uint32_t> browser_id_to_wef_id_;  // CefBrowser::GetIdentifier() -> wef_id
-  std::map<uint64_t, uint32_t> call_to_window_;  // call_id -> window_id for JsCallRespond
+  std::map<int, uint32_t>
+      browser_id_to_wef_id_;  // CefBrowser::GetIdentifier() -> wef_id
+  std::map<uint64_t, uint32_t>
+      call_to_window_;  // call_id -> window_id for JsCallRespond
   std::map<void*, uint32_t> nswindow_to_wef_id_;
   std::map<void*, uint32_t> native_handle_to_wef_id_;
   std::mutex windows_mutex_;
@@ -386,7 +404,8 @@ void InstallNativeMouseMonitor();
 void RemoveNativeMouseMonitor();
 
 #ifdef __APPLE__
-// NSWindow helpers for cross-platform code (implemented in runtime_loader_mac.mm).
+// NSWindow helpers for cross-platform code (implemented in
+// runtime_loader_mac.mm).
 void RegisterNSWindowForCefHandle(void* cef_handle, uint32_t window_id);
 void UnregisterNSWindowForCefHandle(void* cef_handle);
 void SetNSWindowResizable(void* cef_handle, bool resizable);
@@ -394,17 +413,19 @@ bool IsNSWindowResizable(void* cef_handle);
 #endif
 
 #ifdef __linux__
-// Register a CEF window for XI2 event monitoring (implemented in main_linux.cc).
+// Register a CEF window for XI2 event monitoring (implemented in
+// main_linux.cc).
 void MonitorLinuxWindowEvents(unsigned long xid);
 void SetLinuxWindowResizable(unsigned long xid, bool resizable);
 bool IsLinuxWindowResizable(unsigned long xid);
 #endif
 
 #ifdef __APPLE__
-// Show a native dialog (alert/confirm/prompt) on macOS (implemented in runtime_loader_mac.mm).
-void ShowNativeDialog_Mac(int dialog_type, const char* title, const char* message,
-                          const char* default_value, wef_dialog_result_fn callback,
-                          void* callback_data);
+// Show a native dialog (alert/confirm/prompt) on macOS (implemented in
+// runtime_loader_mac.mm).
+void ShowNativeDialog_Mac(int dialog_type, const char* title,
+                          const char* message, const char* default_value,
+                          wef_dialog_result_fn callback, void* callback_data);
 #endif
 
 #endif

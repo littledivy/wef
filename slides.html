@@ -1,18 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>WEF</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css">
-</head>
-<body>
-<div class="reveal">
-<div class="slides">
-
-<section data-markdown>
-<textarea data-template>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WEF</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.css"
+    >
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/theme/white.css"
+    >
+  </head>
+  <body>
+    <div class="reveal">
+      <div class="slides">
+        <section data-markdown>
+          <textarea
+            data-template
+          >
 # wef
 
 deno, but for the desktop.
@@ -31,20 +38,21 @@ but you're locked to one engine and its quirks.
 
 what if you could just... **pick?**
 </textarea>
-</section>
+        </section>
 
-<section>
-<h2>so we made it pluggable</h2>
-<div class="mermaid">
-graph TD
-    CEF & WebView & Servo --> ABI["C ABI — stable interface"]
-    ABI --> DC[deno_core] & YR[your runtime]
-</div>
-<p>swap the engine. app code stays the same.</p>
-</section>
+        <section>
+          <h2>so we made it pluggable</h2>
+          <div class="mermaid">
+            graph TD CEF & WebView & Servo --> ABI["C ABI — stable interface"]
+            ABI --> DC[deno_core] & YR[your runtime]
+          </div>
+          <p>swap the engine. app code stays the same.</p>
+        </section>
 
-<section data-markdown>
-<textarea data-template>
+        <section data-markdown>
+          <textarea
+            data-template
+          >
 ## rust in, js out
 
 write an `#[op2]` in Rust, get a JS class for free
@@ -109,24 +117,29 @@ let me show you the **system dashboard** →
 - **deno compile** — first-class desktop target
 - **more engines** — the C ABI makes it trivial
 </textarea>
-</section>
+        </section>
+      </div>
+    </div>
 
-</div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/markdown/markdown.js"></script>
-<script>
-  mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
-  Reveal.initialize({
-    hash: true,
-    controls: true,
-    progress: true,
-    center: true,
-    transition: 'slide',
-    plugins: [RevealMarkdown],
-  });
-</script>
-</body>
+    <script
+      src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/dist/reveal.js"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/reveal.js@5.1.0/plugin/markdown/markdown.js"
+    ></script>
+    <script>
+      mermaid.initialize({ startOnLoad: true, theme: "neutral" });
+      Reveal.initialize({
+        hash: true,
+        controls: true,
+        progress: true,
+        center: true,
+        transition: "slide",
+        plugins: [RevealMarkdown],
+      });
+    </script>
+  </body>
 </html>

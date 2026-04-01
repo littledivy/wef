@@ -24,18 +24,25 @@ static void gtk_invoke_sync(F&& fn) {
   std::mutex mtx;
   std::condition_variable cv;
   bool done = false;
-  struct Ctx { F* fn; std::mutex* mtx; std::condition_variable* cv; bool* done; };
+  struct Ctx {
+    F* fn;
+    std::mutex* mtx;
+    std::condition_variable* cv;
+    bool* done;
+  };
   Ctx ctx{&fn, &mtx, &cv, &done};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* c = static_cast<Ctx*>(data);
-    (*c->fn)();
-    {
-      std::lock_guard<std::mutex> lock(*c->mtx);
-      *c->done = true;
-    }
-    c->cv->notify_one();
-    return G_SOURCE_REMOVE;
-  }, &ctx);
+  g_idle_add(
+      [](gpointer data) -> gboolean {
+        auto* c = static_cast<Ctx*>(data);
+        (*c->fn)();
+        {
+          std::lock_guard<std::mutex> lock(*c->mtx);
+          *c->done = true;
+        }
+        c->cv->notify_one();
+        return G_SOURCE_REMOVE;
+      },
+      &ctx);
   std::unique_lock<std::mutex> lock(mtx);
   cv.wait(lock, [&done] { return done; });
 }
@@ -44,42 +51,94 @@ namespace keyboard {
 
 std::string GdkKeyvalToKey(guint keyval) {
   switch (keyval) {
-    case GDK_KEY_BackSpace: return "Backspace";
-    case GDK_KEY_Tab: case GDK_KEY_ISO_Left_Tab: return "Tab";
-    case GDK_KEY_Return: case GDK_KEY_KP_Enter: return "Enter";
-    case GDK_KEY_Escape: return "Escape";
-    case GDK_KEY_space: return " ";
-    case GDK_KEY_Delete: case GDK_KEY_KP_Delete: return "Delete";
-    case GDK_KEY_Insert: case GDK_KEY_KP_Insert: return "Insert";
-    case GDK_KEY_Home: case GDK_KEY_KP_Home: return "Home";
-    case GDK_KEY_End: case GDK_KEY_KP_End: return "End";
-    case GDK_KEY_Page_Up: case GDK_KEY_KP_Page_Up: return "PageUp";
-    case GDK_KEY_Page_Down: case GDK_KEY_KP_Page_Down: return "PageDown";
-    case GDK_KEY_Left: case GDK_KEY_KP_Left: return "ArrowLeft";
-    case GDK_KEY_Right: case GDK_KEY_KP_Right: return "ArrowRight";
-    case GDK_KEY_Up: case GDK_KEY_KP_Up: return "ArrowUp";
-    case GDK_KEY_Down: case GDK_KEY_KP_Down: return "ArrowDown";
-    case GDK_KEY_Shift_L: case GDK_KEY_Shift_R: return "Shift";
-    case GDK_KEY_Control_L: case GDK_KEY_Control_R: return "Control";
-    case GDK_KEY_Alt_L: case GDK_KEY_Alt_R: return "Alt";
-    case GDK_KEY_Meta_L: case GDK_KEY_Meta_R:
-    case GDK_KEY_Super_L: case GDK_KEY_Super_R: return "Meta";
-    case GDK_KEY_Caps_Lock: return "CapsLock";
-    case GDK_KEY_Num_Lock: return "NumLock";
-    case GDK_KEY_Scroll_Lock: return "ScrollLock";
-    case GDK_KEY_F1: return "F1";
-    case GDK_KEY_F2: return "F2";
-    case GDK_KEY_F3: return "F3";
-    case GDK_KEY_F4: return "F4";
-    case GDK_KEY_F5: return "F5";
-    case GDK_KEY_F6: return "F6";
-    case GDK_KEY_F7: return "F7";
-    case GDK_KEY_F8: return "F8";
-    case GDK_KEY_F9: return "F9";
-    case GDK_KEY_F10: return "F10";
-    case GDK_KEY_F11: return "F11";
-    case GDK_KEY_F12: return "F12";
-    case GDK_KEY_Pause: return "Pause";
+    case GDK_KEY_BackSpace:
+      return "Backspace";
+    case GDK_KEY_Tab:
+    case GDK_KEY_ISO_Left_Tab:
+      return "Tab";
+    case GDK_KEY_Return:
+    case GDK_KEY_KP_Enter:
+      return "Enter";
+    case GDK_KEY_Escape:
+      return "Escape";
+    case GDK_KEY_space:
+      return " ";
+    case GDK_KEY_Delete:
+    case GDK_KEY_KP_Delete:
+      return "Delete";
+    case GDK_KEY_Insert:
+    case GDK_KEY_KP_Insert:
+      return "Insert";
+    case GDK_KEY_Home:
+    case GDK_KEY_KP_Home:
+      return "Home";
+    case GDK_KEY_End:
+    case GDK_KEY_KP_End:
+      return "End";
+    case GDK_KEY_Page_Up:
+    case GDK_KEY_KP_Page_Up:
+      return "PageUp";
+    case GDK_KEY_Page_Down:
+    case GDK_KEY_KP_Page_Down:
+      return "PageDown";
+    case GDK_KEY_Left:
+    case GDK_KEY_KP_Left:
+      return "ArrowLeft";
+    case GDK_KEY_Right:
+    case GDK_KEY_KP_Right:
+      return "ArrowRight";
+    case GDK_KEY_Up:
+    case GDK_KEY_KP_Up:
+      return "ArrowUp";
+    case GDK_KEY_Down:
+    case GDK_KEY_KP_Down:
+      return "ArrowDown";
+    case GDK_KEY_Shift_L:
+    case GDK_KEY_Shift_R:
+      return "Shift";
+    case GDK_KEY_Control_L:
+    case GDK_KEY_Control_R:
+      return "Control";
+    case GDK_KEY_Alt_L:
+    case GDK_KEY_Alt_R:
+      return "Alt";
+    case GDK_KEY_Meta_L:
+    case GDK_KEY_Meta_R:
+    case GDK_KEY_Super_L:
+    case GDK_KEY_Super_R:
+      return "Meta";
+    case GDK_KEY_Caps_Lock:
+      return "CapsLock";
+    case GDK_KEY_Num_Lock:
+      return "NumLock";
+    case GDK_KEY_Scroll_Lock:
+      return "ScrollLock";
+    case GDK_KEY_F1:
+      return "F1";
+    case GDK_KEY_F2:
+      return "F2";
+    case GDK_KEY_F3:
+      return "F3";
+    case GDK_KEY_F4:
+      return "F4";
+    case GDK_KEY_F5:
+      return "F5";
+    case GDK_KEY_F6:
+      return "F6";
+    case GDK_KEY_F7:
+      return "F7";
+    case GDK_KEY_F8:
+      return "F8";
+    case GDK_KEY_F9:
+      return "F9";
+    case GDK_KEY_F10:
+      return "F10";
+    case GDK_KEY_F11:
+      return "F11";
+    case GDK_KEY_F12:
+      return "F12";
+    case GDK_KEY_Pause:
+      return "Pause";
     default: {
       guint32 uc = gdk_keyval_to_unicode(keyval);
       if (uc > 0 && g_unichar_isprint(uc)) {
@@ -95,110 +154,199 @@ std::string GdkKeyvalToKey(guint keyval) {
 
 std::string GdkKeycodeToCode(guint16 hardware_keycode) {
   switch (hardware_keycode) {
-    case 9: return "Escape";
-    case 10: return "Digit1";
-    case 11: return "Digit2";
-    case 12: return "Digit3";
-    case 13: return "Digit4";
-    case 14: return "Digit5";
-    case 15: return "Digit6";
-    case 16: return "Digit7";
-    case 17: return "Digit8";
-    case 18: return "Digit9";
-    case 19: return "Digit0";
-    case 20: return "Minus";
-    case 21: return "Equal";
-    case 22: return "Backspace";
-    case 23: return "Tab";
-    case 24: return "KeyQ";
-    case 25: return "KeyW";
-    case 26: return "KeyE";
-    case 27: return "KeyR";
-    case 28: return "KeyT";
-    case 29: return "KeyY";
-    case 30: return "KeyU";
-    case 31: return "KeyI";
-    case 32: return "KeyO";
-    case 33: return "KeyP";
-    case 34: return "BracketLeft";
-    case 35: return "BracketRight";
-    case 36: return "Enter";
-    case 37: return "ControlLeft";
-    case 38: return "KeyA";
-    case 39: return "KeyS";
-    case 40: return "KeyD";
-    case 41: return "KeyF";
-    case 42: return "KeyG";
-    case 43: return "KeyH";
-    case 44: return "KeyJ";
-    case 45: return "KeyK";
-    case 46: return "KeyL";
-    case 47: return "Semicolon";
-    case 48: return "Quote";
-    case 49: return "Backquote";
-    case 50: return "ShiftLeft";
-    case 51: return "Backslash";
-    case 52: return "KeyZ";
-    case 53: return "KeyX";
-    case 54: return "KeyC";
-    case 55: return "KeyV";
-    case 56: return "KeyB";
-    case 57: return "KeyN";
-    case 58: return "KeyM";
-    case 59: return "Comma";
-    case 60: return "Period";
-    case 61: return "Slash";
-    case 62: return "ShiftRight";
-    case 64: return "AltLeft";
-    case 65: return "Space";
-    case 66: return "CapsLock";
-    case 67: return "F1";
-    case 68: return "F2";
-    case 69: return "F3";
-    case 70: return "F4";
-    case 71: return "F5";
-    case 72: return "F6";
-    case 73: return "F7";
-    case 74: return "F8";
-    case 75: return "F9";
-    case 76: return "F10";
-    case 95: return "F11";
-    case 96: return "F12";
-    case 105: return "ControlRight";
-    case 108: return "AltRight";
-    case 110: return "Home";
-    case 111: return "ArrowUp";
-    case 112: return "PageUp";
-    case 113: return "ArrowLeft";
-    case 114: return "ArrowRight";
-    case 115: return "End";
-    case 116: return "ArrowDown";
-    case 117: return "PageDown";
-    case 118: return "Insert";
-    case 119: return "Delete";
-    case 133: return "MetaLeft";
-    case 134: return "MetaRight";
-    default: return "Unidentified";
+    case 9:
+      return "Escape";
+    case 10:
+      return "Digit1";
+    case 11:
+      return "Digit2";
+    case 12:
+      return "Digit3";
+    case 13:
+      return "Digit4";
+    case 14:
+      return "Digit5";
+    case 15:
+      return "Digit6";
+    case 16:
+      return "Digit7";
+    case 17:
+      return "Digit8";
+    case 18:
+      return "Digit9";
+    case 19:
+      return "Digit0";
+    case 20:
+      return "Minus";
+    case 21:
+      return "Equal";
+    case 22:
+      return "Backspace";
+    case 23:
+      return "Tab";
+    case 24:
+      return "KeyQ";
+    case 25:
+      return "KeyW";
+    case 26:
+      return "KeyE";
+    case 27:
+      return "KeyR";
+    case 28:
+      return "KeyT";
+    case 29:
+      return "KeyY";
+    case 30:
+      return "KeyU";
+    case 31:
+      return "KeyI";
+    case 32:
+      return "KeyO";
+    case 33:
+      return "KeyP";
+    case 34:
+      return "BracketLeft";
+    case 35:
+      return "BracketRight";
+    case 36:
+      return "Enter";
+    case 37:
+      return "ControlLeft";
+    case 38:
+      return "KeyA";
+    case 39:
+      return "KeyS";
+    case 40:
+      return "KeyD";
+    case 41:
+      return "KeyF";
+    case 42:
+      return "KeyG";
+    case 43:
+      return "KeyH";
+    case 44:
+      return "KeyJ";
+    case 45:
+      return "KeyK";
+    case 46:
+      return "KeyL";
+    case 47:
+      return "Semicolon";
+    case 48:
+      return "Quote";
+    case 49:
+      return "Backquote";
+    case 50:
+      return "ShiftLeft";
+    case 51:
+      return "Backslash";
+    case 52:
+      return "KeyZ";
+    case 53:
+      return "KeyX";
+    case 54:
+      return "KeyC";
+    case 55:
+      return "KeyV";
+    case 56:
+      return "KeyB";
+    case 57:
+      return "KeyN";
+    case 58:
+      return "KeyM";
+    case 59:
+      return "Comma";
+    case 60:
+      return "Period";
+    case 61:
+      return "Slash";
+    case 62:
+      return "ShiftRight";
+    case 64:
+      return "AltLeft";
+    case 65:
+      return "Space";
+    case 66:
+      return "CapsLock";
+    case 67:
+      return "F1";
+    case 68:
+      return "F2";
+    case 69:
+      return "F3";
+    case 70:
+      return "F4";
+    case 71:
+      return "F5";
+    case 72:
+      return "F6";
+    case 73:
+      return "F7";
+    case 74:
+      return "F8";
+    case 75:
+      return "F9";
+    case 76:
+      return "F10";
+    case 95:
+      return "F11";
+    case 96:
+      return "F12";
+    case 105:
+      return "ControlRight";
+    case 108:
+      return "AltRight";
+    case 110:
+      return "Home";
+    case 111:
+      return "ArrowUp";
+    case 112:
+      return "PageUp";
+    case 113:
+      return "ArrowLeft";
+    case 114:
+      return "ArrowRight";
+    case 115:
+      return "End";
+    case 116:
+      return "ArrowDown";
+    case 117:
+      return "PageDown";
+    case 118:
+      return "Insert";
+    case 119:
+      return "Delete";
+    case 133:
+      return "MetaLeft";
+    case 134:
+      return "MetaRight";
+    default:
+      return "Unidentified";
   }
 }
 
 uint32_t GdkModifiersToWef(guint state) {
   uint32_t modifiers = 0;
-  if (state & GDK_SHIFT_MASK) modifiers |= WEF_MOD_SHIFT;
-  if (state & GDK_CONTROL_MASK) modifiers |= WEF_MOD_CONTROL;
-  if (state & GDK_MOD1_MASK) modifiers |= WEF_MOD_ALT;
-  if (state & GDK_MOD4_MASK) modifiers |= WEF_MOD_META;
+  if (state & GDK_SHIFT_MASK)
+    modifiers |= WEF_MOD_SHIFT;
+  if (state & GDK_CONTROL_MASK)
+    modifiers |= WEF_MOD_CONTROL;
+  if (state & GDK_MOD1_MASK)
+    modifiers |= WEF_MOD_ALT;
+  if (state & GDK_MOD4_MASK)
+    modifiers |= WEF_MOD_META;
   return modifiers;
 }
 
-} // namespace keyboard
+}  // namespace keyboard
 
 // GtkWidget → wef_id mapping for event routing
 static std::map<GtkWidget*, uint32_t> g_widget_to_wef_id;
 static std::mutex g_widget_mutex;
 
 static uint32_t WefIdForWidget(GtkWidget* widget) {
-  if (!widget) return 0;
+  if (!widget)
+    return 0;
   // Walk up to find the toplevel window
   GtkWidget* toplevel = gtk_widget_get_toplevel(widget);
   std::lock_guard<std::mutex> lock(g_widget_mutex);
@@ -220,8 +368,8 @@ static void UnregisterWidget(GtkWidget* widget) {
 struct LinuxWindowState {
   uint32_t window_id;
   GtkWidget* window;
-  GtkWidget* vbox;       // container for menu bar + webview
-  GtkWidget* menu_bar;   // per-window menu bar (nullptr = none)
+  GtkWidget* vbox;      // container for menu bar + webview
+  GtkWidget* menu_bar;  // per-window menu bar (nullptr = none)
   WebKitWebView* webview;
   WebKitUserContentManager* content_manager;
 };
@@ -229,9 +377,11 @@ struct LinuxWindowState {
 // Track the click_count from press events for use in the corresponding release.
 static int32_t g_last_click_count = 1;
 
-static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpointer user_data) {
+static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event,
+                                gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
 
   int state;
   int32_t click_count;
@@ -263,12 +413,24 @@ static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpoint
 
   int button;
   switch (event->button) {
-    case 1: button = WEF_MOUSE_BUTTON_LEFT; break;
-    case 2: button = WEF_MOUSE_BUTTON_MIDDLE; break;
-    case 3: button = WEF_MOUSE_BUTTON_RIGHT; break;
-    case 8: button = WEF_MOUSE_BUTTON_BACK; break;
-    case 9: button = WEF_MOUSE_BUTTON_FORWARD; break;
-    default: button = static_cast<int>(event->button); break;
+    case 1:
+      button = WEF_MOUSE_BUTTON_LEFT;
+      break;
+    case 2:
+      button = WEF_MOUSE_BUTTON_MIDDLE;
+      break;
+    case 3:
+      button = WEF_MOUSE_BUTTON_RIGHT;
+      break;
+    case 8:
+      button = WEF_MOUSE_BUTTON_BACK;
+      break;
+    case 9:
+      button = WEF_MOUSE_BUTTON_FORWARD;
+      break;
+    default:
+      button = static_cast<int>(event->button);
+      break;
   }
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
 
@@ -278,26 +440,39 @@ static gboolean on_button_event(GtkWidget* widget, GdkEventButton* event, gpoint
   return FALSE;
 }
 
-static gboolean on_motion_event(GtkWidget* widget, GdkEventMotion* event, gpointer user_data) {
+static gboolean on_motion_event(GtkWidget* widget, GdkEventMotion* event,
+                                gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
-  RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(wid, event->x, event->y, modifiers);
+  RuntimeLoader::GetInstance()->DispatchMouseMoveEvent(wid, event->x, event->y,
+                                                       modifiers);
   return FALSE;
 }
 
-static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpointer user_data) {
+static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event,
+                                gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
 
   double delta_x = 0, delta_y = 0;
   int32_t delta_mode = WEF_WHEEL_DELTA_LINE;
 
   switch (event->direction) {
-    case GDK_SCROLL_UP:    delta_y = -1.0; break;
-    case GDK_SCROLL_DOWN:  delta_y = 1.0; break;
-    case GDK_SCROLL_LEFT:  delta_x = -1.0; break;
-    case GDK_SCROLL_RIGHT: delta_x = 1.0; break;
+    case GDK_SCROLL_UP:
+      delta_y = -1.0;
+      break;
+    case GDK_SCROLL_DOWN:
+      delta_y = 1.0;
+      break;
+    case GDK_SCROLL_LEFT:
+      delta_x = -1.0;
+      break;
+    case GDK_SCROLL_RIGHT:
+      delta_x = 1.0;
+      break;
     case GDK_SCROLL_SMOOTH:
       gdk_event_get_scroll_deltas((GdkEvent*)event, &delta_x, &delta_y);
       delta_mode = WEF_WHEEL_DELTA_PIXEL;
@@ -310,49 +485,67 @@ static gboolean on_scroll_event(GtkWidget* widget, GdkEventScroll* event, gpoint
   return FALSE;
 }
 
-static gboolean on_enter_notify_event(GtkWidget* widget, GdkEventCrossing* event, gpointer user_data) {
+static gboolean on_enter_notify_event(GtkWidget* widget,
+                                      GdkEventCrossing* event,
+                                      gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
-  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(wid, 1, event->x, event->y, modifiers);
+  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(
+      wid, 1, event->x, event->y, modifiers);
   return FALSE;
 }
 
-static gboolean on_leave_notify_event(GtkWidget* widget, GdkEventCrossing* event, gpointer user_data) {
+static gboolean on_leave_notify_event(GtkWidget* widget,
+                                      GdkEventCrossing* event,
+                                      gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
-  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(wid, 0, event->x, event->y, modifiers);
+  RuntimeLoader::GetInstance()->DispatchCursorEnterLeaveEvent(
+      wid, 0, event->x, event->y, modifiers);
   return FALSE;
 }
 
-static gboolean on_focus_in_event(GtkWidget* widget, GdkEventFocus* event, gpointer user_data) {
+static gboolean on_focus_in_event(GtkWidget* widget, GdkEventFocus* event,
+                                  gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
   RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
   return FALSE;
 }
 
-static gboolean on_focus_out_event(GtkWidget* widget, GdkEventFocus* event, gpointer user_data) {
+static gboolean on_focus_out_event(GtkWidget* widget, GdkEventFocus* event,
+                                   gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
   RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
   return FALSE;
 }
 
-static gboolean on_configure_event(GtkWidget* widget, GdkEventConfigure* event, gpointer user_data) {
+static gboolean on_configure_event(GtkWidget* widget, GdkEventConfigure* event,
+                                   gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
-  RuntimeLoader::GetInstance()->DispatchResizeEvent(wid, event->width, event->height);
+  if (wid == 0)
+    return FALSE;
+  RuntimeLoader::GetInstance()->DispatchResizeEvent(wid, event->width,
+                                                    event->height);
   RuntimeLoader::GetInstance()->DispatchMoveEvent(wid, event->x, event->y);
   return FALSE;
 }
 
-static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event, gpointer user_data) {
+static gboolean on_key_event(GtkWidget* widget, GdkEventKey* event,
+                             gpointer user_data) {
   uint32_t wid = WefIdForWidget(widget);
-  if (wid == 0) return FALSE;
+  if (wid == 0)
+    return FALSE;
 
-  int state = (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
+  int state =
+      (event->type == GDK_KEY_PRESS) ? WEF_KEY_PRESSED : WEF_KEY_RELEASED;
   std::string key = keyboard::GdkKeyvalToKey(event->keyval);
   std::string code = keyboard::GdkKeycodeToCode(event->hardware_keycode);
   uint32_t modifiers = keyboard::GdkModifiersToWef(event->state);
@@ -393,26 +586,28 @@ class WebKitGTKBackend : public WefBackend {
   void Focus(uint32_t window_id) override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
-  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) override;
+  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id,
+                        wef::ValuePtr args) override;
   void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) override;
-  void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
+  void RespondToJsCall(uint32_t window_id, uint64_t call_id,
+                       wef::ValuePtr result, wef::ValuePtr error) override;
 
   void Run() override;
 
   void SetApplicationMenu(uint32_t window_id, wef_value_t* menu_template,
                           const wef_backend_api_t* api,
-                          wef_menu_click_fn on_click, void* on_click_data) override;
+                          wef_menu_click_fn on_click,
+                          void* on_click_data) override;
 
   void ShowContextMenu(uint32_t window_id, int x, int y,
-                       wef_value_t* menu_template,
-                       const wef_backend_api_t* api,
-                       wef_menu_click_fn on_click, void* on_click_data) override;
+                       wef_value_t* menu_template, const wef_backend_api_t* api,
+                       wef_menu_click_fn on_click,
+                       void* on_click_data) override;
 
   void OpenDevTools(uint32_t window_id) override;
 
-  void ShowDialog(uint32_t window_id, int dialog_type,
-                  const std::string& title, const std::string& message,
-                  const std::string& default_value,
+  void ShowDialog(uint32_t window_id, int dialog_type, const std::string& title,
+                  const std::string& message, const std::string& default_value,
                   wef_dialog_result_fn callback, void* callback_data) override;
 
   void HandleJsMessage(uint32_t window_id, const char* json);
@@ -428,9 +623,11 @@ class WebKitGTKBackend : public WefBackend {
 static WebKitGTKBackend* g_gtk_backend = nullptr;
 
 // GtkWidget → window_id mapping for script message routing
-static std::map<WebKitUserContentManager*, uint32_t> g_content_manager_to_wef_id;
+static std::map<WebKitUserContentManager*, uint32_t>
+    g_content_manager_to_wef_id;
 
-static std::string BuildInitScript(const std::string& ns, const std::string& postMessage) {
+static std::string BuildInitScript(const std::string& ns,
+                                   const std::string& postMessage) {
   return R"JS(
 (function() {
   const pendingCalls = new Map();
@@ -471,13 +668,15 @@ static std::string BuildInitScript(const std::string& ns, const std::string& pos
             return arg;
           });
 
-          )JS" + postMessage + R"JS(
+          )JS" +
+         postMessage + R"JS(
         });
       }
     });
   }
 
-  window[")JS" + ns + R"JS("] = createWefProxy();
+  window[")JS" +
+         ns + R"JS("] = createWefProxy();
 
   window.__wefRespond = function(callId, result, error) {
     const pending = pendingCalls.get(callId);
@@ -567,7 +766,8 @@ WebKitGTKBackend::WebKitGTKBackend() {
 WebKitGTKBackend::~WebKitGTKBackend() {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   for (auto& [wid, state] : windows_) {
-    webkit_user_content_manager_unregister_script_message_handler(state.content_manager, "wef");
+    webkit_user_content_manager_unregister_script_message_handler(
+        state.content_manager, "wef");
     g_content_manager_to_wef_id.erase(state.content_manager);
     UnregisterWidget(state.window);
   }
@@ -581,8 +781,8 @@ LinuxWindowState* WebKitGTKBackend::GetWindow(uint32_t window_id) {
 }
 
 static gboolean on_script_dialog(WebKitWebView* webview,
-                                  WebKitScriptDialog* dialog,
-                                  gpointer user_data) {
+                                 WebKitScriptDialog* dialog,
+                                 gpointer user_data) {
   WebKitScriptDialogType type = webkit_script_dialog_get_dialog_type(dialog);
   const gchar* message = webkit_script_dialog_get_message(dialog);
 
@@ -590,9 +790,9 @@ static gboolean on_script_dialog(WebKitWebView* webview,
   GtkWindow* parent = GTK_IS_WINDOW(toplevel) ? GTK_WINDOW(toplevel) : nullptr;
 
   if (type == WEBKIT_SCRIPT_DIALOG_ALERT) {
-    GtkWidget* dlg = gtk_message_dialog_new(
-        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
-        "%s", message);
+    GtkWidget* dlg =
+        gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
+                               GTK_BUTTONS_OK, "%s", message);
     gtk_dialog_run(GTK_DIALOG(dlg));
     gtk_widget_destroy(dlg);
     webkit_script_dialog_confirm_set_confirmed(dialog, TRUE);
@@ -600,22 +800,24 @@ static gboolean on_script_dialog(WebKitWebView* webview,
   }
 
   if (type == WEBKIT_SCRIPT_DIALOG_CONFIRM) {
-    GtkWidget* dlg = gtk_message_dialog_new(
-        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
-        "%s", message);
+    GtkWidget* dlg =
+        gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+                               GTK_BUTTONS_OK_CANCEL, "%s", message);
     gint result = gtk_dialog_run(GTK_DIALOG(dlg));
     gtk_widget_destroy(dlg);
-    webkit_script_dialog_confirm_set_confirmed(dialog, result == GTK_RESPONSE_OK);
+    webkit_script_dialog_confirm_set_confirmed(dialog,
+                                               result == GTK_RESPONSE_OK);
     return TRUE;
   }
 
   if (type == WEBKIT_SCRIPT_DIALOG_PROMPT) {
-    GtkWidget* dlg = gtk_message_dialog_new(
-        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
-        "%s", message);
+    GtkWidget* dlg =
+        gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+                               GTK_BUTTONS_OK_CANCEL, "%s", message);
     GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dlg));
     GtkWidget* entry = gtk_entry_new();
-    const gchar* default_text = webkit_script_dialog_prompt_get_default_text(dialog);
+    const gchar* default_text =
+        webkit_script_dialog_prompt_get_default_text(dialog);
     if (default_text) {
       gtk_entry_set_text(GTK_ENTRY(entry), default_text);
     }
@@ -623,9 +825,11 @@ static gboolean on_script_dialog(WebKitWebView* webview,
     gtk_widget_show(entry);
     gint result = gtk_dialog_run(GTK_DIALOG(dlg));
     if (result == GTK_RESPONSE_OK) {
-      webkit_script_dialog_prompt_set_text(dialog, gtk_entry_get_text(GTK_ENTRY(entry)));
+      webkit_script_dialog_prompt_set_text(
+          dialog, gtk_entry_get_text(GTK_ENTRY(entry)));
     }
-    webkit_script_dialog_confirm_set_confirmed(dialog, result == GTK_RESPONSE_OK);
+    webkit_script_dialog_confirm_set_confirmed(dialog,
+                                               result == GTK_RESPONSE_OK);
     gtk_widget_destroy(dlg);
     return TRUE;
   }
@@ -637,33 +841,47 @@ void WebKitGTKBackend::CreateWindow(uint32_t window_id, int width, int height) {
   GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_default_size(GTK_WINDOW(window), width, height);
   g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), nullptr);
-  g_signal_connect(window, "key-press-event", G_CALLBACK(on_key_event), nullptr);
-  g_signal_connect(window, "key-release-event", G_CALLBACK(on_key_event), nullptr);
-  g_signal_connect(window, "button-press-event", G_CALLBACK(on_button_event), nullptr);
-  g_signal_connect(window, "button-release-event", G_CALLBACK(on_button_event), nullptr);
+  g_signal_connect(window, "key-press-event", G_CALLBACK(on_key_event),
+                   nullptr);
+  g_signal_connect(window, "key-release-event", G_CALLBACK(on_key_event),
+                   nullptr);
+  g_signal_connect(window, "button-press-event", G_CALLBACK(on_button_event),
+                   nullptr);
+  g_signal_connect(window, "button-release-event", G_CALLBACK(on_button_event),
+                   nullptr);
   gtk_widget_add_events(window, GDK_POINTER_MOTION_MASK | GDK_SCROLL_MASK |
-                                GDK_SMOOTH_SCROLL_MASK | GDK_ENTER_NOTIFY_MASK |
-                                GDK_LEAVE_NOTIFY_MASK);
-  g_signal_connect(window, "motion-notify-event", G_CALLBACK(on_motion_event), nullptr);
-  g_signal_connect(window, "scroll-event", G_CALLBACK(on_scroll_event), nullptr);
-  g_signal_connect(window, "enter-notify-event", G_CALLBACK(on_enter_notify_event), nullptr);
-  g_signal_connect(window, "leave-notify-event", G_CALLBACK(on_leave_notify_event), nullptr);
-  g_signal_connect(window, "focus-in-event", G_CALLBACK(on_focus_in_event), nullptr);
-  g_signal_connect(window, "focus-out-event", G_CALLBACK(on_focus_out_event), nullptr);
-  g_signal_connect(window, "configure-event", G_CALLBACK(on_configure_event), nullptr);
+                                    GDK_SMOOTH_SCROLL_MASK |
+                                    GDK_ENTER_NOTIFY_MASK |
+                                    GDK_LEAVE_NOTIFY_MASK);
+  g_signal_connect(window, "motion-notify-event", G_CALLBACK(on_motion_event),
+                   nullptr);
+  g_signal_connect(window, "scroll-event", G_CALLBACK(on_scroll_event),
+                   nullptr);
+  g_signal_connect(window, "enter-notify-event",
+                   G_CALLBACK(on_enter_notify_event), nullptr);
+  g_signal_connect(window, "leave-notify-event",
+                   G_CALLBACK(on_leave_notify_event), nullptr);
+  g_signal_connect(window, "focus-in-event", G_CALLBACK(on_focus_in_event),
+                   nullptr);
+  g_signal_connect(window, "focus-out-event", G_CALLBACK(on_focus_out_event),
+                   nullptr);
+  g_signal_connect(window, "configure-event", G_CALLBACK(on_configure_event),
+                   nullptr);
 
   RegisterWidget(window, window_id);
 
   WebKitUserContentManager* content_manager = webkit_user_content_manager_new();
   g_signal_connect(content_manager, "script-message-received::wef",
                    G_CALLBACK(on_script_message), nullptr);
-  webkit_user_content_manager_register_script_message_handler(content_manager, "wef");
+  webkit_user_content_manager_register_script_message_handler(content_manager,
+                                                              "wef");
   g_content_manager_to_wef_id[content_manager] = window_id;
 
   WebKitWebView* webview = WEBKIT_WEB_VIEW(
       webkit_web_view_new_with_user_content_manager(content_manager));
 
-  g_signal_connect(webview, "script-dialog", G_CALLBACK(on_script_dialog), nullptr);
+  g_signal_connect(webview, "script-dialog", G_CALLBACK(on_script_dialog),
+                   nullptr);
 
   WebKitSettings* wk_settings = webkit_web_view_get_settings(webview);
   webkit_settings_set_enable_developer_extras(wk_settings, TRUE);
@@ -676,10 +894,8 @@ void WebKitGTKBackend::CreateWindow(uint32_t window_id, int width, int height) {
       "            args: processedArgs\n"
       "          }));");
   WebKitUserScript* script = webkit_user_script_new(
-      initScript.c_str(),
-      WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
-      WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START,
-      nullptr, nullptr);
+      initScript.c_str(), WEBKIT_USER_CONTENT_INJECT_ALL_FRAMES,
+      WEBKIT_USER_SCRIPT_INJECT_AT_DOCUMENT_START, nullptr, nullptr);
   webkit_user_content_manager_add_script(content_manager, script);
   webkit_user_script_unref(script);
 
@@ -707,7 +923,8 @@ void WebKitGTKBackend::CloseWindow(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
-    webkit_user_content_manager_unregister_script_message_handler(state->content_manager, "wef");
+    webkit_user_content_manager_unregister_script_message_handler(
+        state->content_manager, "wef");
     g_content_manager_to_wef_id.erase(state->content_manager);
     UnregisterWidget(state->window);
     gtk_widget_destroy(state->window);
@@ -731,23 +948,27 @@ void WebKitGTKBackend::SetTitle(uint32_t window_id, const std::string& title) {
   }
 }
 
-void WebKitGTKBackend::ExecuteJs(uint32_t window_id, const std::string& script) {
+void WebKitGTKBackend::ExecuteJs(uint32_t window_id,
+                                 const std::string& script) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
-    webkit_web_view_run_javascript(state->webview, script.c_str(),
-                                    nullptr, nullptr, nullptr);
+    webkit_web_view_run_javascript(state->webview, script.c_str(), nullptr,
+                                   nullptr, nullptr);
   }
 }
 
 void WebKitGTKBackend::Quit() {
-  g_idle_add([](gpointer) -> gboolean {
-    gtk_main_quit();
-    return G_SOURCE_REMOVE;
-  }, nullptr);
+  g_idle_add(
+      [](gpointer) -> gboolean {
+        gtk_main_quit();
+        return G_SOURCE_REMOVE;
+      },
+      nullptr);
 }
 
-void WebKitGTKBackend::SetWindowSize(uint32_t window_id, int width, int height) {
+void WebKitGTKBackend::SetWindowSize(uint32_t window_id, int width,
+                                     int height) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
@@ -755,7 +976,8 @@ void WebKitGTKBackend::SetWindowSize(uint32_t window_id, int width, int height) 
   }
 }
 
-void WebKitGTKBackend::GetWindowSize(uint32_t window_id, int* width, int* height) {
+void WebKitGTKBackend::GetWindowSize(uint32_t window_id, int* width,
+                                     int* height) {
   int w = 0, h = 0;
   gtk_invoke_sync([&] {
     std::lock_guard<std::mutex> lock(windows_mutex_);
@@ -764,8 +986,10 @@ void WebKitGTKBackend::GetWindowSize(uint32_t window_id, int* width, int* height
       gtk_window_get_size(GTK_WINDOW(state->window), &w, &h);
     }
   });
-  if (width) *width = w;
-  if (height) *height = h;
+  if (width)
+    *width = w;
+  if (height)
+    *height = h;
 }
 
 void WebKitGTKBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
@@ -785,8 +1009,10 @@ void WebKitGTKBackend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
       gtk_window_get_position(GTK_WINDOW(state->window), &wx, &wy);
     }
   });
-  if (x) *x = wx;
-  if (y) *y = wy;
+  if (x)
+    *x = wx;
+  if (y)
+    *y = wy;
 }
 
 void WebKitGTKBackend::SetResizable(uint32_t window_id, bool resizable) {
@@ -871,57 +1097,67 @@ void WebKitGTKBackend::Focus(uint32_t window_id) {
 }
 
 void WebKitGTKBackend::PostUiTask(void (*task)(void*), void* data) {
-  struct TaskData { void (*task)(void*); void* data; };
+  struct TaskData {
+    void (*task)(void*);
+    void* data;
+  };
   auto* td = new TaskData{task, data};
-  g_idle_add([](gpointer data) -> gboolean {
-    auto* td = static_cast<TaskData*>(data);
-    td->task(td->data);
-    delete td;
-    return G_SOURCE_REMOVE;
-  }, td);
+  g_idle_add(
+      [](gpointer data) -> gboolean {
+        auto* td = static_cast<TaskData*>(data);
+        td->task(td->data);
+        delete td;
+        return G_SOURCE_REMOVE;
+      },
+      td);
 }
 
-void WebKitGTKBackend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) {
+void WebKitGTKBackend::InvokeJsCallback(uint32_t window_id,
+                                        uint64_t callback_id,
+                                        wef::ValuePtr args) {
   std::string argsJson = json::Serialize(args);
   std::string script = "window.__wefInvokeCallback(" +
                        std::to_string(callback_id) + ", " + argsJson + ");";
   std::lock_guard<std::mutex> lock(windows_mutex_);
   if (window_id == 0) {
     for (auto& [wid, state] : windows_) {
-      webkit_web_view_run_javascript(state.webview, script.c_str(),
-                                      nullptr, nullptr, nullptr);
+      webkit_web_view_run_javascript(state.webview, script.c_str(), nullptr,
+                                     nullptr, nullptr);
     }
   } else {
     auto* state = GetWindow(window_id);
     if (state) {
-      webkit_web_view_run_javascript(state->webview, script.c_str(),
-                                      nullptr, nullptr, nullptr);
+      webkit_web_view_run_javascript(state->webview, script.c_str(), nullptr,
+                                     nullptr, nullptr);
     }
   }
 }
 
-void WebKitGTKBackend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) {
-  std::string script = "window.__wefReleaseCallback(" +
-                       std::to_string(callback_id) + ");";
+void WebKitGTKBackend::ReleaseJsCallback(uint32_t window_id,
+                                         uint64_t callback_id) {
+  std::string script =
+      "window.__wefReleaseCallback(" + std::to_string(callback_id) + ");";
   std::lock_guard<std::mutex> lock(windows_mutex_);
   if (window_id == 0) {
     for (auto& [wid, state] : windows_) {
-      webkit_web_view_run_javascript(state.webview, script.c_str(),
-                                      nullptr, nullptr, nullptr);
+      webkit_web_view_run_javascript(state.webview, script.c_str(), nullptr,
+                                     nullptr, nullptr);
     }
   } else {
     auto* state = GetWindow(window_id);
     if (state) {
-      webkit_web_view_run_javascript(state->webview, script.c_str(),
-                                      nullptr, nullptr, nullptr);
+      webkit_web_view_run_javascript(state->webview, script.c_str(), nullptr,
+                                     nullptr, nullptr);
     }
   }
 }
 
 void WebKitGTKBackend::RespondToJsCall(uint32_t window_id, uint64_t call_id,
-                                        wef::ValuePtr result, wef::ValuePtr error) {
+                                       wef::ValuePtr result,
+                                       wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
-  std::string errorJson = (error && !error->IsNull()) ? json::Serialize(error) : "null";
+  std::string errorJson =
+      (error && !error->IsNull()) ? json::Serialize(error) : "null";
   std::string script;
   if (errorJson == "null") {
     script = "window.__wefRespond(" + std::to_string(call_id) + ", " +
@@ -933,8 +1169,8 @@ void WebKitGTKBackend::RespondToJsCall(uint32_t window_id, uint64_t call_id,
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
-    webkit_web_view_run_javascript(state->webview, script.c_str(),
-                                    nullptr, nullptr, nullptr);
+    webkit_web_view_run_javascript(state->webview, script.c_str(), nullptr,
+                                   nullptr, nullptr);
   }
 }
 
@@ -942,9 +1178,11 @@ void WebKitGTKBackend::Run() {
   gtk_main();
 }
 
-void WebKitGTKBackend::HandleJsMessage(uint32_t window_id, const char* jsonStr) {
+void WebKitGTKBackend::HandleJsMessage(uint32_t window_id,
+                                       const char* jsonStr) {
   wef::ValuePtr msg = json::ParseJson(jsonStr);
-  if (!msg || !msg->IsDict()) return;
+  if (!msg || !msg->IsDict())
+    return;
 
   const auto& dict = msg->GetDict();
 
@@ -952,7 +1190,8 @@ void WebKitGTKBackend::HandleJsMessage(uint32_t window_id, const char* jsonStr) 
   auto methodIt = dict.find("method");
   auto argsIt = dict.find("args");
 
-  if (callIdIt == dict.end() || methodIt == dict.end()) return;
+  if (callIdIt == dict.end() || methodIt == dict.end())
+    return;
 
   uint64_t call_id = 0;
   if (callIdIt->second->IsInt()) {
@@ -961,8 +1200,10 @@ void WebKitGTKBackend::HandleJsMessage(uint32_t window_id, const char* jsonStr) 
     call_id = static_cast<uint64_t>(callIdIt->second->GetDouble());
   }
 
-  std::string method = methodIt->second->IsString() ? methodIt->second->GetString() : "";
-  wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
+  std::string method =
+      methodIt->second->IsString() ? methodIt->second->GetString() : "";
+  wef::ValuePtr args =
+      (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
   RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
 }
@@ -978,28 +1219,34 @@ struct GtkMenuCallbackData {
   std::string item_id;
 };
 
-static void on_gtk_menu_item_activate(GtkMenuItem* /*item*/, gpointer user_data) {
+static void on_gtk_menu_item_activate(GtkMenuItem* /*item*/,
+                                      gpointer user_data) {
   auto* data = static_cast<GtkMenuCallbackData*>(user_data);
   if (data->on_click) {
     data->on_click(data->on_click_data, data->window_id, data->item_id.c_str());
   }
 }
 
-static void on_gtk_menu_item_destroy(gpointer user_data, GClosure* /*closure*/) {
+static void on_gtk_menu_item_destroy(gpointer user_data,
+                                     GClosure* /*closure*/) {
   delete static_cast<GtkMenuCallbackData*>(user_data);
 }
 
-static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_t* api,
-                                         uint32_t window_id, wef_menu_click_fn on_click,
-                                         void* on_click_data, bool is_menu_bar) {
-  if (!val || !api->value_is_list(val)) return nullptr;
+static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val,
+                                        const wef_backend_api_t* api,
+                                        uint32_t window_id,
+                                        wef_menu_click_fn on_click,
+                                        void* on_click_data, bool is_menu_bar) {
+  if (!val || !api->value_is_list(val))
+    return nullptr;
 
   GtkWidget* menu = is_menu_bar ? gtk_menu_bar_new() : gtk_menu_new();
   size_t count = api->value_list_size(val);
 
   for (size_t i = 0; i < count; ++i) {
     wef_value_t* itemVal = api->value_list_get(val, i);
-    if (!itemVal || !api->value_is_dict(itemVal)) continue;
+    if (!itemVal || !api->value_is_dict(itemVal))
+      continue;
 
     // Separator
     wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
@@ -1007,11 +1254,13 @@ static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_
       size_t len = 0;
       char* typeStr = api->value_get_string(typeVal, &len);
       if (typeStr && std::string(typeStr) == "separator") {
-        gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu),
+                              gtk_separator_menu_item_new());
         api->value_free_string(typeStr);
         continue;
       }
-      if (typeStr) api->value_free_string(typeStr);
+      if (typeStr)
+        api->value_free_string(typeStr);
     }
 
     // Role-based items (map to labels; GTK doesn't have built-in roles)
@@ -1025,23 +1274,36 @@ static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_
 
         // Map roles to labels
         std::string label;
-        if (role == "quit") label = "Quit";
-        else if (role == "copy") label = "Copy";
-        else if (role == "paste") label = "Paste";
-        else if (role == "cut") label = "Cut";
-        else if (role == "selectall" || role == "selectAll") label = "Select All";
-        else if (role == "undo") label = "Undo";
-        else if (role == "redo") label = "Redo";
-        else if (role == "minimize") label = "Minimize";
-        else if (role == "close") label = "Close";
-        else if (role == "about") label = "About";
-        else if (role == "togglefullscreen" || role == "toggleFullScreen") label = "Toggle Full Screen";
+        if (role == "quit")
+          label = "Quit";
+        else if (role == "copy")
+          label = "Copy";
+        else if (role == "paste")
+          label = "Paste";
+        else if (role == "cut")
+          label = "Cut";
+        else if (role == "selectall" || role == "selectAll")
+          label = "Select All";
+        else if (role == "undo")
+          label = "Undo";
+        else if (role == "redo")
+          label = "Redo";
+        else if (role == "minimize")
+          label = "Minimize";
+        else if (role == "close")
+          label = "Close";
+        else if (role == "about")
+          label = "About";
+        else if (role == "togglefullscreen" || role == "toggleFullScreen")
+          label = "Toggle Full Screen";
 
         if (!label.empty()) {
           GtkWidget* item = gtk_menu_item_new_with_label(label.c_str());
-          auto* cb_data = new GtkMenuCallbackData{on_click, on_click_data, window_id, role};
-          g_signal_connect_data(item, "activate", G_CALLBACK(on_gtk_menu_item_activate),
-                                cb_data, on_gtk_menu_item_destroy, (GConnectFlags)0);
+          auto* cb_data =
+              new GtkMenuCallbackData{on_click, on_click_data, window_id, role};
+          g_signal_connect_data(item, "activate",
+                                G_CALLBACK(on_gtk_menu_item_activate), cb_data,
+                                on_gtk_menu_item_destroy, (GConnectFlags)0);
           gtk_menu_shell_append(GTK_MENU_SHELL(menu), item);
         }
         continue;
@@ -1050,10 +1312,12 @@ static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_
 
     // Label
     wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
-    if (!labelVal || !api->value_is_string(labelVal)) continue;
+    if (!labelVal || !api->value_is_string(labelVal))
+      continue;
     size_t labelLen = 0;
     char* labelStr = api->value_get_string(labelVal, &labelLen);
-    if (!labelStr) continue;
+    if (!labelStr)
+      continue;
     std::string label = labelStr;
     api->value_free_string(labelStr);
 
@@ -1061,8 +1325,8 @@ static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_
     wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
     if (submenuVal && api->value_is_list(submenuVal)) {
       GtkWidget* submenuItem = gtk_menu_item_new_with_label(label.c_str());
-      GtkWidget* submenu = BuildGtkMenuFromValue(submenuVal, api, window_id,
-                                                  on_click, on_click_data, false);
+      GtkWidget* submenu = BuildGtkMenuFromValue(
+          submenuVal, api, window_id, on_click, on_click_data, false);
       if (submenu) {
         gtk_menu_item_set_submenu(GTK_MENU_ITEM(submenuItem), submenu);
       }
@@ -1085,9 +1349,10 @@ static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_
     }
 
     auto* cb_data = new GtkMenuCallbackData{on_click, on_click_data, window_id,
-                                             itemId.empty() ? label : itemId};
-    g_signal_connect_data(gtkItem, "activate", G_CALLBACK(on_gtk_menu_item_activate),
-                          cb_data, on_gtk_menu_item_destroy, (GConnectFlags)0);
+                                            itemId.empty() ? label : itemId};
+    g_signal_connect_data(gtkItem, "activate",
+                          G_CALLBACK(on_gtk_menu_item_activate), cb_data,
+                          on_gtk_menu_item_destroy, (GConnectFlags)0);
 
     wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
     if (enabledVal && api->value_is_bool(enabledVal)) {
@@ -1101,14 +1366,16 @@ static GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_
 }
 
 void WebKitGTKBackend::SetApplicationMenu(uint32_t window_id,
-                                           wef_value_t* menu_template,
-                                           const wef_backend_api_t* api,
-                                           wef_menu_click_fn on_click,
-                                           void* on_click_data) {
-  if (!menu_template) return;
+                                          wef_value_t* menu_template,
+                                          const wef_backend_api_t* api,
+                                          wef_menu_click_fn on_click,
+                                          void* on_click_data) {
+  if (!menu_template)
+    return;
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (!state || !state->vbox) return;
+  if (!state || !state->vbox)
+    return;
 
   // Remove old menu bar if present
   if (state->menu_bar) {
@@ -1117,7 +1384,7 @@ void WebKitGTKBackend::SetApplicationMenu(uint32_t window_id,
   }
 
   GtkWidget* menu_bar = BuildGtkMenuFromValue(menu_template, api, window_id,
-                                               on_click, on_click_data, true);
+                                              on_click, on_click_data, true);
   if (menu_bar) {
     // Pack menu bar at the top (before the webview)
     gtk_box_pack_start(GTK_BOX(state->vbox), menu_bar, FALSE, FALSE, 0);
@@ -1131,17 +1398,18 @@ void WebKitGTKBackend::SetApplicationMenu(uint32_t window_id,
 // Context Menu
 // ============================================================================
 
-void WebKitGTKBackend::ShowContextMenu(uint32_t window_id,
-                                        int x, int y,
-                                        wef_value_t* menu_template,
-                                        const wef_backend_api_t* api,
-                                        wef_menu_click_fn on_click,
-                                        void* on_click_data) {
-  if (!menu_template) return;
+void WebKitGTKBackend::ShowContextMenu(uint32_t window_id, int x, int y,
+                                       wef_value_t* menu_template,
+                                       const wef_backend_api_t* api,
+                                       wef_menu_click_fn on_click,
+                                       void* on_click_data) {
+  if (!menu_template)
+    return;
 
   GtkWidget* menu = BuildGtkMenuFromValue(menu_template, api, window_id,
-                                           on_click, on_click_data, false);
-  if (!menu) return;
+                                          on_click, on_click_data, false);
+  if (!menu)
+    return;
 
   gtk_widget_show_all(menu);
   gtk_menu_popup_at_pointer(GTK_MENU(menu), nullptr);
@@ -1155,7 +1423,8 @@ void WebKitGTKBackend::OpenDevTools(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state && state->webview) {
-    WebKitWebInspector* inspector = webkit_web_view_get_inspector(state->webview);
+    WebKitWebInspector* inspector =
+        webkit_web_view_get_inspector(state->webview);
     webkit_web_inspector_show(inspector);
   }
 }
@@ -1165,36 +1434,39 @@ void WebKitGTKBackend::OpenDevTools(uint32_t window_id) {
 // ============================================================================
 
 void WebKitGTKBackend::ShowDialog(uint32_t window_id, int dialog_type,
-                                   const std::string& title, const std::string& message,
-                                   const std::string& default_value,
-                                   wef_dialog_result_fn callback, void* callback_data) {
+                                  const std::string& title,
+                                  const std::string& message,
+                                  const std::string& default_value,
+                                  wef_dialog_result_fn callback,
+                                  void* callback_data) {
   GtkWindow* parent = nullptr;
   auto* win = GetWindow(window_id);
-  if (win && win->window) parent = GTK_WINDOW(win->window);
+  if (win && win->window)
+    parent = GTK_WINDOW(win->window);
 
   if (dialog_type == WEF_DIALOG_ALERT) {
-    GtkWidget* dialog = gtk_message_dialog_new(
-        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
-        "%s", message.c_str());
+    GtkWidget* dialog =
+        gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO,
+                               GTK_BUTTONS_OK, "%s", message.c_str());
     gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
     gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    if (callback) callback(callback_data, 1, nullptr);
+    if (callback)
+      callback(callback_data, 1, nullptr);
   } else if (dialog_type == WEF_DIALOG_CONFIRM) {
-    GtkWidget* dialog = gtk_message_dialog_new(
-        parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION, GTK_BUTTONS_OK_CANCEL,
-        "%s", message.c_str());
+    GtkWidget* dialog =
+        gtk_message_dialog_new(parent, GTK_DIALOG_MODAL, GTK_MESSAGE_QUESTION,
+                               GTK_BUTTONS_OK_CANCEL, "%s", message.c_str());
     gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
     gint result = gtk_dialog_run(GTK_DIALOG(dialog));
     gtk_widget_destroy(dialog);
-    if (callback) callback(callback_data, (result == GTK_RESPONSE_OK) ? 1 : 0, nullptr);
+    if (callback)
+      callback(callback_data, (result == GTK_RESPONSE_OK) ? 1 : 0, nullptr);
   } else if (dialog_type == WEF_DIALOG_PROMPT) {
     GtkWidget* dialog = gtk_dialog_new_with_buttons(
         title.c_str(), parent,
         (GtkDialogFlags)(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
-        "_Cancel", GTK_RESPONSE_CANCEL,
-        "_OK", GTK_RESPONSE_OK,
-        nullptr);
+        "_Cancel", GTK_RESPONSE_CANCEL, "_OK", GTK_RESPONSE_OK, nullptr);
     GtkWidget* content = gtk_dialog_get_content_area(GTK_DIALOG(dialog));
     GtkWidget* label = gtk_label_new(message.c_str());
     gtk_container_add(GTK_CONTAINER(content), label);

@@ -48,10 +48,18 @@ class WefHandler : public CefClient,
 
   static WefHandler* GetInstance();
 
-  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
-  CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
-  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
-  CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override { return this; }
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override {
+    return this;
+  }
+  CefRefPtr<CefDisplayHandler> GetDisplayHandler() override {
+    return this;
+  }
+  CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override {
+    return this;
+  }
+  CefRefPtr<CefJSDialogHandler> GetJSDialogHandler() override {
+    return this;
+  }
 
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
   bool DoClose(CefRefPtr<CefBrowser> browser) override;
@@ -60,21 +68,17 @@ class WefHandler : public CefClient,
   void OnTitleChange(CefRefPtr<CefBrowser> browser,
                      const CefString& title) override;
 
-  bool OnKeyEvent(CefRefPtr<CefBrowser> browser,
-                  const CefKeyEvent& event,
+  bool OnKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event,
                   CefEventHandle os_event) override;
 
-  bool OnJSDialog(CefRefPtr<CefBrowser> browser,
-                  const CefString& origin_url,
-                  JSDialogType dialog_type,
-                  const CefString& message_text,
+  bool OnJSDialog(CefRefPtr<CefBrowser> browser, const CefString& origin_url,
+                  JSDialogType dialog_type, const CefString& message_text,
                   const CefString& default_prompt_text,
                   CefRefPtr<CefJSDialogCallback> callback,
                   bool& suppress_message) override;
 
   bool OnBeforeUnloadDialog(CefRefPtr<CefBrowser> browser,
-                            const CefString& message_text,
-                            bool is_reload,
+                            const CefString& message_text, bool is_reload,
                             CefRefPtr<CefJSDialogCallback> callback) override;
 
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser> browser,
@@ -83,7 +87,9 @@ class WefHandler : public CefClient,
                                 CefRefPtr<CefProcessMessage> message) override;
 
   void CloseAllBrowsers(bool force_close);
-  bool IsClosing() const { return is_closing_; }
+  bool IsClosing() const {
+    return is_closing_;
+  }
 
  private:
   std::list<CefRefPtr<CefBrowser>> browser_list_;

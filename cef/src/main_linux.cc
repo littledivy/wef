@@ -52,35 +52,45 @@ static std::map<Window, CachedWindow> g_frame_cache;
 
 static uint32_t XI2ModsToWef(XIModifierState* mods) {
   uint32_t wef = 0;
-  if (mods->effective & ShiftMask) wef |= WEF_MOD_SHIFT;
-  if (mods->effective & ControlMask) wef |= WEF_MOD_CONTROL;
-  if (mods->effective & Mod1Mask) wef |= WEF_MOD_ALT;
-  if (mods->effective & Mod4Mask) wef |= WEF_MOD_META;
+  if (mods->effective & ShiftMask)
+    wef |= WEF_MOD_SHIFT;
+  if (mods->effective & ControlMask)
+    wef |= WEF_MOD_CONTROL;
+  if (mods->effective & Mod1Mask)
+    wef |= WEF_MOD_ALT;
+  if (mods->effective & Mod4Mask)
+    wef |= WEF_MOD_META;
   return wef;
 }
 
 static int XI2ButtonToWef(int detail) {
   switch (detail) {
-    case 1: return WEF_MOUSE_BUTTON_LEFT;
-    case 2: return WEF_MOUSE_BUTTON_MIDDLE;
-    case 3: return WEF_MOUSE_BUTTON_RIGHT;
-    case 8: return WEF_MOUSE_BUTTON_BACK;
-    case 9: return WEF_MOUSE_BUTTON_FORWARD;
-    default: return WEF_MOUSE_BUTTON_LEFT;
+    case 1:
+      return WEF_MOUSE_BUTTON_LEFT;
+    case 2:
+      return WEF_MOUSE_BUTTON_MIDDLE;
+    case 3:
+      return WEF_MOUSE_BUTTON_RIGHT;
+    case 8:
+      return WEF_MOUSE_BUTTON_BACK;
+    case 9:
+      return WEF_MOUSE_BUTTON_FORWARD;
+    default:
+      return WEF_MOUSE_BUTTON_LEFT;
   }
 }
 
 // Resolve an XI2 device event to a wef window ID and content-relative coords.
-static bool ResolveWindow(XIDeviceEvent* dev, uint32_t* out_wid,
-                          double* out_x, double* out_y) {
-  if (!dev->child) return false;
+static bool ResolveWindow(XIDeviceEvent* dev, uint32_t* out_wid, double* out_x,
+                          double* out_y) {
+  if (!dev->child)
+    return false;
 
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
 
   // Try the child (top-level under root) directly — works when no
   // reparenting WM is running or the CEF window IS the top-level.
-  uint32_t wid = loader->GetWefIdForNativeHandle(
-      (void*)(uintptr_t)dev->child);
+  uint32_t wid = loader->GetWefIdForNativeHandle((void*)(uintptr_t)dev->child);
   Window content_xid = dev->child;
 
   if (wid == 0) {
@@ -92,15 +102,15 @@ static bool ResolveWindow(XIDeviceEvent* dev, uint32_t* out_wid,
     }
   }
 
-  if (wid == 0) return false;
+  if (wid == 0)
+    return false;
 
   // Translate root-relative coordinates to content-window-relative.
   int wx, wy;
   Window child_ret;
-  if (XTranslateCoordinates(g_monitor_display,
-          DefaultRootWindow(g_monitor_display), content_xid,
-          (int)dev->root_x, (int)dev->root_y,
-          &wx, &wy, &child_ret)) {
+  if (XTranslateCoordinates(
+          g_monitor_display, DefaultRootWindow(g_monitor_display), content_xid,
+          (int)dev->root_x, (int)dev->root_y, &wx, &wy, &child_ret)) {
     *out_wid = wid;
     *out_x = static_cast<double>(wx);
     *out_y = static_cast<double>(wy);
@@ -112,18 +122,21 @@ static bool ResolveWindow(XIDeviceEvent* dev, uint32_t* out_wid,
 
 // Resolve a window XID from an XI2 enter/focus event to a wef ID.
 static uint32_t ResolveWefId(Window xid) {
-  if (!xid) return 0;
+  if (!xid)
+    return 0;
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
   uint32_t wid = loader->GetWefIdForNativeHandle((void*)(uintptr_t)xid);
   if (wid == 0) {
     auto it = g_frame_cache.find(xid);
-    if (it != g_frame_cache.end()) wid = it->second.wef_id;
+    if (it != g_frame_cache.end())
+      wid = it->second.wef_id;
   }
   return wid;
 }
 
 static void ProcessXI2Event(XEvent* xev) {
-  if (!XGetEventData(xev->xcookie.display, &xev->xcookie)) return;
+  if (!XGetEventData(xev->xcookie.display, &xev->xcookie))
+    return;
 
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
   int evtype = xev->xcookie.evtype;
@@ -143,24 +156,29 @@ static void ProcessXI2Event(XEvent* xev) {
           if (detail >= 4 && detail <= 7) {
             // X11 scroll wheel: buttons 4-7
             double dx = 0, dy = 0;
-            if (detail == 4) dy = -1.0;
-            else if (detail == 5) dy = 1.0;
-            else if (detail == 6) dx = -1.0;
-            else if (detail == 7) dx = 1.0;
-            loader->DispatchWheelEvent(
-                wid, dx, dy, x, y, modifiers, WEF_WHEEL_DELTA_LINE);
+            if (detail == 4)
+              dy = -1.0;
+            else if (detail == 5)
+              dy = 1.0;
+            else if (detail == 6)
+              dx = -1.0;
+            else if (detail == 7)
+              dx = 1.0;
+            loader->DispatchWheelEvent(wid, dx, dy, x, y, modifiers,
+                                       WEF_WHEEL_DELTA_LINE);
           } else {
-            loader->DispatchMouseClickEvent(
-                wid, WEF_MOUSE_PRESSED, XI2ButtonToWef(detail),
-                x, y, modifiers, 1);
+            loader->DispatchMouseClickEvent(wid, WEF_MOUSE_PRESSED,
+                                            XI2ButtonToWef(detail), x, y,
+                                            modifiers, 1);
           }
           break;
         }
         case XI_ButtonRelease: {
-          if (dev->detail >= 4 && dev->detail <= 7) break;
-          loader->DispatchMouseClickEvent(
-              wid, WEF_MOUSE_RELEASED, XI2ButtonToWef(dev->detail),
-              x, y, modifiers, 1);
+          if (dev->detail >= 4 && dev->detail <= 7)
+            break;
+          loader->DispatchMouseClickEvent(wid, WEF_MOUSE_RELEASED,
+                                          XI2ButtonToWef(dev->detail), x, y,
+                                          modifiers, 1);
           break;
         }
         case XI_Motion:
@@ -187,13 +205,14 @@ static void ProcessXI2Event(XEvent* xev) {
 }
 
 static void ProcessStructureEvent(XEvent* xev) {
-  if (xev->type != ConfigureNotify) return;
+  if (xev->type != ConfigureNotify)
+    return;
 
   RuntimeLoader* loader = RuntimeLoader::GetInstance();
   XConfigureEvent* config = &xev->xconfigure;
 
-  uint32_t wid = loader->GetWefIdForNativeHandle(
-      (void*)(uintptr_t)config->window);
+  uint32_t wid =
+      loader->GetWefIdForNativeHandle((void*)(uintptr_t)config->window);
   if (wid > 0) {
     loader->DispatchResizeEvent(wid, config->width, config->height);
     loader->DispatchMoveEvent(wid, config->x, config->y);
@@ -201,8 +220,9 @@ static void ProcessStructureEvent(XEvent* xev) {
 }
 
 static gboolean X11IoCallback(GIOChannel* source, GIOCondition condition,
-                               gpointer data) {
-  if (!g_monitor_display) return FALSE;
+                              gpointer data) {
+  if (!g_monitor_display)
+    return FALSE;
 
   while (XPending(g_monitor_display)) {
     XEvent xev;
@@ -218,23 +238,26 @@ static gboolean X11IoCallback(GIOChannel* source, GIOCondition condition,
   return TRUE;
 }
 
-#endif // GDK_WINDOWING_X11
+#endif  // GDK_WINDOWING_X11
 
 void InstallNativeMouseMonitor() {
 #ifdef GDK_WINDOWING_X11
-  if (g_monitor_installed) return;
+  if (g_monitor_installed)
+    return;
 
   GdkDisplay* gdk_display = gdk_display_get_default();
-  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display)) return;
+  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display))
+    return;
 
   // Open a dedicated X11 connection for event monitoring.
   g_monitor_display = XOpenDisplay(nullptr);
-  if (!g_monitor_display) return;
+  if (!g_monitor_display)
+    return;
 
   // Check for XI2 support.
   int xi2_event, xi2_error;
-  if (!XQueryExtension(g_monitor_display, "XInputExtension",
-                       &g_xi2_opcode, &xi2_event, &xi2_error)) {
+  if (!XQueryExtension(g_monitor_display, "XInputExtension", &g_xi2_opcode,
+                       &xi2_event, &xi2_error)) {
     XCloseDisplay(g_monitor_display);
     g_monitor_display = nullptr;
     return;
@@ -269,8 +292,7 @@ void InstallNativeMouseMonitor() {
   int fd = ConnectionNumber(g_monitor_display);
   g_io_channel = g_io_channel_unix_new(fd);
   g_io_source_id = g_io_add_watch(
-      g_io_channel,
-      static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR),
+      g_io_channel, static_cast<GIOCondition>(G_IO_IN | G_IO_HUP | G_IO_ERR),
       X11IoCallback, nullptr);
 
   g_monitor_installed = true;
@@ -279,7 +301,8 @@ void InstallNativeMouseMonitor() {
 
 void RemoveNativeMouseMonitor() {
 #ifdef GDK_WINDOWING_X11
-  if (!g_monitor_installed) return;
+  if (!g_monitor_installed)
+    return;
 
   if (g_io_source_id) {
     g_source_remove(g_io_source_id);
@@ -302,7 +325,8 @@ void RemoveNativeMouseMonitor() {
 void SetLinuxWindowResizable(unsigned long xid, bool resizable) {
 #ifdef GDK_WINDOWING_X11
   GdkDisplay* gdk_display = gdk_display_get_default();
-  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display)) return;
+  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display))
+    return;
   Display* dpy = GDK_DISPLAY_XDISPLAY(gdk_display);
 
   XSizeHints hints;
@@ -332,7 +356,8 @@ void SetLinuxWindowResizable(unsigned long xid, bool resizable) {
 bool IsLinuxWindowResizable(unsigned long xid) {
 #ifdef GDK_WINDOWING_X11
   GdkDisplay* gdk_display = gdk_display_get_default();
-  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display)) return true;
+  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display))
+    return true;
   Display* dpy = GDK_DISPLAY_XDISPLAY(gdk_display);
 
   XSizeHints hints;
@@ -340,7 +365,8 @@ bool IsLinuxWindowResizable(unsigned long xid) {
   XGetWMNormalHints(dpy, xid, &hints, &supplied);
 
   if ((hints.flags & PMinSize) && (hints.flags & PMaxSize)) {
-    return hints.min_width != hints.max_width || hints.min_height != hints.max_height;
+    return hints.min_width != hints.max_width ||
+           hints.min_height != hints.max_height;
   }
   return true;
 #else
@@ -350,7 +376,8 @@ bool IsLinuxWindowResizable(unsigned long xid) {
 
 void MonitorLinuxWindowEvents(unsigned long xid) {
 #ifdef GDK_WINDOWING_X11
-  if (!g_monitor_display) return;
+  if (!g_monitor_display)
+    return;
 
   // Select StructureNotifyMask on the CEF window to get ConfigureNotify
   // (resize/move) events on our monitoring connection.
@@ -365,9 +392,10 @@ void MonitorLinuxWindowEvents(unsigned long xid) {
   unsigned int nchildren;
   Window current = xid;
 
-  while (XQueryTree(g_monitor_display, current, &root_ret, &parent,
-                    &children, &nchildren)) {
-    if (children) XFree(children);
+  while (XQueryTree(g_monitor_display, current, &root_ret, &parent, &children,
+                    &nchildren)) {
+    if (children)
+      XFree(children);
     if (parent == root_ret || parent == 0) {
       // current is the top-level frame (or the window itself if no WM).
       if (current != xid) {
@@ -413,8 +441,8 @@ static int run_headless(const std::string& runtimePath) {
 }
 
 static bool is_forked_worker() {
-  return getenv("NODE_CHANNEL_FD") != nullptr
-      || getenv("NEXT_PRIVATE_WORKER") != nullptr;
+  return getenv("NODE_CHANNEL_FD") != nullptr ||
+         getenv("NEXT_PRIVATE_WORKER") != nullptr;
 }
 
 static bool is_cli_worker_command(int argc, char* argv[]) {
@@ -430,9 +458,9 @@ static bool is_cli_worker_command(int argc, char* argv[]) {
   return false;
 }
 
-// Combined app that handles both browser and renderer processes (single-exe model)
-class WefCombinedApp : public CefApp,
-                       public CefBrowserProcessHandler {
+// Combined app that handles both browser and renderer processes (single-exe
+// model)
+class WefCombinedApp : public CefApp, public CefBrowserProcessHandler {
  public:
   WefCombinedApp() : renderer_app_(new WefRendererApp()) {}
 
@@ -446,8 +474,7 @@ class WefCombinedApp : public CefApp,
 
   void OnBeforeCommandLineProcessing(
       const CefString& process_type,
-      CefRefPtr<CefCommandLine> command_line) override {
-  }
+      CefRefPtr<CefCommandLine> command_line) override {}
 
   void OnContextInitialized() override {
     CEF_REQUIRE_UI_THREAD();
@@ -468,18 +495,17 @@ class WefCombinedApp : public CefApp,
       // CefRunMessageLoop() has started. The runtime thread's
       // Backend_CreateWindow posts CefPostTasks to the UI thread and blocks
       // until they complete — this deadlocks if the loop isn't running yet.
-      CefPostTask(TID_UI, base::BindOnce([]() {
-        RuntimeLoader::GetInstance()->Start();
-      }));
+      CefPostTask(TID_UI, base::BindOnce(
+                              []() { RuntimeLoader::GetInstance()->Start(); }));
     } else {
       // No runtime: create a default window for demo
       uint32_t wef_id = RuntimeLoader::GetInstance()->AllocateWindowId();
       g_pending_wef_ids.push(wef_id);
       CefBrowserSettings browser_settings;
       CefRefPtr<CefBrowserView> browser_view =
-          CefBrowserView::CreateBrowserView(
-              handler, "https://example.com", browser_settings,
-              nullptr, nullptr, nullptr);
+          CefBrowserView::CreateBrowserView(handler, "https://example.com",
+                                            browser_settings, nullptr, nullptr,
+                                            nullptr);
       CefWindow::CreateTopLevelWindow(
           new WefWindowDelegate(browser_view, wef_id));
     }

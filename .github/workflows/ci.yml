@@ -11,6 +11,40 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies (Linux)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-format pkg-config libx11-dev libxcb1-dev libxkbcommon-dev libwayland-dev
+
+      - name: cargo fmt
+        run: cargo fmt --check
+
+      - name: cargo clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: clang-format
+        run: |
+          find capi cef/src webview/src -name '*.cc' -o -name '*.cpp' -o -name '*.c' -o -name '*.h' -o -name '*.mm' | \
+            xargs clang-format --dry-run --Werror
+
+      - name: deno fmt
+        run: deno fmt --check
+
+      - name: deno lint
+        run: deno lint
+
   build-winit:
     name: winit / ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
@@ -18,11 +52,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-pc-windows-msvc,    os: windows-latest }
-          - { target: x86_64-apple-darwin,       os: macos-15-intel }
-          - { target: aarch64-apple-darwin,      os: macos-14 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-14 }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -72,11 +106,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-pc-windows-msvc,    os: windows-latest }
-          - { target: x86_64-apple-darwin,       os: macos-15-intel }
-          - { target: aarch64-apple-darwin,      os: macos-14 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-14 }
     steps:
       - uses: actions/checkout@v4
 
@@ -134,11 +168,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-apple-darwin,       os: macos-15-intel }
-          - { target: aarch64-apple-darwin,      os: macos-14 }
-          - { target: x86_64-pc-windows-msvc,    os: windows-latest }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
     steps:
       - uses: actions/checkout@v4
 
@@ -197,10 +231,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu,  os: ubuntu-latest }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm }
-          - { target: x86_64-apple-darwin,       os: macos-15-intel }
-          - { target: aarch64-apple-darwin,      os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-14 }
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable

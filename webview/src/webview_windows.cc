@@ -23,47 +23,84 @@ namespace keyboard {
 
 std::string VirtualKeyToKey(WPARAM vk, LPARAM lParam) {
   switch (vk) {
-    case VK_BACK: return "Backspace";
-    case VK_TAB: return "Tab";
-    case VK_RETURN: return "Enter";
-    case VK_SHIFT: return "Shift";
-    case VK_CONTROL: return "Control";
-    case VK_MENU: return "Alt";
-    case VK_PAUSE: return "Pause";
-    case VK_CAPITAL: return "CapsLock";
-    case VK_ESCAPE: return "Escape";
-    case VK_SPACE: return " ";
-    case VK_PRIOR: return "PageUp";
-    case VK_NEXT: return "PageDown";
-    case VK_END: return "End";
-    case VK_HOME: return "Home";
-    case VK_LEFT: return "ArrowLeft";
-    case VK_UP: return "ArrowUp";
-    case VK_RIGHT: return "ArrowRight";
-    case VK_DOWN: return "ArrowDown";
-    case VK_INSERT: return "Insert";
-    case VK_DELETE: return "Delete";
-    case VK_LWIN: case VK_RWIN: return "Meta";
-    case VK_F1: return "F1";
-    case VK_F2: return "F2";
-    case VK_F3: return "F3";
-    case VK_F4: return "F4";
-    case VK_F5: return "F5";
-    case VK_F6: return "F6";
-    case VK_F7: return "F7";
-    case VK_F8: return "F8";
-    case VK_F9: return "F9";
-    case VK_F10: return "F10";
-    case VK_F11: return "F11";
-    case VK_F12: return "F12";
-    case VK_NUMLOCK: return "NumLock";
-    case VK_SCROLL: return "ScrollLock";
+    case VK_BACK:
+      return "Backspace";
+    case VK_TAB:
+      return "Tab";
+    case VK_RETURN:
+      return "Enter";
+    case VK_SHIFT:
+      return "Shift";
+    case VK_CONTROL:
+      return "Control";
+    case VK_MENU:
+      return "Alt";
+    case VK_PAUSE:
+      return "Pause";
+    case VK_CAPITAL:
+      return "CapsLock";
+    case VK_ESCAPE:
+      return "Escape";
+    case VK_SPACE:
+      return " ";
+    case VK_PRIOR:
+      return "PageUp";
+    case VK_NEXT:
+      return "PageDown";
+    case VK_END:
+      return "End";
+    case VK_HOME:
+      return "Home";
+    case VK_LEFT:
+      return "ArrowLeft";
+    case VK_UP:
+      return "ArrowUp";
+    case VK_RIGHT:
+      return "ArrowRight";
+    case VK_DOWN:
+      return "ArrowDown";
+    case VK_INSERT:
+      return "Insert";
+    case VK_DELETE:
+      return "Delete";
+    case VK_LWIN:
+    case VK_RWIN:
+      return "Meta";
+    case VK_F1:
+      return "F1";
+    case VK_F2:
+      return "F2";
+    case VK_F3:
+      return "F3";
+    case VK_F4:
+      return "F4";
+    case VK_F5:
+      return "F5";
+    case VK_F6:
+      return "F6";
+    case VK_F7:
+      return "F7";
+    case VK_F8:
+      return "F8";
+    case VK_F9:
+      return "F9";
+    case VK_F10:
+      return "F10";
+    case VK_F11:
+      return "F11";
+    case VK_F12:
+      return "F12";
+    case VK_NUMLOCK:
+      return "NumLock";
+    case VK_SCROLL:
+      return "ScrollLock";
     default:
       if (vk >= 'A' && vk <= 'Z') {
         bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         bool caps = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
         char c = static_cast<char>(vk);
-        if (!(shift ^ caps)) c += 32; // lowercase
+        if (!(shift ^ caps))
+          c += 32;  // lowercase
         return std::string(1, c);
       }
       if (vk >= '0' && vk <= '9') {
@@ -76,53 +113,103 @@ std::string VirtualKeyToKey(WPARAM vk, LPARAM lParam) {
 std::string VirtualKeyToCode(WPARAM vk, LPARAM lParam) {
   bool isExtended = (lParam & (1 << 24)) != 0;
   switch (vk) {
-    case VK_BACK: return "Backspace";
-    case VK_TAB: return "Tab";
-    case VK_RETURN: return isExtended ? "NumpadEnter" : "Enter";
-    case VK_SHIFT: return (MapVirtualKey((lParam >> 16) & 0xFF, MAPVK_VSC_TO_VK_EX) == VK_RSHIFT) ? "ShiftRight" : "ShiftLeft";
-    case VK_CONTROL: return isExtended ? "ControlRight" : "ControlLeft";
-    case VK_MENU: return isExtended ? "AltRight" : "AltLeft";
-    case VK_PAUSE: return "Pause";
-    case VK_CAPITAL: return "CapsLock";
-    case VK_ESCAPE: return "Escape";
-    case VK_SPACE: return "Space";
-    case VK_PRIOR: return "PageUp";
-    case VK_NEXT: return "PageDown";
-    case VK_END: return "End";
-    case VK_HOME: return "Home";
-    case VK_LEFT: return "ArrowLeft";
-    case VK_UP: return "ArrowUp";
-    case VK_RIGHT: return "ArrowRight";
-    case VK_DOWN: return "ArrowDown";
-    case VK_INSERT: return "Insert";
-    case VK_DELETE: return "Delete";
-    case VK_LWIN: return "MetaLeft";
-    case VK_RWIN: return "MetaRight";
-    case VK_F1: return "F1";
-    case VK_F2: return "F2";
-    case VK_F3: return "F3";
-    case VK_F4: return "F4";
-    case VK_F5: return "F5";
-    case VK_F6: return "F6";
-    case VK_F7: return "F7";
-    case VK_F8: return "F8";
-    case VK_F9: return "F9";
-    case VK_F10: return "F10";
-    case VK_F11: return "F11";
-    case VK_F12: return "F12";
-    case VK_NUMLOCK: return "NumLock";
-    case VK_SCROLL: return "ScrollLock";
-    case VK_OEM_1: return "Semicolon";
-    case VK_OEM_PLUS: return "Equal";
-    case VK_OEM_COMMA: return "Comma";
-    case VK_OEM_MINUS: return "Minus";
-    case VK_OEM_PERIOD: return "Period";
-    case VK_OEM_2: return "Slash";
-    case VK_OEM_3: return "Backquote";
-    case VK_OEM_4: return "BracketLeft";
-    case VK_OEM_5: return "Backslash";
-    case VK_OEM_6: return "BracketRight";
-    case VK_OEM_7: return "Quote";
+    case VK_BACK:
+      return "Backspace";
+    case VK_TAB:
+      return "Tab";
+    case VK_RETURN:
+      return isExtended ? "NumpadEnter" : "Enter";
+    case VK_SHIFT:
+      return (MapVirtualKey((lParam >> 16) & 0xFF, MAPVK_VSC_TO_VK_EX) ==
+              VK_RSHIFT)
+                 ? "ShiftRight"
+                 : "ShiftLeft";
+    case VK_CONTROL:
+      return isExtended ? "ControlRight" : "ControlLeft";
+    case VK_MENU:
+      return isExtended ? "AltRight" : "AltLeft";
+    case VK_PAUSE:
+      return "Pause";
+    case VK_CAPITAL:
+      return "CapsLock";
+    case VK_ESCAPE:
+      return "Escape";
+    case VK_SPACE:
+      return "Space";
+    case VK_PRIOR:
+      return "PageUp";
+    case VK_NEXT:
+      return "PageDown";
+    case VK_END:
+      return "End";
+    case VK_HOME:
+      return "Home";
+    case VK_LEFT:
+      return "ArrowLeft";
+    case VK_UP:
+      return "ArrowUp";
+    case VK_RIGHT:
+      return "ArrowRight";
+    case VK_DOWN:
+      return "ArrowDown";
+    case VK_INSERT:
+      return "Insert";
+    case VK_DELETE:
+      return "Delete";
+    case VK_LWIN:
+      return "MetaLeft";
+    case VK_RWIN:
+      return "MetaRight";
+    case VK_F1:
+      return "F1";
+    case VK_F2:
+      return "F2";
+    case VK_F3:
+      return "F3";
+    case VK_F4:
+      return "F4";
+    case VK_F5:
+      return "F5";
+    case VK_F6:
+      return "F6";
+    case VK_F7:
+      return "F7";
+    case VK_F8:
+      return "F8";
+    case VK_F9:
+      return "F9";
+    case VK_F10:
+      return "F10";
+    case VK_F11:
+      return "F11";
+    case VK_F12:
+      return "F12";
+    case VK_NUMLOCK:
+      return "NumLock";
+    case VK_SCROLL:
+      return "ScrollLock";
+    case VK_OEM_1:
+      return "Semicolon";
+    case VK_OEM_PLUS:
+      return "Equal";
+    case VK_OEM_COMMA:
+      return "Comma";
+    case VK_OEM_MINUS:
+      return "Minus";
+    case VK_OEM_PERIOD:
+      return "Period";
+    case VK_OEM_2:
+      return "Slash";
+    case VK_OEM_3:
+      return "Backquote";
+    case VK_OEM_4:
+      return "BracketLeft";
+    case VK_OEM_5:
+      return "Backslash";
+    case VK_OEM_6:
+      return "BracketRight";
+    case VK_OEM_7:
+      return "Quote";
     default:
       if (vk >= 'A' && vk <= 'Z') {
         return "Key" + std::string(1, static_cast<char>(vk));
@@ -136,18 +223,23 @@ std::string VirtualKeyToCode(WPARAM vk, LPARAM lParam) {
 
 uint32_t GetWefModifiers() {
   uint32_t modifiers = 0;
-  if (GetKeyState(VK_SHIFT) & 0x8000) modifiers |= WEF_MOD_SHIFT;
-  if (GetKeyState(VK_CONTROL) & 0x8000) modifiers |= WEF_MOD_CONTROL;
-  if (GetKeyState(VK_MENU) & 0x8000) modifiers |= WEF_MOD_ALT;
-  if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) modifiers |= WEF_MOD_META;
+  if (GetKeyState(VK_SHIFT) & 0x8000)
+    modifiers |= WEF_MOD_SHIFT;
+  if (GetKeyState(VK_CONTROL) & 0x8000)
+    modifiers |= WEF_MOD_CONTROL;
+  if (GetKeyState(VK_MENU) & 0x8000)
+    modifiers |= WEF_MOD_ALT;
+  if ((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000)
+    modifiers |= WEF_MOD_META;
   return modifiers;
 }
 
-} // namespace keyboard
+}  // namespace keyboard
 
 // Convert UTF-8 to wide string
 static std::wstring Utf8ToWide(const std::string& str) {
-  if (str.empty()) return std::wstring();
+  if (str.empty())
+    return std::wstring();
   int size = MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, nullptr, 0);
   std::wstring result(size - 1, 0);
   MultiByteToWideChar(CP_UTF8, 0, str.c_str(), -1, &result[0], size);
@@ -156,10 +248,13 @@ static std::wstring Utf8ToWide(const std::string& str) {
 
 // Convert wide string to UTF-8
 static std::string WideToUtf8(const std::wstring& wstr) {
-  if (wstr.empty()) return std::string();
-  int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0, nullptr, nullptr);
+  if (wstr.empty())
+    return std::string();
+  int size = WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, nullptr, 0,
+                                 nullptr, nullptr);
   std::string result(size - 1, 0);
-  WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &result[0], size, nullptr, nullptr);
+  WideCharToMultiByte(CP_UTF8, 0, wstr.c_str(), -1, &result[0], size, nullptr,
+                      nullptr);
   return result;
 }
 
@@ -168,7 +263,8 @@ static std::map<HWND, uint32_t> g_hwnd_to_wef_id;
 static std::mutex g_hwnd_mutex;
 
 static uint32_t WefIdForHwnd(HWND hwnd) {
-  if (!hwnd) return 0;
+  if (!hwnd)
+    return 0;
   std::lock_guard<std::mutex> lock(g_hwnd_mutex);
   auto it = g_hwnd_to_wef_id.find(hwnd);
   return it != g_hwnd_to_wef_id.end() ? it->second : 0;
@@ -197,7 +293,8 @@ struct UiTaskData {
 // WebView2 Backend
 // ============================================================================
 
-static std::string BuildInitScript(const std::string& ns, const std::string& postMessage) {
+static std::string BuildInitScript(const std::string& ns,
+                                   const std::string& postMessage) {
   return R"JS(
 (function() {
   const pendingCalls = new Map();
@@ -238,13 +335,15 @@ static std::string BuildInitScript(const std::string& ns, const std::string& pos
             return arg;
           });
 
-          )JS" + postMessage + R"JS(
+          )JS" +
+         postMessage + R"JS(
         });
       }
     });
   }
 
-  window[")JS" + ns + R"JS("] = createWefProxy();
+  window[")JS" +
+         ns + R"JS("] = createWefProxy();
 
   window.__wefRespond = function(callId, result, error) {
     const pending = pendingCalls.get(callId);
@@ -325,26 +424,28 @@ class WebView2Backend : public WefBackend {
   void Focus(uint32_t window_id) override;
   void PostUiTask(void (*task)(void*), void* data) override;
 
-  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) override;
+  void InvokeJsCallback(uint32_t window_id, uint64_t callback_id,
+                        wef::ValuePtr args) override;
   void ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) override;
-  void RespondToJsCall(uint32_t window_id, uint64_t call_id, wef::ValuePtr result, wef::ValuePtr error) override;
+  void RespondToJsCall(uint32_t window_id, uint64_t call_id,
+                       wef::ValuePtr result, wef::ValuePtr error) override;
 
   void Run() override;
 
   void SetApplicationMenu(uint32_t window_id, wef_value_t* menu_template,
                           const wef_backend_api_t* api,
-                          wef_menu_click_fn on_click, void* on_click_data) override;
+                          wef_menu_click_fn on_click,
+                          void* on_click_data) override;
 
   void ShowContextMenu(uint32_t window_id, int x, int y,
-                       wef_value_t* menu_template,
-                       const wef_backend_api_t* api,
-                       wef_menu_click_fn on_click, void* on_click_data) override;
+                       wef_value_t* menu_template, const wef_backend_api_t* api,
+                       wef_menu_click_fn on_click,
+                       void* on_click_data) override;
 
   void OpenDevTools(uint32_t window_id) override;
 
-  void ShowDialog(uint32_t window_id, int dialog_type,
-                  const std::string& title, const std::string& message,
-                  const std::string& default_value,
+  void ShowDialog(uint32_t window_id, int dialog_type, const std::string& title,
+                  const std::string& message, const std::string& default_value,
                   wef_dialog_result_fn callback, void* callback_data) override;
 
   void HandleJsMessage(uint32_t window_id, const std::wstring& json);
@@ -352,14 +453,16 @@ class WebView2Backend : public WefBackend {
  private:
   WinWindowState* GetWindow(uint32_t window_id);
   void InitializeWebViewForWindow(uint32_t window_id, HWND hwnd);
-  static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+  static LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                     LPARAM lParam);
 
   std::map<uint32_t, WinWindowState> windows_;
   std::mutex windows_mutex_;
   bool class_registered_ = false;
 };
 
-LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
+                                             LPARAM lParam) {
   uint32_t wid = WefIdForHwnd(hwnd);
 
   switch (msg) {
@@ -388,10 +491,12 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
       }
       return 0;
     case WM_SETFOCUS:
-      if (wid > 0) RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
+      if (wid > 0)
+        RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 1);
       return 0;
     case WM_KILLFOCUS:
-      if (wid > 0) RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
+      if (wid > 0)
+        RuntimeLoader::GetInstance()->DispatchFocusedEvent(wid, 0);
       return 0;
     case WM_LBUTTONDOWN:
     case WM_LBUTTONUP:
@@ -401,33 +506,43 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
     case WM_MBUTTONUP:
     case WM_XBUTTONDOWN:
     case WM_XBUTTONUP: {
-      if (wid == 0) break;
+      if (wid == 0)
+        break;
       int state = (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
                    msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN)
-                      ? WEF_MOUSE_PRESSED : WEF_MOUSE_RELEASED;
+                      ? WEF_MOUSE_PRESSED
+                      : WEF_MOUSE_RELEASED;
       int button;
       switch (msg) {
-        case WM_LBUTTONDOWN: case WM_LBUTTONUP:
-          button = WEF_MOUSE_BUTTON_LEFT; break;
-        case WM_RBUTTONDOWN: case WM_RBUTTONUP:
-          button = WEF_MOUSE_BUTTON_RIGHT; break;
-        case WM_MBUTTONDOWN: case WM_MBUTTONUP:
-          button = WEF_MOUSE_BUTTON_MIDDLE; break;
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+          button = WEF_MOUSE_BUTTON_LEFT;
+          break;
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+          button = WEF_MOUSE_BUTTON_RIGHT;
+          break;
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+          button = WEF_MOUSE_BUTTON_MIDDLE;
+          break;
         default:
           button = (GET_XBUTTON_WPARAM(wParam) == XBUTTON1)
-                       ? WEF_MOUSE_BUTTON_BACK : WEF_MOUSE_BUTTON_FORWARD;
+                       ? WEF_MOUSE_BUTTON_BACK
+                       : WEF_MOUSE_BUTTON_FORWARD;
           break;
       }
       double x = static_cast<double>(GET_X_LPARAM(lParam));
       double y = static_cast<double>(GET_Y_LPARAM(lParam));
       uint32_t modifiers = keyboard::GetWefModifiers();
-      RuntimeLoader::GetInstance()->DispatchMouseClickEvent(
-          wid, state, button, x, y, modifiers, 1);
+      RuntimeLoader::GetInstance()->DispatchMouseClickEvent(wid, state, button,
+                                                            x, y, modifiers, 1);
       break;
     }
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN: {
-      if (wid == 0) break;
+      if (wid == 0)
+        break;
       std::string key = keyboard::VirtualKeyToKey(wParam, lParam);
       std::string code = keyboard::VirtualKeyToCode(wParam, lParam);
       uint32_t modifiers = keyboard::GetWefModifiers();
@@ -438,7 +553,8 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
     }
     case WM_KEYUP:
     case WM_SYSKEYUP: {
-      if (wid == 0) break;
+      if (wid == 0)
+        break;
       std::string key = keyboard::VirtualKeyToKey(wParam, lParam);
       std::string code = keyboard::VirtualKeyToCode(wParam, lParam);
       uint32_t modifiers = keyboard::GetWefModifiers();
@@ -498,7 +614,8 @@ WebView2Backend::WebView2Backend() {
 WebView2Backend::~WebView2Backend() {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   for (auto& [wid, state] : windows_) {
-    if (state.controller) state.controller->Close();
+    if (state.controller)
+      state.controller->Close();
     {
       std::lock_guard<std::mutex> hlock(g_hwnd_mutex);
       g_hwnd_to_wef_id.erase(state.hwnd);
@@ -515,16 +632,8 @@ WinWindowState* WebView2Backend::GetWindow(uint32_t window_id) {
 
 void WebView2Backend::CreateWindow(uint32_t window_id, int width, int height) {
   HWND hwnd = CreateWindowExW(
-      0,
-      L"WefWebView2",
-      L"",
-      WS_OVERLAPPEDWINDOW,
-      CW_USEDEFAULT, CW_USEDEFAULT,
-      width, height,
-      nullptr, nullptr,
-      GetModuleHandle(nullptr),
-      nullptr
-  );
+      0, L"WefWebView2", L"", WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT,
+      width, height, nullptr, nullptr, GetModuleHandle(nullptr), nullptr);
 
   {
     std::lock_guard<std::mutex> lock(g_hwnd_mutex);
@@ -546,11 +655,13 @@ void WebView2Backend::CreateWindow(uint32_t window_id, int width, int height) {
   UpdateWindow(hwnd);
 }
 
-void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) {
+void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id,
+                                                 HWND hwnd) {
   CreateCoreWebView2EnvironmentWithOptions(
       nullptr, nullptr, nullptr,
       Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
-          [this, window_id, hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT {
+          [this, window_id, hwnd](HRESULT result,
+                                  ICoreWebView2Environment* env) -> HRESULT {
             if (FAILED(result)) {
               std::cerr << "Failed to create WebView2 environment" << std::endl;
               return result;
@@ -558,16 +669,21 @@ void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) 
 
             env->CreateCoreWebView2Controller(
                 hwnd,
-                Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
-                    [this, window_id, hwnd](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT {
+                Callback<
+                    ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                    [this, window_id, hwnd](
+                        HRESULT result,
+                        ICoreWebView2Controller* controller) -> HRESULT {
                       if (FAILED(result) || !controller) {
-                        std::cerr << "Failed to create WebView2 controller" << std::endl;
+                        std::cerr << "Failed to create WebView2 controller"
+                                  << std::endl;
                         return result;
                       }
 
                       std::lock_guard<std::mutex> lock(windows_mutex_);
                       auto* state = GetWindow(window_id);
-                      if (!state) return S_OK;
+                      if (!state)
+                        return S_OK;
 
                       state->controller = controller;
                       controller->get_CoreWebView2(&state->webview);
@@ -583,15 +699,18 @@ void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) 
                           "            method: path.join('.'),\n"
                           "            args: processedArgs\n"
                           "          }));");
-                      std::wstring wInitScript(initScript.begin(), initScript.end());
+                      std::wstring wInitScript(initScript.begin(),
+                                               initScript.end());
                       state->webview->AddScriptToExecuteOnDocumentCreated(
-                          wInitScript.c_str(),
-                          nullptr);
+                          wInitScript.c_str(), nullptr);
 
                       uint32_t wid = window_id;
                       state->webview->add_WebMessageReceived(
                           Callback<ICoreWebView2WebMessageReceivedEventHandler>(
-                              [this, wid](ICoreWebView2* sender, ICoreWebView2WebMessageReceivedEventArgs* args) -> HRESULT {
+                              [this, wid](
+                                  ICoreWebView2* sender,
+                                  ICoreWebView2WebMessageReceivedEventArgs*
+                                      args) -> HRESULT {
                                 LPWSTR messageRaw;
                                 args->TryGetWebMessageAsString(&messageRaw);
                                 if (messageRaw) {
@@ -599,48 +718,73 @@ void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) 
                                   CoTaskMemFree(messageRaw);
                                 }
                                 return S_OK;
-                              }).Get(),
+                              })
+                              .Get(),
                           nullptr);
 
                       state->webview->add_ScriptDialogOpening(
-                          Callback<ICoreWebView2ScriptDialogOpeningEventHandler>(
-                              [hwnd](ICoreWebView2* sender, ICoreWebView2ScriptDialogOpeningEventArgs* args) -> HRESULT {
+                          Callback<
+                              ICoreWebView2ScriptDialogOpeningEventHandler>(
+                              [hwnd](ICoreWebView2* sender,
+                                     ICoreWebView2ScriptDialogOpeningEventArgs*
+                                         args) -> HRESULT {
                                 COREWEBVIEW2_SCRIPT_DIALOG_KIND kind;
                                 args->get_Kind(&kind);
 
                                 LPWSTR messageRaw = nullptr;
                                 args->get_Message(&messageRaw);
-                                std::wstring message = messageRaw ? messageRaw : L"";
-                                if (messageRaw) CoTaskMemFree(messageRaw);
+                                std::wstring message =
+                                    messageRaw ? messageRaw : L"";
+                                if (messageRaw)
+                                  CoTaskMemFree(messageRaw);
 
-                                if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_ALERT) {
-                                  MessageBoxW(hwnd, message.c_str(), L"Alert", MB_OK | MB_ICONINFORMATION);
+                                if (kind ==
+                                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_ALERT) {
+                                  MessageBoxW(hwnd, message.c_str(), L"Alert",
+                                              MB_OK | MB_ICONINFORMATION);
                                   args->Accept();
-                                } else if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM) {
-                                  int result = MessageBoxW(hwnd, message.c_str(), L"Confirm", MB_OKCANCEL | MB_ICONQUESTION);
+                                } else if (
+                                    kind ==
+                                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_CONFIRM) {
+                                  int result = MessageBoxW(
+                                      hwnd, message.c_str(), L"Confirm",
+                                      MB_OKCANCEL | MB_ICONQUESTION);
                                   if (result == IDOK) {
                                     args->Accept();
                                   }
-                                } else if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT) {
-                                  // For prompt, we need a custom dialog. Use a simple approach with TaskDialog-style input.
-                                  // WebView2 doesn't have a built-in way to show prompt with input, so we accept with the default.
+                                } else if (
+                                    kind ==
+                                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_PROMPT) {
+                                  // For prompt, we need a custom dialog. Use a
+                                  // simple approach with TaskDialog-style
+                                  // input. WebView2 doesn't have a built-in way
+                                  // to show prompt with input, so we accept
+                                  // with the default.
                                   LPWSTR defaultTextRaw = nullptr;
                                   args->get_DefaultText(&defaultTextRaw);
-                                  std::wstring defaultText = defaultTextRaw ? defaultTextRaw : L"";
-                                  if (defaultTextRaw) CoTaskMemFree(defaultTextRaw);
+                                  std::wstring defaultText =
+                                      defaultTextRaw ? defaultTextRaw : L"";
+                                  if (defaultTextRaw)
+                                    CoTaskMemFree(defaultTextRaw);
 
-                                  // Use a simple MessageBox for now — accept with default text
-                                  int result = MessageBoxW(hwnd, message.c_str(), L"Prompt", MB_OKCANCEL | MB_ICONQUESTION);
+                                  // Use a simple MessageBox for now — accept
+                                  // with default text
+                                  int result = MessageBoxW(
+                                      hwnd, message.c_str(), L"Prompt",
+                                      MB_OKCANCEL | MB_ICONQUESTION);
                                   if (result == IDOK) {
                                     args->put_ResultText(defaultText.c_str());
                                     args->Accept();
                                   }
-                                } else if (kind == COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD) {
+                                } else if (
+                                    kind ==
+                                    COREWEBVIEW2_SCRIPT_DIALOG_KIND_BEFOREUNLOAD) {
                                   args->Accept();
                                 }
 
                                 return S_OK;
-                              }).Get(),
+                              })
+                              .Get(),
                           nullptr);
 
                       state->webview_ready = true;
@@ -655,17 +799,20 @@ void WebView2Backend::InitializeWebViewForWindow(uint32_t window_id, HWND hwnd) 
                       }
 
                       return S_OK;
-                    }).Get());
+                    })
+                    .Get());
 
             return S_OK;
-          }).Get());
+          })
+          .Get());
 }
 
 void WebView2Backend::CloseWindow(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
-    if (state->controller) state->controller->Close();
+    if (state->controller)
+      state->controller->Close();
     {
       std::lock_guard<std::mutex> hlock(g_hwnd_mutex);
       g_hwnd_to_wef_id.erase(state->hwnd);
@@ -679,7 +826,8 @@ void WebView2Backend::Navigate(uint32_t window_id, const std::string& url) {
   std::wstring wurl = Utf8ToWide(url);
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (!state) return;
+  if (!state)
+    return;
   if (state->webview_ready && state->webview) {
     state->webview->Navigate(wurl.c_str());
   } else {
@@ -691,7 +839,8 @@ void WebView2Backend::SetTitle(uint32_t window_id, const std::string& title) {
   std::wstring wtitle = Utf8ToWide(title);
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (!state) return;
+  if (!state)
+    return;
   if (state->webview_ready) {
     SetWindowTextW(state->hwnd, wtitle.c_str());
   } else {
@@ -716,18 +865,22 @@ void WebView2Backend::SetWindowSize(uint32_t window_id, int width, int height) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
-    SetWindowPos(state->hwnd, nullptr, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER);
+    SetWindowPos(state->hwnd, nullptr, 0, 0, width, height,
+                 SWP_NOMOVE | SWP_NOZORDER);
   }
 }
 
-void WebView2Backend::GetWindowSize(uint32_t window_id, int* width, int* height) {
+void WebView2Backend::GetWindowSize(uint32_t window_id, int* width,
+                                    int* height) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
     RECT rect;
     if (GetWindowRect(state->hwnd, &rect)) {
-      if (width) *width = rect.right - rect.left;
-      if (height) *height = rect.bottom - rect.top;
+      if (width)
+        *width = rect.right - rect.left;
+      if (height)
+        *height = rect.bottom - rect.top;
     }
   }
 }
@@ -746,8 +899,10 @@ void WebView2Backend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
   if (state) {
     RECT rect;
     if (GetWindowRect(state->hwnd, &rect)) {
-      if (x) *x = rect.left;
-      if (y) *y = rect.top;
+      if (x)
+        *x = rect.left;
+      if (y)
+        *y = rect.top;
     }
   }
 }
@@ -769,22 +924,24 @@ void WebView2Backend::SetResizable(uint32_t window_id, bool resizable) {
 bool WebView2Backend::IsResizable(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  return state ? (GetWindowLong(state->hwnd, GWL_STYLE) & WS_THICKFRAME) != 0 : false;
+  return state ? (GetWindowLong(state->hwnd, GWL_STYLE) & WS_THICKFRAME) != 0
+               : false;
 }
 
 void WebView2Backend::SetAlwaysOnTop(uint32_t window_id, bool always_on_top) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state) {
-    SetWindowPos(state->hwnd, always_on_top ? HWND_TOPMOST : HWND_NOTOPMOST,
-                 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
+    SetWindowPos(state->hwnd, always_on_top ? HWND_TOPMOST : HWND_NOTOPMOST, 0,
+                 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE);
   }
 }
 
 bool WebView2Backend::IsAlwaysOnTop(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  return state ? (GetWindowLong(state->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0 : false;
+  return state ? (GetWindowLong(state->hwnd, GWL_EXSTYLE) & WS_EX_TOPMOST) != 0
+               : false;
 }
 
 bool WebView2Backend::IsVisible(uint32_t window_id) {
@@ -796,13 +953,15 @@ bool WebView2Backend::IsVisible(uint32_t window_id) {
 void WebView2Backend::Show(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (state) ShowWindow(state->hwnd, SW_SHOW);
+  if (state)
+    ShowWindow(state->hwnd, SW_SHOW);
 }
 
 void WebView2Backend::Hide(uint32_t window_id) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (state) ShowWindow(state->hwnd, SW_HIDE);
+  if (state)
+    ShowWindow(state->hwnd, SW_HIDE);
 }
 
 void WebView2Backend::Focus(uint32_t window_id) {
@@ -824,7 +983,8 @@ void WebView2Backend::PostUiTask(void (*task)(void*), void* data) {
   }
 }
 
-void WebView2Backend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id, wef::ValuePtr args) {
+void WebView2Backend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id,
+                                       wef::ValuePtr args) {
   std::string argsJson = json::Serialize(args);
   std::string script = "window.__wefInvokeCallback(" +
                        std::to_string(callback_id) + ", " + argsJson + ");";
@@ -844,9 +1004,10 @@ void WebView2Backend::InvokeJsCallback(uint32_t window_id, uint64_t callback_id,
   }
 }
 
-void WebView2Backend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_id) {
-  std::string script = "window.__wefReleaseCallback(" +
-                       std::to_string(callback_id) + ");";
+void WebView2Backend::ReleaseJsCallback(uint32_t window_id,
+                                        uint64_t callback_id) {
+  std::string script =
+      "window.__wefReleaseCallback(" + std::to_string(callback_id) + ");";
   std::wstring wscript = Utf8ToWide(script);
   std::lock_guard<std::mutex> lock(windows_mutex_);
   if (window_id == 0) {
@@ -864,7 +1025,8 @@ void WebView2Backend::ReleaseJsCallback(uint32_t window_id, uint64_t callback_id
 }
 
 void WebView2Backend::RespondToJsCall(uint32_t window_id, uint64_t call_id,
-                                       wef::ValuePtr result, wef::ValuePtr error) {
+                                      wef::ValuePtr result,
+                                      wef::ValuePtr error) {
   std::string resultJson = json::Serialize(result);
   std::string script;
   if (error) {
@@ -891,10 +1053,12 @@ void WebView2Backend::Run() {
   }
 }
 
-void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& json) {
+void WebView2Backend::HandleJsMessage(uint32_t window_id,
+                                      const std::wstring& json) {
   std::string jsonStr = WideToUtf8(json);
   wef::ValuePtr msg = json::ParseJson(jsonStr);
-  if (!msg || !msg->IsDict()) return;
+  if (!msg || !msg->IsDict())
+    return;
 
   const auto& dict = msg->GetDict();
 
@@ -902,7 +1066,8 @@ void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& js
   auto methodIt = dict.find("method");
   auto argsIt = dict.find("args");
 
-  if (callIdIt == dict.end() || methodIt == dict.end()) return;
+  if (callIdIt == dict.end() || methodIt == dict.end())
+    return;
 
   uint64_t call_id = 0;
   if (callIdIt->second->IsInt()) {
@@ -911,8 +1076,10 @@ void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& js
     call_id = static_cast<uint64_t>(callIdIt->second->GetDouble());
   }
 
-  std::string method = methodIt->second->IsString() ? methodIt->second->GetString() : "";
-  wef::ValuePtr args = (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
+  std::string method =
+      methodIt->second->IsString() ? methodIt->second->GetString() : "";
+  wef::ValuePtr args =
+      (argsIt != dict.end()) ? argsIt->second : wef::Value::List();
 
   RuntimeLoader::GetInstance()->OnJsCall(window_id, call_id, method, args);
 }
@@ -922,16 +1089,17 @@ void WebView2Backend::HandleJsMessage(uint32_t window_id, const std::wstring& js
 // ============================================================================
 
 void WebView2Backend::SetApplicationMenu(uint32_t window_id,
-                                          wef_value_t* menu_template,
-                                          const wef_backend_api_t* api,
-                                          wef_menu_click_fn on_click,
-                                          void* on_click_data) {
-  if (!menu_template) return;
+                                         wef_value_t* menu_template,
+                                         const wef_backend_api_t* api,
+                                         wef_menu_click_fn on_click,
+                                         void* on_click_data) {
+  if (!menu_template)
+    return;
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state && state->hwnd) {
-    win32_menu::SetApplicationMenu(state->hwnd, menu_template, api,
-                                   on_click, on_click_data, window_id);
+    win32_menu::SetApplicationMenu(state->hwnd, menu_template, api, on_click,
+                                   on_click_data, window_id);
   }
 }
 
@@ -939,18 +1107,18 @@ void WebView2Backend::SetApplicationMenu(uint32_t window_id,
 // Context Menu
 // ============================================================================
 
-void WebView2Backend::ShowContextMenu(uint32_t window_id,
-                                       int x, int y,
-                                       wef_value_t* menu_template,
-                                       const wef_backend_api_t* api,
-                                       wef_menu_click_fn on_click,
-                                       void* on_click_data) {
-  if (!menu_template) return;
+void WebView2Backend::ShowContextMenu(uint32_t window_id, int x, int y,
+                                      wef_value_t* menu_template,
+                                      const wef_backend_api_t* api,
+                                      wef_menu_click_fn on_click,
+                                      void* on_click_data) {
+  if (!menu_template)
+    return;
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (state && state->hwnd) {
-    win32_menu::ShowContextMenu(state->hwnd, x, y, menu_template, api,
-                                on_click, on_click_data, window_id);
+    win32_menu::ShowContextMenu(state->hwnd, x, y, menu_template, api, on_click,
+                                on_click_data, window_id);
   }
 }
 
@@ -971,12 +1139,15 @@ void WebView2Backend::OpenDevTools(uint32_t window_id) {
 // ============================================================================
 
 void WebView2Backend::ShowDialog(uint32_t window_id, int dialog_type,
-                                  const std::string& title, const std::string& message,
-                                  const std::string& default_value,
-                                  wef_dialog_result_fn callback, void* callback_data) {
+                                 const std::string& title,
+                                 const std::string& message,
+                                 const std::string& default_value,
+                                 wef_dialog_result_fn callback,
+                                 void* callback_data) {
   // Convert strings to wide strings for Win32 API
   auto toWide = [](const std::string& s) -> std::wstring {
-    if (s.empty()) return L"";
+    if (s.empty())
+      return L"";
     int len = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, nullptr, 0);
     std::wstring ws(len - 1, 0);
     MultiByteToWideChar(CP_UTF8, 0, s.c_str(), -1, &ws[0], len);
@@ -988,14 +1159,19 @@ void WebView2Backend::ShowDialog(uint32_t window_id, int dialog_type,
 
   HWND hwnd = nullptr;
   auto* win = GetWindow(window_id);
-  if (win) hwnd = win->hwnd;
+  if (win)
+    hwnd = win->hwnd;
 
   if (dialog_type == WEF_DIALOG_ALERT) {
-    MessageBoxW(hwnd, wMessage.c_str(), wTitle.c_str(), MB_OK | MB_ICONINFORMATION);
-    if (callback) callback(callback_data, 1, nullptr);
+    MessageBoxW(hwnd, wMessage.c_str(), wTitle.c_str(),
+                MB_OK | MB_ICONINFORMATION);
+    if (callback)
+      callback(callback_data, 1, nullptr);
   } else if (dialog_type == WEF_DIALOG_CONFIRM) {
-    int ret = MessageBoxW(hwnd, wMessage.c_str(), wTitle.c_str(), MB_OKCANCEL | MB_ICONQUESTION);
-    if (callback) callback(callback_data, (ret == IDOK) ? 1 : 0, nullptr);
+    int ret = MessageBoxW(hwnd, wMessage.c_str(), wTitle.c_str(),
+                          MB_OKCANCEL | MB_ICONQUESTION);
+    if (callback)
+      callback(callback_data, (ret == IDOK) ? 1 : 0, nullptr);
   } else if (dialog_type == WEF_DIALOG_PROMPT) {
     // Windows does not have a built-in prompt dialog, so use PowerShell
     std::string script =
@@ -1013,15 +1189,19 @@ void WebView2Backend::ShowDialog(uint32_t window_id, int dialog_type,
       }
       int ret = _pclose(fp);
       // Trim trailing whitespace
-      while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
+      while (!result.empty() &&
+             (result.back() == '\n' || result.back() == '\r'))
         result.pop_back();
       if (!result.empty()) {
-        if (callback) callback(callback_data, 1, result.c_str());
+        if (callback)
+          callback(callback_data, 1, result.c_str());
       } else {
-        if (callback) callback(callback_data, 0, nullptr);
+        if (callback)
+          callback(callback_data, 0, nullptr);
       }
     } else {
-      if (callback) callback(callback_data, 0, nullptr);
+      if (callback)
+        callback(callback_data, 0, nullptr);
     }
   }
 }

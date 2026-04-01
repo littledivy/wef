@@ -15,13 +15,27 @@ inline std::string Escape(const std::string& s) {
   std::string result;
   for (char c : s) {
     switch (c) {
-      case '"': result += "\\\""; break;
-      case '\\': result += "\\\\"; break;
-      case '\b': result += "\\b"; break;
-      case '\f': result += "\\f"; break;
-      case '\n': result += "\\n"; break;
-      case '\r': result += "\\r"; break;
-      case '\t': result += "\\t"; break;
+      case '"':
+        result += "\\\"";
+        break;
+      case '\\':
+        result += "\\\\";
+        break;
+      case '\b':
+        result += "\\b";
+        break;
+      case '\f':
+        result += "\\f";
+        break;
+      case '\n':
+        result += "\\n";
+        break;
+      case '\r':
+        result += "\\r";
+        break;
+      case '\t':
+        result += "\\t";
+        break;
       default:
         if (static_cast<unsigned char>(c) < 0x20) {
           char buf[8];
@@ -41,7 +55,8 @@ inline std::string SerializeList(const wef::ValueList& list) {
   std::ostringstream ss;
   ss << "[";
   for (size_t i = 0; i < list.size(); ++i) {
-    if (i > 0) ss << ",";
+    if (i > 0)
+      ss << ",";
     ss << Serialize(list[i]);
   }
   ss << "]";
@@ -53,7 +68,8 @@ inline std::string SerializeDict(const wef::ValueDict& dict) {
   ss << "{";
   bool first = true;
   for (const auto& pair : dict) {
-    if (!first) ss << ",";
+    if (!first)
+      ss << ",";
     first = false;
     ss << "\"" << Escape(pair.first) << "\":" << Serialize(pair.second);
   }
@@ -62,7 +78,8 @@ inline std::string SerializeDict(const wef::ValueDict& dict) {
 }
 
 inline std::string Serialize(const wef::ValuePtr& value) {
-  if (!value) return "null";
+  if (!value)
+    return "null";
   switch (value->type) {
     case wef::ValueType::Null:
       return "null";
@@ -80,14 +97,17 @@ inline std::string Serialize(const wef::ValuePtr& value) {
     case wef::ValueType::Binary: {
       const auto& binary = value->GetBinary();
       std::string base64;
-      static const char* chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+      static const char* chars =
+          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
       size_t i = 0;
       const uint8_t* data = binary.data.data();
       size_t len = binary.data.size();
       while (i < len) {
         uint32_t n = (data[i] << 16);
-        if (i + 1 < len) n |= (data[i + 1] << 8);
-        if (i + 2 < len) n |= data[i + 2];
+        if (i + 1 < len)
+          n |= (data[i + 1] << 8);
+        if (i + 2 < len)
+          n |= data[i + 2];
         base64 += chars[(n >> 18) & 0x3F];
         base64 += chars[(n >> 12) & 0x3F];
         base64 += (i + 1 < len) ? chars[(n >> 6) & 0x3F] : '=';
@@ -101,7 +121,8 @@ inline std::string Serialize(const wef::ValuePtr& value) {
     case wef::ValueType::Dict:
       return SerializeDict(value->GetDict());
     case wef::ValueType::Callback:
-      return "{\"__callback__\":\"" + std::to_string(value->GetCallbackId()) + "\"}";
+      return "{\"__callback__\":\"" + std::to_string(value->GetCallbackId()) +
+             "\"}";
   }
   return "null";
 }
@@ -109,7 +130,8 @@ inline std::string Serialize(const wef::ValuePtr& value) {
 inline wef::ValuePtr Parse(const char*& p);
 
 inline void SkipWhitespace(const char*& p) {
-  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')) ++p;
+  while (*p && (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r'))
+    ++p;
 }
 
 inline std::string ParseString(const char*& p) {
@@ -119,13 +141,27 @@ inline std::string ParseString(const char*& p) {
     if (*p == '\\' && *(p + 1)) {
       ++p;
       switch (*p) {
-        case '"': result += '"'; break;
-        case '\\': result += '\\'; break;
-        case 'b': result += '\b'; break;
-        case 'f': result += '\f'; break;
-        case 'n': result += '\n'; break;
-        case 'r': result += '\r'; break;
-        case 't': result += '\t'; break;
+        case '"':
+          result += '"';
+          break;
+        case '\\':
+          result += '\\';
+          break;
+        case 'b':
+          result += '\b';
+          break;
+        case 'f':
+          result += '\f';
+          break;
+        case 'n':
+          result += '\n';
+          break;
+        case 'r':
+          result += '\r';
+          break;
+        case 't':
+          result += '\t';
+          break;
         case 'u': {
           if (p[1] && p[2] && p[3] && p[4]) {
             char hex[5] = {p[1], p[2], p[3], p[4], 0};
@@ -144,14 +180,16 @@ inline std::string ParseString(const char*& p) {
           }
           break;
         }
-        default: result += *p;
+        default:
+          result += *p;
       }
     } else {
       result += *p;
     }
     ++p;
   }
-  if (*p == '"') ++p;
+  if (*p == '"')
+    ++p;
   return result;
 }
 
@@ -162,10 +200,12 @@ inline wef::ValuePtr ParseArray(const char*& p) {
   while (*p && *p != ']') {
     list->GetList().push_back(Parse(p));
     SkipWhitespace(p);
-    if (*p == ',') ++p;
+    if (*p == ',')
+      ++p;
     SkipWhitespace(p);
   }
-  if (*p == ']') ++p;
+  if (*p == ']')
+    ++p;
   return list;
 }
 
@@ -175,17 +215,21 @@ inline wef::ValuePtr ParseObject(const char*& p) {
   SkipWhitespace(p);
   while (*p && *p != '}') {
     SkipWhitespace(p);
-    if (*p != '"') break;
+    if (*p != '"')
+      break;
     std::string key = ParseString(p);
     SkipWhitespace(p);
-    if (*p == ':') ++p;
+    if (*p == ':')
+      ++p;
     SkipWhitespace(p);
     dict->GetDict()[key] = Parse(p);
     SkipWhitespace(p);
-    if (*p == ',') ++p;
+    if (*p == ',')
+      ++p;
     SkipWhitespace(p);
   }
-  if (*p == '}') ++p;
+  if (*p == '}')
+    ++p;
 
   const auto& d = dict->GetDict();
   auto it = d.find("__callback__");
@@ -198,28 +242,28 @@ inline wef::ValuePtr ParseObject(const char*& p) {
     const std::string& base64 = it->second->GetString();
     std::vector<uint8_t> data;
     static const int decode[256] = {
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,62,-1,-1,-1,63,
-      52,53,54,55,56,57,58,59,60,61,-1,-1,-1,-1,-1,-1,
-      -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,10,11,12,13,14,
-      15,16,17,18,19,20,21,22,23,24,25,-1,-1,-1,-1,-1,
-      -1,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,
-      41,42,43,44,45,46,47,48,49,50,51,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,
-      -1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1,-1
-    };
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, 62, -1, -1, -1, 63, 52, 53, 54, 55, 56, 57,
+        58, 59, 60, 61, -1, -1, -1, -1, -1, -1, -1, 0,  1,  2,  3,  4,  5,  6,
+        7,  8,  9,  10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24,
+        25, -1, -1, -1, -1, -1, -1, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+        37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        -1, -1, -1, -1};
     int val = 0, bits = -8;
     for (char c : base64) {
-      if (c == '=') break;
+      if (c == '=')
+        break;
       int d = decode[(unsigned char)c];
-      if (d < 0) continue;
+      if (d < 0)
+        continue;
       val = (val << 6) | d;
       bits += 6;
       if (bits >= 0) {
@@ -235,7 +279,8 @@ inline wef::ValuePtr ParseObject(const char*& p) {
 
 inline wef::ValuePtr Parse(const char*& p) {
   SkipWhitespace(p);
-  if (!*p) return wef::Value::Null();
+  if (!*p)
+    return wef::Value::Null();
 
   if (*p == 'n' && strncmp(p, "null", 4) == 0) {
     p += 4;
@@ -283,6 +328,6 @@ inline wef::ValuePtr ParseJson(const std::string& json) {
   return Parse(p);
 }
 
-} // namespace json
+}  // namespace json
 
-#endif // WEF_JSON_H_
+#endif  // WEF_JSON_H_
