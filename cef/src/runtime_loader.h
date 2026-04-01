@@ -389,11 +389,15 @@ void RemoveNativeMouseMonitor();
 // NSWindow helpers for cross-platform code (implemented in runtime_loader_mac.mm).
 void RegisterNSWindowForCefHandle(void* cef_handle, uint32_t window_id);
 void UnregisterNSWindowForCefHandle(void* cef_handle);
+void SetNSWindowResizable(void* cef_handle, bool resizable);
+bool IsNSWindowResizable(void* cef_handle);
 #endif
 
 #ifdef __linux__
 // Register a CEF window for XI2 event monitoring (implemented in main_linux.cc).
 void MonitorLinuxWindowEvents(unsigned long xid);
+void SetLinuxWindowResizable(unsigned long xid, bool resizable);
+bool IsLinuxWindowResizable(unsigned long xid);
 #endif
 
 #ifdef __APPLE__

@@ -10,6 +10,27 @@
 
 // --- NSWindow Helpers (called from app.cc to avoid Obj-C in cross-platform code) ---
 
+void SetNSWindowResizable(void* cef_handle, bool resizable) {
+  NSView* view = (__bridge NSView*)cef_handle;
+  NSWindow* nswindow = [view window];
+  if (nswindow) {
+    if (resizable) {
+      nswindow.styleMask |= NSWindowStyleMaskResizable;
+    } else {
+      nswindow.styleMask &= ~NSWindowStyleMaskResizable;
+    }
+  }
+}
+
+bool IsNSWindowResizable(void* cef_handle) {
+  NSView* view = (__bridge NSView*)cef_handle;
+  NSWindow* nswindow = [view window];
+  if (nswindow) {
+    return (nswindow.styleMask & NSWindowStyleMaskResizable) != 0;
+  }
+  return true;
+}
+
 void RegisterNSWindowForCefHandle(void* cef_handle, uint32_t window_id) {
   NSView* view = (__bridge NSView*)cef_handle;
   NSWindow* nswindow = [view window];

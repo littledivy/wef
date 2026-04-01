@@ -186,17 +186,56 @@ static void Backend_GetWindowPosition(void* data, uint32_t window_id, int* x, in
 }
 
 static void Backend_SetResizable(void* data, uint32_t window_id, bool resizable) {
-  // CEF Views framework does not expose a direct resizable toggle
-  (void)data;
-  (void)window_id;
-  (void)resizable;
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  if (browser) {
+    CefPostTask(TID_UI, base::BindOnce(
+        [](CefRefPtr<CefBrowser> b, bool r) {
+          auto browser_view = CefBrowserView::GetForBrowser(b);
+          if (!browser_view) return;
+          auto window = browser_view->GetWindow();
+          if (!window) return;
+#ifdef _WIN32
+          HWND hwnd = window->GetWindowHandle();
+          LONG style = GetWindowLong(hwnd, GWL_STYLE);
+          if (r) {
+            style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
+          } else {
+            style &= ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
+          }
+          SetWindowLong(hwnd, GWL_STYLE, style);
+#elif defined(__APPLE__)
+          SetNSWindowResizable(window->GetWindowHandle(), r);
+#elif defined(__linux__)
+          SetLinuxWindowResizable(window->GetWindowHandle(), r);
+#endif
+        },
+        browser, resizable));
+  }
 }
 
 static bool Backend_IsResizable(void* data, uint32_t window_id) {
-  // CEF Views framework does not expose a direct resizable query
-  (void)data;
-  (void)window_id;
-  return true;
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  bool result = true;
+  if (browser) {
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (!browser_view) return;
+      auto window = browser_view->GetWindow();
+      if (!window) return;
+#ifdef _WIN32
+      HWND hwnd = window->GetWindowHandle();
+      LONG style = GetWindowLong(hwnd, GWL_STYLE);
+      result = (style & WS_THICKFRAME) != 0;
+#elif defined(__APPLE__)
+      result = IsNSWindowResizable(window->GetWindowHandle());
+#elif defined(__linux__)
+      result = IsLinuxWindowResizable(window->GetWindowHandle());
+#endif
+    });
+  }
+  return result;
 }
 
 static void Backend_SetAlwaysOnTop(void* data, uint32_t window_id, bool always_on_top) {

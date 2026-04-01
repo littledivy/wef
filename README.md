@@ -76,7 +76,7 @@ within a backend.
 | Execute JavaScript        | ✅  | ✅      | ✅    | ❌    |
 | Set / get window size     | ✅  | ✅      | ✅    | ✅    |
 | Set / get window position | ✅  | ✅      | ✅    | ✅    |
-| Set / get resizable       | ❌  | ✅      | ✅    | ✅    |
+| Set / get resizable       | ✅  | ✅      | ✅    | ✅    |
 | Set / get always on top   | ✅  | ✅      | ✅    | ✅    |
 | Show / hide / is visible  | ✅  | ✅      | ✅    | ✅    |
 | Focus                     | ✅  | ✅      | ✅    | ✅    |
@@ -91,6 +91,7 @@ within a backend.
 | Respond to JS calls               | ✅  | ✅      | ❌    | ❌    |
 | Invoke JS callbacks               | ✅  | ✅      | ❌    | ❌    |
 | Release JS callbacks              | ✅  | ✅      | ❌    | ❌    |
+| Custom JS namespace               | ✅  | ✅      | ❌    | ❌    |
 
 #### Menus
 
@@ -105,11 +106,12 @@ X11/Wayland windows without a GTK container.
 
 #### Native dialogs
 
-| Feature | CEF | WebView | Servo | Winit |
-| ------- | --- | ------- | ----- | ----- |
-| Alert   | ✅  | ✅      | ✅    | ✅    |
-| Confirm | ✅  | ✅      | ✅    | ✅    |
-| Prompt  | ✅  | ✅      | ✅    | ✅    |
+| Feature                        | CEF | WebView | Servo | Winit |
+| ------------------------------ | --- | ------- | ----- | ----- |
+| Alert                          | ✅  | ✅      | ✅    | ✅    |
+| Confirm                        | ✅  | ✅      | ✅    | ✅    |
+| Prompt                         | ✅  | ✅      | ✅    | ✅    |
+| Browser JS dialogs (native UI) | ✅  | ✅      | ❌    | ❌    |
 
 #### Input events
 

@@ -299,6 +299,55 @@ void RemoveNativeMouseMonitor() {
 #endif
 }
 
+void SetLinuxWindowResizable(unsigned long xid, bool resizable) {
+#ifdef GDK_WINDOWING_X11
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display)) return;
+  Display* dpy = GDK_DISPLAY_XDISPLAY(gdk_display);
+
+  XSizeHints hints;
+  long supplied;
+  XGetWMNormalHints(dpy, xid, &hints, &supplied);
+
+  if (resizable) {
+    hints.flags &= ~(PMinSize | PMaxSize);
+    hints.min_width = 0;
+    hints.min_height = 0;
+    hints.max_width = 0;
+    hints.max_height = 0;
+  } else {
+    XWindowAttributes attrs;
+    XGetWindowAttributes(dpy, xid, &attrs);
+    hints.flags |= PMinSize | PMaxSize;
+    hints.min_width = attrs.width;
+    hints.min_height = attrs.height;
+    hints.max_width = attrs.width;
+    hints.max_height = attrs.height;
+  }
+  XSetWMNormalHints(dpy, xid, &hints);
+  XFlush(dpy);
+#endif
+}
+
+bool IsLinuxWindowResizable(unsigned long xid) {
+#ifdef GDK_WINDOWING_X11
+  GdkDisplay* gdk_display = gdk_display_get_default();
+  if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display)) return true;
+  Display* dpy = GDK_DISPLAY_XDISPLAY(gdk_display);
+
+  XSizeHints hints;
+  long supplied;
+  XGetWMNormalHints(dpy, xid, &hints, &supplied);
+
+  if ((hints.flags & PMinSize) && (hints.flags & PMaxSize)) {
+    return hints.min_width != hints.max_width || hints.min_height != hints.max_height;
+  }
+  return true;
+#else
+  return true;
+#endif
+}
+
 void MonitorLinuxWindowEvents(unsigned long xid) {
 #ifdef GDK_WINDOWING_X11
   if (!g_monitor_display) return;
