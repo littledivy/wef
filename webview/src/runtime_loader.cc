@@ -39,11 +39,7 @@ static void Backend_ExecuteJs(void* data, uint32_t window_id,
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   WefBackend* backend = loader->GetBackend();
   if (backend && script) {
-    backend->ExecuteJs(window_id, script);
-    // TODO: webview backends don't support result callbacks yet
-    if (callback) {
-      callback(nullptr, nullptr, callback_data);
-    }
+    backend->ExecuteJs(window_id, script, callback, callback_data);
   }
 }
 

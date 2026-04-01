@@ -221,6 +221,41 @@ bool WefRenderProcessHandler::OnProcessMessageReceived(
     return true;
   }
 
+  if (name == "wef_eval") {
+    CefRefPtr<CefListValue> args = message->GetArgumentList();
+    uint64_t eval_id = static_cast<uint64_t>(args->GetInt(0));
+    std::string script = args->GetString(1).ToString();
+
+    CefRefPtr<CefV8Context> context = frame->GetV8Context();
+    CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create("wef_eval_result");
+    CefRefPtr<CefListValue> replyArgs = reply->GetArgumentList();
+    replyArgs->SetInt(0, static_cast<int>(eval_id));
+
+    if (context && context->Enter()) {
+      CefRefPtr<CefV8Value> retval;
+      CefRefPtr<CefV8Exception> exception;
+      bool success = context->Eval(script, "", 0, retval, exception);
+
+      if (success && retval) {
+        replyArgs->SetValue(1, V8ValueToCefValue(retval));
+        replyArgs->SetString(2, "");
+      } else if (exception) {
+        replyArgs->SetNull(1);
+        replyArgs->SetString(2, exception->GetMessage().ToString());
+      } else {
+        replyArgs->SetNull(1);
+        replyArgs->SetString(2, "");
+      }
+      context->Exit();
+    } else {
+      replyArgs->SetNull(1);
+      replyArgs->SetString(2, "Failed to enter V8 context");
+    }
+
+    frame->SendProcessMessage(PID_BROWSER, reply);
+    return true;
+  }
+
   if (name == "wef_release_callback") {
     CefRefPtr<CefListValue> args = message->GetArgumentList();
     uint64_t callback_id = static_cast<uint64_t>(args->GetInt(0));

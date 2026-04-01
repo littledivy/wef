@@ -92,17 +92,34 @@ static void Backend_ExecuteJs(void* data, uint32_t window_id,
                               void* callback_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
-  if (browser && script) {
+  if (!browser || !script) {
+    if (callback) callback(nullptr, nullptr, callback_data);
+    return;
+  }
+
+  if (!callback) {
+    // Fire-and-forget: use the simple path
     std::string script_str(script);
     CefPostTask(TID_UI, base::BindOnce(
                             [](CefRefPtr<CefBrowser> b, std::string s) {
                               b->GetMainFrame()->ExecuteJavaScript(s, "", 0);
                             },
                             browser, script_str));
-    if (callback) {
-      callback(nullptr, nullptr, callback_data);
-    }
+    return;
   }
+
+  // With callback: send IPC to renderer for eval with result
+  uint64_t eval_id = loader->StoreEvalCallback(callback, callback_data);
+  std::string script_str(script);
+  CefPostTask(TID_UI, base::BindOnce(
+      [](CefRefPtr<CefBrowser> b, uint64_t id, std::string s) {
+        CefRefPtr<CefProcessMessage> msg = CefProcessMessage::Create("wef_eval");
+        CefRefPtr<CefListValue> args = msg->GetArgumentList();
+        args->SetInt(0, static_cast<int>(id));
+        args->SetString(1, s);
+        b->GetMainFrame()->SendProcessMessage(PID_RENDERER, msg);
+      },
+      browser, eval_id, script_str));
 }
 
 static void Backend_Quit(void* data) {
@@ -1274,6 +1291,31 @@ void RuntimeLoader::Shutdown() {
 
   if (runtime_thread_.joinable()) {
     runtime_thread_.join();
+  }
+}
+
+void RuntimeLoader::HandleEvalResult(uint64_t eval_id,
+                                     CefRefPtr<CefValue> result,
+                                     const std::string& error) {
+  PendingEval eval;
+  {
+    std::lock_guard<std::mutex> lock(eval_mutex_);
+    auto it = pending_evals_.find(eval_id);
+    if (it == pending_evals_.end()) return;
+    eval = it->second;
+    pending_evals_.erase(it);
+  }
+
+  if (!error.empty()) {
+    CefRefPtr<CefValue> errValue = CefValue::Create();
+    errValue->SetString(error);
+    wef_value errWef(errValue);
+    eval.callback(nullptr, &errWef, eval.callback_data);
+  } else if (result && result->GetType() != VTYPE_NULL) {
+    wef_value resultWef(result);
+    eval.callback(&resultWef, nullptr, eval.callback_data);
+  } else {
+    eval.callback(nullptr, nullptr, eval.callback_data);
   }
 }
 

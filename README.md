@@ -92,6 +92,7 @@ within a backend.
 | Invoke JS callbacks               | ✅  | ✅      | ❌    | ❌    |
 | Release JS callbacks              | ✅  | ✅      | ❌    | ❌    |
 | Custom JS namespace               | ✅  | ✅      | ❌    | ❌    |
+| Execute JS with result callback   | ✅  | ✅      | ❌    | ❌    |
 
 #### Menus
 

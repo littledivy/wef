@@ -515,6 +515,15 @@ bool WefHandler::OnProcessMessageReceived(
     return true;
   }
 
+  if (name == "wef_eval_result") {
+    CefRefPtr<CefListValue> args = message->GetArgumentList();
+    uint64_t eval_id = static_cast<uint64_t>(args->GetInt(0));
+    CefRefPtr<CefValue> result = args->GetValue(1);
+    std::string error = args->GetString(2).ToString();
+    RuntimeLoader::GetInstance()->HandleEvalResult(eval_id, result, error);
+    return true;
+  }
+
   return false;
 }
 

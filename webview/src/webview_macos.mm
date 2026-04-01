@@ -11,6 +11,7 @@
 
 @class WefScriptMessageHandler;
 @class WefWindowDelegate;
+@class WefUIDelegate;
 
 // Per-window state
 struct MacWindowState {
@@ -24,6 +25,7 @@ struct MacWindowState {
   id resize_observer;
   id move_observer;
   NSMenu* menu = nil;  // per-window menu (nil = no custom menu)
+  WefUIDelegate* ui_delegate;
 };
 
 class WKWebViewBackend : public WefBackend {
@@ -36,7 +38,8 @@ class WKWebViewBackend : public WefBackend {
 
   void Navigate(uint32_t window_id, const std::string& url) override;
   void SetTitle(uint32_t window_id, const std::string& title) override;
-  void ExecuteJs(uint32_t window_id, const std::string& script) override;
+  void ExecuteJs(uint32_t window_id, const std::string& script,
+                 wef_js_result_fn callback, void* callback_data) override;
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
@@ -884,7 +887,8 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
       if ([webview respondsToSelector:@selector(setInspectable:)]) {
         [webview setInspectable:YES];
       }
-      webview.UIDelegate = [[WefUIDelegate alloc] init];
+      WefUIDelegate* uiDelegate = [[WefUIDelegate alloc] init];
+      webview.UIDelegate = uiDelegate;
       [window setContentView:webview];
 
       RegisterNSWindow(window, window_id);
@@ -946,6 +950,7 @@ void WKWebViewBackend::CreateWindow(uint32_t window_id, int width, int height) {
       state.webview = webview;
       state.message_handler = handler;
       state.window_delegate = delegate;
+      state.ui_delegate = uiDelegate;
       state.focus_observer = focus_obs;
       state.blur_observer = blur_obs;
       state.resize_observer = resize_obs;
@@ -1022,18 +1027,81 @@ void WKWebViewBackend::SetTitle(uint32_t window_id, const std::string& title) {
 }
 
 void WKWebViewBackend::ExecuteJs(uint32_t window_id,
-                                 const std::string& script) {
+                                 const std::string& script,
+                                 wef_js_result_fn callback,
+                                 void* callback_data) {
   std::string scriptCopy = script;
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
-      if (state) {
-        [state->webview
-            evaluateJavaScript:[NSString
-                                   stringWithUTF8String:scriptCopy.c_str()]
-             completionHandler:nil];
+      if (!state) {
+        if (callback) callback(nullptr, nullptr, callback_data);
+        return;
       }
+      if (!callback) {
+        [state->webview
+            evaluateJavaScript:[NSString stringWithUTF8String:scriptCopy.c_str()]
+             completionHandler:nil];
+        return;
+      }
+      [state->webview
+          evaluateJavaScript:[NSString stringWithUTF8String:scriptCopy.c_str()]
+           completionHandler:^(id result, NSError* error) {
+             if (error) {
+               std::string errMsg = [[error localizedDescription] UTF8String];
+               auto errVal = wef::Value::String(errMsg);
+               wef_value errWef(errVal);
+               callback(nullptr, &errWef, callback_data);
+               return;
+             }
+             if (!result || [result isKindOfClass:[NSNull class]]) {
+               callback(nullptr, nullptr, callback_data);
+               return;
+             }
+             // Convert the result to JSON, then parse it back into a wef::Value
+             NSError* jsonError = nil;
+             NSData* jsonData = nil;
+             if ([NSJSONSerialization isValidJSONObject:@[result]]) {
+               // Wrap in array to handle primitives
+               jsonData = [NSJSONSerialization dataWithJSONObject:@[result] options:0 error:&jsonError];
+             }
+             if (jsonData) {
+               NSString* jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+               // Parse the wrapped array, extract first element
+               auto parsed = json::ParseJson([jsonStr UTF8String]);
+               if (parsed && parsed->IsList() && !parsed->GetList().empty()) {
+                 wef_value resultWef(parsed->GetList()[0]);
+                 callback(&resultWef, nullptr, callback_data);
+               } else {
+                 callback(nullptr, nullptr, callback_data);
+               }
+             } else if ([result isKindOfClass:[NSNumber class]]) {
+               // Handle numbers that aren't valid JSON objects on their own
+               NSNumber* num = (NSNumber*)result;
+               const char* objcType = [num objCType];
+               if (strcmp(objcType, @encode(BOOL)) == 0 || strcmp(objcType, @encode(char)) == 0) {
+                 auto val = wef::Value::Bool([num boolValue]);
+                 wef_value wef(val);
+                 callback(&wef, nullptr, callback_data);
+               } else if (strcmp(objcType, @encode(int)) == 0 || strcmp(objcType, @encode(long)) == 0 ||
+                          strcmp(objcType, @encode(long long)) == 0) {
+                 auto val = wef::Value::Int([num intValue]);
+                 wef_value wef(val);
+                 callback(&wef, nullptr, callback_data);
+               } else {
+                 auto val = wef::Value::Double([num doubleValue]);
+                 wef_value wef(val);
+                 callback(&wef, nullptr, callback_data);
+               }
+             } else if ([result isKindOfClass:[NSString class]]) {
+               auto val = wef::Value::String([(NSString*)result UTF8String]);
+               wef_value wef(val);
+               callback(&wef, nullptr, callback_data);
+             } else {
+               callback(nullptr, nullptr, callback_data);
+             }
+           }];
     }
   });
 }

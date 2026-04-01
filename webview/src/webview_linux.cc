@@ -570,7 +570,8 @@ class WebKitGTKBackend : public WefBackend {
 
   void Navigate(uint32_t window_id, const std::string& url) override;
   void SetTitle(uint32_t window_id, const std::string& title) override;
-  void ExecuteJs(uint32_t window_id, const std::string& script) override;
+  void ExecuteJs(uint32_t window_id, const std::string& script,
+                 wef_js_result_fn callback, void* callback_data) override;
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
@@ -948,13 +949,86 @@ void WebKitGTKBackend::SetTitle(uint32_t window_id, const std::string& title) {
   }
 }
 
+struct ExecuteJsCallbackData {
+  wef_js_result_fn callback;
+  void* user_data;
+};
+
+static void on_execute_js_finished(GObject* source, GAsyncResult* result,
+                                   gpointer user_data) {
+  auto* cb_data = static_cast<ExecuteJsCallbackData*>(user_data);
+
+  GError* error = nullptr;
+  WebKitJavascriptResult* js_result =
+      webkit_web_view_run_javascript_finish(WEBKIT_WEB_VIEW(source), result, &error);
+
+  if (error) {
+    auto errVal = wef::Value::String(error->message);
+    wef_value errWef(errVal);
+    cb_data->callback(nullptr, &errWef, cb_data->user_data);
+    g_error_free(error);
+  } else if (js_result) {
+    JSCValue* value = webkit_javascript_result_get_js_value(js_result);
+    if (jsc_value_is_null(value) || jsc_value_is_undefined(value)) {
+      cb_data->callback(nullptr, nullptr, cb_data->user_data);
+    } else if (jsc_value_is_boolean(value)) {
+      auto val = wef::Value::Bool(jsc_value_to_boolean(value));
+      wef_value wef(val);
+      cb_data->callback(&wef, nullptr, cb_data->user_data);
+    } else if (jsc_value_is_number(value)) {
+      double d = jsc_value_to_double(value);
+      if (d == (int)d && d >= INT_MIN && d <= INT_MAX) {
+        auto val = wef::Value::Int((int)d);
+        wef_value wef(val);
+        cb_data->callback(&wef, nullptr, cb_data->user_data);
+      } else {
+        auto val = wef::Value::Double(d);
+        wef_value wef(val);
+        cb_data->callback(&wef, nullptr, cb_data->user_data);
+      }
+    } else if (jsc_value_is_string(value)) {
+      gchar* str = jsc_value_to_string(value);
+      auto val = wef::Value::String(str);
+      wef_value wef(val);
+      cb_data->callback(&wef, nullptr, cb_data->user_data);
+      g_free(str);
+    } else {
+      // For objects/arrays, serialize to JSON and parse
+      gchar* json = jsc_value_to_json(value, 0);
+      if (json) {
+        auto val = json::ParseJson(json);
+        wef_value wef(val);
+        cb_data->callback(&wef, nullptr, cb_data->user_data);
+        g_free(json);
+      } else {
+        cb_data->callback(nullptr, nullptr, cb_data->user_data);
+      }
+    }
+    webkit_javascript_result_unref(js_result);
+  } else {
+    cb_data->callback(nullptr, nullptr, cb_data->user_data);
+  }
+
+  delete cb_data;
+}
+
 void WebKitGTKBackend::ExecuteJs(uint32_t window_id,
-                                 const std::string& script) {
+                                 const std::string& script,
+                                 wef_js_result_fn callback,
+                                 void* callback_data) {
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (state) {
+  if (!state) {
+    if (callback) callback(nullptr, nullptr, callback_data);
+    return;
+  }
+  if (!callback) {
     webkit_web_view_run_javascript(state->webview, script.c_str(), nullptr,
                                    nullptr, nullptr);
+  } else {
+    auto* cb_data = new ExecuteJsCallbackData{callback, callback_data};
+    webkit_web_view_run_javascript(state->webview, script.c_str(), nullptr,
+                                   on_execute_js_finished, cb_data);
   }
 }
 

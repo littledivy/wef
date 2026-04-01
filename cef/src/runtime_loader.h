@@ -302,6 +302,16 @@ class RuntimeLoader {
     js_call_notify_data_ = notify_data;
   }
 
+  uint64_t StoreEvalCallback(wef_js_result_fn callback, void* callback_data) {
+    std::lock_guard<std::mutex> lock(eval_mutex_);
+    uint64_t id = next_eval_id_++;
+    pending_evals_[id] = {callback, callback_data};
+    return id;
+  }
+
+  void HandleEvalResult(uint64_t eval_id, CefRefPtr<CefValue> result,
+                        const std::string& error);
+
   void SetJsNamespace(const std::string& name) {
     std::lock_guard<std::mutex> lock(js_namespace_mutex_);
     js_namespace_ = name;
@@ -385,6 +395,14 @@ class RuntimeLoader {
 
   std::string js_namespace_ = "Wef";
   mutable std::mutex js_namespace_mutex_;
+
+  struct PendingEval {
+    wef_js_result_fn callback;
+    void* callback_data;
+  };
+  std::map<uint64_t, PendingEval> pending_evals_;
+  std::atomic<uint64_t> next_eval_id_{1};
+  std::mutex eval_mutex_;
 
   struct PendingJsCall {
     uint32_t window_id;

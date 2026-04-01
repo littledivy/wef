@@ -408,7 +408,8 @@ class WebView2Backend : public WefBackend {
 
   void Navigate(uint32_t window_id, const std::string& url) override;
   void SetTitle(uint32_t window_id, const std::string& title) override;
-  void ExecuteJs(uint32_t window_id, const std::string& script) override;
+  void ExecuteJs(uint32_t window_id, const std::string& script,
+                 wef_js_result_fn callback, void* callback_data) override;
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
@@ -848,12 +849,41 @@ void WebView2Backend::SetTitle(uint32_t window_id, const std::string& title) {
   }
 }
 
-void WebView2Backend::ExecuteJs(uint32_t window_id, const std::string& script) {
+void WebView2Backend::ExecuteJs(uint32_t window_id, const std::string& script,
+                                wef_js_result_fn callback,
+                                void* callback_data) {
   std::wstring wscript = Utf8ToWide(script);
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
-  if (state && state->webview_ready && state->webview) {
+  if (!state || !state->webview_ready || !state->webview) {
+    if (callback) callback(nullptr, nullptr, callback_data);
+    return;
+  }
+  if (!callback) {
     state->webview->ExecuteScript(wscript.c_str(), nullptr);
+  } else {
+    state->webview->ExecuteScript(
+        wscript.c_str(),
+        Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [callback, callback_data](HRESULT hr, LPCWSTR resultJson) -> HRESULT {
+              if (FAILED(hr)) {
+                auto errVal = wef::Value::String("ExecuteScript failed");
+                wef_value errWef(errVal);
+                callback(nullptr, &errWef, callback_data);
+                return S_OK;
+              }
+              if (!resultJson) {
+                callback(nullptr, nullptr, callback_data);
+                return S_OK;
+              }
+              // WebView2 returns the result as a JSON string
+              std::wstring wresult(resultJson);
+              std::string result(wresult.begin(), wresult.end());
+              auto val = json::ParseJson(result);
+              wef_value wef(val);
+              callback(&wef, nullptr, callback_data);
+              return S_OK;
+            }).Get());
   }
 }
 

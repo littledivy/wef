@@ -307,7 +307,8 @@ class WefBackend {
   // Per-window operations
   virtual void Navigate(uint32_t window_id, const std::string& url) = 0;
   virtual void SetTitle(uint32_t window_id, const std::string& title) = 0;
-  virtual void ExecuteJs(uint32_t window_id, const std::string& script) = 0;
+  virtual void ExecuteJs(uint32_t window_id, const std::string& script,
+                         wef_js_result_fn callback, void* callback_data) = 0;
   virtual void SetWindowSize(uint32_t window_id, int width, int height) = 0;
   virtual void GetWindowSize(uint32_t window_id, int* width, int* height) = 0;
   virtual void SetWindowPosition(uint32_t window_id, int x, int y) = 0;
