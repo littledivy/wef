@@ -29,6 +29,14 @@
 }
 
 - (void)sendEvent:(NSEvent*)event {
+  // Swallow Cmd+Q so Chromium's "Hold ⌘Q to Quit" panel never fires and no
+  // default termination happens. Embedders receive the key event through the
+  // normal keyboard pipeline and decide what (if anything) to do.
+  if (event.type == NSEventTypeKeyDown &&
+      (event.modifierFlags & NSEventModifierFlagCommand) &&
+      [event.charactersIgnoringModifiers isEqualToString:@"q"]) {
+    return;
+  }
   CefScopedSendingEvent sendingEventScoper;
   [super sendEvent:event];
 }
@@ -51,6 +59,11 @@
 }
 
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app {
+  return NO;
+}
+
+- (BOOL)applicationShouldHandleReopen:(NSApplication*)sender
+                    hasVisibleWindows:(BOOL)hasVisibleWindows {
   return NO;
 }
 @end

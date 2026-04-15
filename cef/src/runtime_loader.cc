@@ -1322,9 +1322,14 @@ void RuntimeLoader::HandleEvalResult(uint64_t eval_id,
 void RuntimeLoader::OnJsCall(uint32_t window_id, uint64_t call_id,
                              const std::string& method_path,
                              CefRefPtr<CefListValue> args) {
+  // The CefListValue passed in is owned by the CefProcessMessage and
+  // becomes invalid once OnProcessMessageReceived returns. Copy it so the
+  // queued entry survives until PollPendingJsCalls runs.
+  CefRefPtr<CefListValue> owned_args =
+      args ? args->Copy() : CefListValue::Create();
   {
     std::lock_guard<std::mutex> lock(pending_mutex_);
-    pending_js_calls_.push({window_id, call_id, method_path, args});
+    pending_js_calls_.push({window_id, call_id, method_path, owned_args});
   }
   StoreCallWindow(call_id, window_id);
 
