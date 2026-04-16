@@ -269,6 +269,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                            std::to_string(GetCurrentProcessId());
   CefString(&settings.root_cache_path) = cache_path;
 
+  char port_buf[16];
+  if (GetEnvironmentVariableA("WEF_REMOTE_DEBUGGING_PORT", port_buf,
+                              sizeof(port_buf)) > 0) {
+    int port = atoi(port_buf);
+    if (port > 0 && port < 65536) {
+      settings.remote_debugging_port = port;
+    }
+  }
+
   if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
     return 1;
   }
