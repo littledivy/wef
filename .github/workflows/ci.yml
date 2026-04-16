@@ -289,10 +289,29 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches capi crate version
+        run: |
+          tag="${GITHUB_REF#refs/tags/v}"
+          crate=$(awk -F'"' '/^version = / {print $2; exit}' capi/Cargo.toml)
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::Tag v$tag does not match capi crate version $crate"
+            exit 1
+          fi
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+
+      - name: Generate SHA256SUMS
+        working-directory: artifacts
+        run: |
+          shopt -s nullglob
+          files=(*.tar.gz *.zip)
+          sha256sum "${files[@]}" > SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create release
         uses: softprops/action-gh-release@v2

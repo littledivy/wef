@@ -22,6 +22,11 @@ pub use keyboard::*;
 mod mouse;
 pub use mouse::*;
 
+/// Version of this wef crate. Used by downstream consumers (e.g. the Deno CLI)
+/// to locate matching prebuilt backend binaries in GitHub releases
+/// (`github.com/denoland/wef/releases/tag/v{VERSION}`).
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 pub const WEF_API_VERSION: u32 = 18;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
