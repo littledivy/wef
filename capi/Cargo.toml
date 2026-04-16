@@ -12,4 +12,4 @@ crate-type = ["rlib"]
 tokio = { version = "1", features = ["sync", "rt"] }
 
 [build-dependencies]
-bindgen = { version = "0.71", features = ["runtime"] }
+bindgen = { version = "0.72", features = ["runtime"] }

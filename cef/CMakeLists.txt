@@ -216,7 +216,13 @@ elseif(OS_LINUX)
 
   add_executable(${CEF_TARGET} ${WEF_SRCS_COMMON} ${WEF_SRCS_LINUX})
   SET_EXECUTABLE_TARGET_PROPERTIES(${CEF_TARGET})
-  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS} ${XI2_LIBRARIES})
+  # Chromium launches child processes with --change-stack-guard-on-fork=enable
+  # (re-randomizes __stack_chk_guard after fork). The wef binary's main() is
+  # not part of Chromium's runtime, so its entry-time canary no longer matches
+  # at return, tripping __stack_chk_fail. Disable stack protection to bypass.
+  target_compile_options(${CEF_TARGET} PRIVATE -fno-stack-protector)
+  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS} ${GTK3_LIBRARIES} ${XI2_LIBRARIES})
+  target_link_directories(${CEF_TARGET} PRIVATE ${GTK3_LIBRARY_DIRS} ${XI2_LIBRARY_DIRS})
   target_include_directories(${CEF_TARGET} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${WEF_INCLUDE_DIR}"
