@@ -656,6 +656,13 @@ int main(int argc, char* argv[]) {
   std::string cache_path = "/tmp/wef_cef_" + std::to_string(getpid());
   CefString(&settings.root_cache_path) = cache_path;
 
+  if (const char* port_env = getenv("WEF_REMOTE_DEBUGGING_PORT")) {
+    int port = atoi(port_env);
+    if (port > 0 && port < 65536) {
+      settings.remote_debugging_port = port;
+    }
+  }
+
   if (!CefInitialize(main_args, settings, app.get(), nullptr)) {
     return 1;
   }
