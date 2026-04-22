@@ -154,6 +154,14 @@ class RuntimeLoader {
     }
   }
 
+  template <typename F>
+  void ForEachBrowserWithId(F&& fn) {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    for (auto& [wid, browser] : browsers_) {
+      fn(wid, browser);
+    }
+  }
+
   void OnJsCall(uint32_t window_id, uint64_t call_id,
                 const std::string& method_path, CefRefPtr<CefListValue> args);
 

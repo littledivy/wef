@@ -27,7 +27,7 @@ pub use mouse::*;
 /// (`github.com/denoland/wef/releases/tag/v{VERSION}`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const WEF_API_VERSION: u32 = 18;
+pub const WEF_API_VERSION: u32 = 19;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -51,6 +51,12 @@ static MENU_CLICK_HANDLERS: OnceLock<
 > = OnceLock::new();
 static CONTEXT_MENU_HANDLERS: OnceLock<
   Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>>,
+> = OnceLock::new();
+static DOCK_MENU_HANDLER: OnceLock<
+  Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>,
+> = OnceLock::new();
+static DOCK_REOPEN_HANDLER: OnceLock<
+  Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>,
 > = OnceLock::new();
 
 enum BindingHandler {
@@ -1135,6 +1141,161 @@ unsafe extern "C" fn context_menu_click_callback(
 fn context_menu_handlers(
 ) -> &'static Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>> {
   CONTEXT_MENU_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// --- Dock / taskbar ---
+
+/// How urgently to request the user's attention when calling [`bounce_dock`].
+///
+/// On macOS, `Informational` triggers a single bounce and `Critical` bounces
+/// continuously until the app is focused. Behavior on Windows/Linux is the
+/// closest native analog (`FlashWindowEx` / urgency hint).
+#[derive(Clone, Copy, Debug)]
+pub enum DockBounceType {
+  Informational,
+  Critical,
+}
+
+fn dock_menu_handler(
+) -> &'static Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>> {
+  DOCK_MENU_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+fn dock_reopen_handler(
+) -> &'static Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>> {
+  DOCK_REOPEN_HANDLER.get_or_init(|| Mutex::new(None))
+}
+
+unsafe extern "C" fn dock_menu_click_callback(
+  _user_data: *mut c_void,
+  _window_id: u32,
+  item_id: *const c_char,
+) {
+  if item_id.is_null() {
+    return;
+  }
+  let id = CStr::from_ptr(item_id).to_string_lossy();
+  if let Some(handler) = dock_menu_handler().lock().unwrap().as_ref() {
+    handler(&id);
+  }
+}
+
+unsafe extern "C" fn dock_reopen_callback(
+  _user_data: *mut c_void,
+  has_visible_windows: bool,
+) {
+  if let Some(handler) = dock_reopen_handler().lock().unwrap().as_ref() {
+    handler(has_visible_windows);
+  }
+}
+
+/// Set a short text badge on the app's dock icon (macOS) or taskbar icon
+/// (Windows), or prefix the focused window's title with `"(text) "` (Linux).
+/// Pass `None` or an empty string to clear the badge.
+pub fn set_dock_badge(text: Option<&str>) {
+  let api = api();
+  if let Some(f) = api.set_dock_badge {
+    match text {
+      Some(t) if !t.is_empty() => {
+        let c_text = CString::new(t).expect("Invalid badge text");
+        unsafe { f(api.backend_data, c_text.as_ptr()) };
+      }
+      _ => unsafe { f(api.backend_data, std::ptr::null()) },
+    }
+  }
+}
+
+/// Bounce the dock icon (macOS), flash the focused window's taskbar button
+/// (Windows), or set the urgency hint on the focused window (Linux).
+pub fn bounce_dock(kind: DockBounceType) {
+  let api = api();
+  if let Some(f) = api.bounce_dock {
+    let ty = match kind {
+      DockBounceType::Informational => {
+        ffi::WEF_DOCK_BOUNCE_INFORMATIONAL as c_int
+      }
+      DockBounceType::Critical => ffi::WEF_DOCK_BOUNCE_CRITICAL as c_int,
+    };
+    unsafe { f(api.backend_data, ty) };
+  }
+}
+
+/// Set a custom right-click menu on the app's dock icon (macOS only).
+/// `on_click` is called with the `id` of the clicked item.
+/// Windows and Linux: no-op.
+pub fn set_dock_menu<F>(template: &[MenuItem], on_click: F)
+where
+  F: Fn(&str) + Send + Sync + 'static,
+{
+  let value = Value::List(template.iter().map(|i| i.to_value()).collect());
+
+  {
+    let mut handler = dock_menu_handler().lock().unwrap();
+    *handler = Some(Box::new(on_click));
+  }
+
+  let api = api();
+  if let Some(f) = api.set_dock_menu {
+    let raw = value.to_raw();
+    unsafe {
+      f(
+        api.backend_data,
+        raw,
+        Some(dock_menu_click_callback),
+        std::ptr::null_mut(),
+      );
+    }
+  }
+}
+
+/// Remove the custom dock menu set by [`set_dock_menu`] (macOS only).
+pub fn clear_dock_menu() {
+  {
+    let mut handler = dock_menu_handler().lock().unwrap();
+    *handler = None;
+  }
+
+  let api = api();
+  if let Some(f) = api.set_dock_menu {
+    unsafe {
+      f(api.backend_data, std::ptr::null_mut(), None, std::ptr::null_mut());
+    }
+  }
+}
+
+/// Show or hide the app's dock icon (macOS activation policy).
+/// Windows and Linux: no-op (no app-level equivalent).
+pub fn set_dock_visible(visible: bool) {
+  let api = api();
+  if let Some(f) = api.set_dock_visible {
+    unsafe { f(api.backend_data, visible) };
+  }
+}
+
+/// Register a callback invoked when the user clicks the dock icon while the
+/// app has no visible windows (macOS only). The callback receives whether
+/// any windows are currently visible.
+///
+/// The default "show last hidden window" behavior is always swallowed — the
+/// callback is purely informational; user code decides what (if anything) to
+/// do (e.g. call `window.show()`).
+///
+/// Windows and Linux: no-op (no equivalent event).
+pub fn on_dock_reopen<F>(handler: F)
+where
+  F: Fn(bool) + Send + Sync + 'static,
+{
+  {
+    let mut slot = dock_reopen_handler().lock().unwrap();
+    *slot = Some(Box::new(handler));
+  }
+
+  let api = api();
+  if let Some(f) = api.set_dock_reopen_handler {
+    unsafe {
+      f(api.backend_data, Some(dock_reopen_callback), std::ptr::null_mut());
+    }
+  }
 }
 
 /// Set the global JS namespace name for bindings (default: `"Wef"`).

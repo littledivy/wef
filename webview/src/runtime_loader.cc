@@ -592,6 +592,48 @@ static void Backend_ShowDialog(void* data, uint32_t window_id, int dialog_type,
   }
 }
 
+// --- Dock / taskbar ---
+
+static void Backend_SetDockBadge(void* data, const char* badge_or_null) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend()) {
+    backend->SetDockBadge(badge_or_null);
+  }
+}
+
+static void Backend_BounceDock(void* data, int type) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend()) {
+    backend->BounceDock(type);
+  }
+}
+
+static void Backend_SetDockMenu(void* data, wef_value_t* menu_template,
+                                wef_menu_click_fn on_click,
+                                void* on_click_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend()) {
+    backend->SetDockMenu(menu_template, &loader->GetBackendApi(), on_click,
+                         on_click_data);
+  }
+}
+
+static void Backend_SetDockVisible(void* data, bool visible) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend()) {
+    backend->SetDockVisible(visible);
+  }
+}
+
+static void Backend_SetDockReopenHandler(void* data,
+                                         wef_dock_reopen_fn handler,
+                                         void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend()) {
+    backend->SetDockReopenHandler(handler, user_data);
+  }
+}
+
 void RuntimeLoader::InitializeBackendApi() {
   memset(&backend_api_, 0, sizeof(backend_api_));
   backend_api_.version = WEF_API_VERSION;
@@ -689,6 +731,12 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.close_window = Backend_CloseWindow;
   backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;
   backend_api_.show_dialog = Backend_ShowDialog;
+
+  backend_api_.set_dock_badge = Backend_SetDockBadge;
+  backend_api_.bounce_dock = Backend_BounceDock;
+  backend_api_.set_dock_menu = Backend_SetDockMenu;
+  backend_api_.set_dock_visible = Backend_SetDockVisible;
+  backend_api_.set_dock_reopen_handler = Backend_SetDockReopenHandler;
 }
 
 RuntimeLoader::RuntimeLoader() {

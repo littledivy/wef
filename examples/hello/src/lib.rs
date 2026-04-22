@@ -1,8 +1,12 @@
-use wef::{Value, Window};
+use wef::{DockBounceType, MenuItem, Value, Window};
 
 fn hello_main() {
   let rt = tokio::runtime::Runtime::new().unwrap();
   rt.block_on(async {
+    wef::on_dock_reopen(|has_visible| {
+      println!("dock reopen fired; has_visible_windows = {}", has_visible);
+    });
+
     let _win = Window::new(800, 600)
       .title("WEF - Bindings Demo")
       .bind("greet", |call| {
@@ -25,6 +29,54 @@ fn hello_main() {
         info.insert("version".to_string(), Value::String("0.1.0".to_string()));
         info.insert("rust".to_string(), Value::Bool(true));
         call.resolve(Value::Dict(info));
+      })
+      .bind("setDockBadge", |call| {
+        let text = call.args.get(0).and_then(|v| v.as_string());
+        wef::set_dock_badge(text);
+        call.resolve(Value::Null);
+      })
+      .bind("bounceDock", |call| {
+        let critical = call
+          .args
+          .get(0)
+          .and_then(|v| v.as_bool())
+          .unwrap_or(false);
+        wef::bounce_dock(if critical {
+          DockBounceType::Critical
+        } else {
+          DockBounceType::Informational
+        });
+        call.resolve(Value::Null);
+      })
+      .bind("setDockVisible", |call| {
+        let visible = call
+          .args
+          .get(0)
+          .and_then(|v| v.as_bool())
+          .unwrap_or(true);
+        wef::set_dock_visible(visible);
+        call.resolve(Value::Null);
+      })
+      .bind("setDockMenu", |call| {
+        let items = vec![
+          MenuItem::Item {
+            label: "Say hello".into(),
+            id: Some("hello".into()),
+            accelerator: None,
+            enabled: true,
+          },
+          MenuItem::Separator,
+          MenuItem::Item {
+            label: "Make noise".into(),
+            id: Some("noise".into()),
+            accelerator: None,
+            enabled: true,
+          },
+        ];
+        wef::set_dock_menu(&items, |id| {
+          println!("dock menu clicked: {}", id);
+        });
+        call.resolve(Value::Null);
       })
       .load(
         r#"data:text/html,<!DOCTYPE html>
@@ -71,6 +123,16 @@ fn hello_main() {
         <button onclick="testAdd()">Wef.add(10, 25)</button>
         <button onclick="testInfo()">Wef.getInfo()</button>
         <button onclick="testUnknown()">Wef.unknown()</button>
+    </div>
+    <h2>Dock / Taskbar</h2>
+    <div>
+        <button onclick="Wef.setDockBadge('3')">Badge "3"</button>
+        <button onclick="Wef.setDockBadge('')">Clear Badge</button>
+        <button onclick="Wef.bounceDock(false)">Bounce</button>
+        <button onclick="Wef.bounceDock(true)">Bounce (Critical)</button>
+        <button onclick="Wef.setDockMenu()">Set Dock Menu</button>
+        <button onclick="Wef.setDockVisible(false)">Hide from Dock</button>
+        <button onclick="Wef.setDockVisible(true)">Show in Dock</button>
     </div>
     <pre id="output">Click a button to test...</pre>
     <script>

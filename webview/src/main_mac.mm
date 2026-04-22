@@ -7,6 +7,11 @@
 #include <iostream>
 #include <string>
 
+// Dock state lives in webview_macos.mm.
+extern NSMenu* g_wv_dock_menu;
+extern wef_dock_reopen_fn g_wv_dock_reopen_fn;
+extern void* g_wv_dock_reopen_data;
+
 @interface AppDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic, assign) WefBackend* backend;
 @property(nonatomic, copy) NSString* runtimePath;
@@ -78,6 +83,20 @@
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
   return YES;
+}
+
+- (BOOL)applicationShouldHandleReopen:(NSApplication*)sender
+                    hasVisibleWindows:(BOOL)hasVisibleWindows {
+  if (g_wv_dock_reopen_fn) {
+    g_wv_dock_reopen_fn(g_wv_dock_reopen_data, hasVisibleWindows ? true : false);
+  }
+  // Always swallow the default "show last hidden window" behavior — the
+  // embedder's callback decides what to do.
+  return NO;
+}
+
+- (NSMenu*)applicationDockMenu:(NSApplication*)sender {
+  return g_wv_dock_menu;
 }
 
 @end

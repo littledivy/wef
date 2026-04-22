@@ -353,6 +353,20 @@ class WefBackend {
                           const std::string& default_value,
                           wef_dialog_result_fn callback,
                           void* callback_data) = 0;
+
+  // --- Dock / taskbar ---
+  // Default implementations are no-ops so platforms that don't support a
+  // given operation inherit silently. The canonical macOS implementation is
+  // in WKWebViewBackend; Windows/Linux override Bounce only.
+  virtual void SetDockBadge(const char* /*badge_or_null*/) {}
+  virtual void BounceDock(int /*type*/) {}
+  virtual void SetDockMenu(wef_value_t* /*menu_template*/,
+                           const wef_backend_api_t* /*api*/,
+                           wef_menu_click_fn /*on_click*/,
+                           void* /*on_click_data*/) {}
+  virtual void SetDockVisible(bool /*visible*/) {}
+  virtual void SetDockReopenHandler(wef_dock_reopen_fn /*handler*/,
+                                    void* /*user_data*/) {}
 };
 
 WefBackend* CreateWefBackend();

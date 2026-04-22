@@ -611,6 +611,9 @@ class WebKitGTKBackend : public WefBackend {
                   const std::string& message, const std::string& default_value,
                   wef_dialog_result_fn callback, void* callback_data) override;
 
+  void BounceDock(int type) override;
+  void SetDockBadge(const char* badge_or_null) override;
+
   void HandleJsMessage(uint32_t window_id, const char* json);
 
  private:
@@ -1561,6 +1564,52 @@ void WebKitGTKBackend::ShowDialog(uint32_t window_id, int dialog_type,
         callback(callback_data, 1, result_text.c_str());
       } else {
         callback(callback_data, 0, nullptr);
+      }
+    }
+  }
+}
+
+// ============================================================================
+// Dock / taskbar (Linux — X11 urgency hint)
+// ============================================================================
+
+void WebKitGTKBackend::BounceDock(int /*type*/) {
+  // X11 urgency hint is binary (no informational vs critical). Set it on
+  // every WEF window; the WM surfaces attention (flash the taskbar button,
+  // highlight the window in overview, etc.).
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  for (auto& [wid, state] : windows_) {
+    if (!state.window)
+      continue;
+    gtk_window_set_urgency_hint(GTK_WINDOW(state.window), TRUE);
+  }
+}
+
+// Badge via title prefix. See CEF backend for the same best-effort model.
+static std::mutex g_gtk_badge_mutex;
+static std::map<uint32_t, std::string> g_gtk_saved_titles;
+
+void WebKitGTKBackend::SetDockBadge(const char* badge_or_null) {
+  std::string badge =
+      (badge_or_null && *badge_or_null) ? std::string(badge_or_null) : "";
+  std::lock_guard<std::mutex> wlock(windows_mutex_);
+  std::lock_guard<std::mutex> block(g_gtk_badge_mutex);
+  for (auto& [wid, state] : windows_) {
+    if (!state.window)
+      continue;
+    GtkWindow* gw = GTK_WINDOW(state.window);
+    if (!badge.empty()) {
+      if (g_gtk_saved_titles.find(wid) == g_gtk_saved_titles.end()) {
+        const char* current = gtk_window_get_title(gw);
+        g_gtk_saved_titles[wid] = current ? current : "";
+      }
+      std::string prefixed = "(" + badge + ") " + g_gtk_saved_titles[wid];
+      gtk_window_set_title(gw, prefixed.c_str());
+    } else {
+      auto it = g_gtk_saved_titles.find(wid);
+      if (it != g_gtk_saved_titles.end()) {
+        gtk_window_set_title(gw, it->second.c_str());
+        g_gtk_saved_titles.erase(it);
       }
     }
   }

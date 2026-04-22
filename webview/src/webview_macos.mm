@@ -79,6 +79,14 @@ class WKWebViewBackend : public WefBackend {
                   const std::string& message, const std::string& default_value,
                   wef_dialog_result_fn callback, void* callback_data) override;
 
+  void SetDockBadge(const char* badge_or_null) override;
+  void BounceDock(int type) override;
+  void SetDockMenu(wef_value_t* menu_template, const wef_backend_api_t* api,
+                   wef_menu_click_fn on_click, void* on_click_data) override;
+  void SetDockVisible(bool visible) override;
+  void SetDockReopenHandler(wef_dock_reopen_fn handler,
+                            void* user_data) override;
+
   void HandleJsMessage(uint32_t window_id, uint64_t call_id,
                        const std::string& method, wef::ValuePtr args);
 
@@ -1538,7 +1546,8 @@ static NSMenuItem* CreateRoleMenuItem(const std::string& role) {
 }
 
 static NSMenu* BuildMenuFromValue(wef_value_t* val,
-                                  const wef_backend_api_t* api) {
+                                  const wef_backend_api_t* api, id target,
+                                  SEL action) {
   if (!val || !api->value_is_list(val))
     return nil;
 
@@ -1595,7 +1604,7 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val,
     if (submenuVal && api->value_is_list(submenuVal)) {
       NSMenuItem* submenuItem = [[NSMenuItem alloc] init];
       [submenuItem setTitle:label];
-      NSMenu* submenu = BuildMenuFromValue(submenuVal, api);
+      NSMenu* submenu = BuildMenuFromValue(submenuVal, api, target, action);
       [submenu setTitle:label];
       [submenuItem setSubmenu:submenu];
       [menu addItem:submenuItem];
@@ -1617,10 +1626,10 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val,
 
     NSMenuItem* nsItem =
         [[NSMenuItem alloc] initWithTitle:label
-                                   action:@selector(menuItemClicked:)
+                                   action:action
                             keyEquivalent:keyEquiv];
     [nsItem setKeyEquivalentModifierMask:modMask];
-    [nsItem setTarget:[WefMenuTarget shared]];
+    [nsItem setTarget:target];
 
     wef_value_t* idVal = api->value_dict_get(itemVal, "id");
     if (idVal && api->value_is_string(idVal)) {
@@ -1654,7 +1663,9 @@ void WKWebViewBackend::SetApplicationMenu(uint32_t window_id,
   g_webview_menu_click_data = on_click_data;
 
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menubar = BuildMenuFromValue(menu_template, api);
+    NSMenu* menubar = BuildMenuFromValue(menu_template, api,
+                                         [WefMenuTarget shared],
+                                         @selector(menuItemClicked:));
     if (menubar) {
       // Store the menu for this window
       {
@@ -1683,7 +1694,9 @@ void WKWebViewBackend::ShowContextMenu(uint32_t window_id, int x, int y,
   g_webview_menu_click_data = on_click_data;
 
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api);
+    NSMenu* menu = BuildMenuFromValue(menu_template, api,
+                                      [WefMenuTarget shared],
+                                      @selector(menuItemClicked:));
     if (!menu)
       return;
 
@@ -1768,6 +1781,95 @@ void WKWebViewBackend::ShowDialog(uint32_t window_id, int dialog_type,
       }
     }
   });
+}
+
+// --- Dock (macOS) ---
+
+// Consumed by AppDelegate in main_mac.mm (declared extern there).
+NSMenu* g_wv_dock_menu = nil;
+static wef_menu_click_fn g_wv_dock_click_fn = nullptr;
+static void* g_wv_dock_click_data = nullptr;
+wef_dock_reopen_fn g_wv_dock_reopen_fn = nullptr;
+void* g_wv_dock_reopen_data = nullptr;
+
+@interface WefDockMenuTarget : NSObject
++ (instancetype)shared;
+- (void)dockMenuItemClicked:(id)sender;
+@end
+
+@implementation WefDockMenuTarget
++ (instancetype)shared {
+  static WefDockMenuTarget* instance = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    instance = [[WefDockMenuTarget alloc] init];
+  });
+  return instance;
+}
+
+- (void)dockMenuItemClicked:(id)sender {
+  NSMenuItem* item = (NSMenuItem*)sender;
+  NSString* itemId = [item representedObject];
+  if (itemId && g_wv_dock_click_fn) {
+    // window_id = 0 because the dock menu is app-scoped.
+    g_wv_dock_click_fn(g_wv_dock_click_data, 0, [itemId UTF8String]);
+  }
+}
+@end
+
+void WKWebViewBackend::SetDockBadge(const char* badge_or_null) {
+  NSString* ns = badge_or_null && *badge_or_null
+                     ? [NSString stringWithUTF8String:badge_or_null]
+                     : nil;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [[NSApp dockTile] setBadgeLabel:ns];
+  });
+}
+
+void WKWebViewBackend::BounceDock(int type) {
+  NSRequestUserAttentionType t = (type == WEF_DOCK_BOUNCE_CRITICAL)
+                                     ? NSCriticalRequest
+                                     : NSInformationalRequest;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [NSApp requestUserAttention:t];
+  });
+}
+
+void WKWebViewBackend::SetDockMenu(wef_value_t* menu_template,
+                                   const wef_backend_api_t* api,
+                                   wef_menu_click_fn on_click,
+                                   void* on_click_data) {
+  if (!menu_template) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      g_wv_dock_menu = nil;
+      g_wv_dock_click_fn = nullptr;
+      g_wv_dock_click_data = nullptr;
+    });
+    return;
+  }
+  g_wv_dock_click_fn = on_click;
+  g_wv_dock_click_data = on_click_data;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menu = BuildMenuFromValue(menu_template, api,
+                                      [WefDockMenuTarget shared],
+                                      @selector(dockMenuItemClicked:));
+    g_wv_dock_menu = menu;
+  });
+}
+
+void WKWebViewBackend::SetDockVisible(bool visible) {
+  NSApplicationActivationPolicy policy =
+      visible ? NSApplicationActivationPolicyRegular
+              : NSApplicationActivationPolicyAccessory;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [NSApp setActivationPolicy:policy];
+  });
+}
+
+void WKWebViewBackend::SetDockReopenHandler(wef_dock_reopen_fn handler,
+                                            void* user_data) {
+  g_wv_dock_reopen_fn = handler;
+  g_wv_dock_reopen_data = user_data;
 }
 
 WefBackend* CreateWefBackend() {

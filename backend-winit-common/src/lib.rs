@@ -2,6 +2,8 @@
 
 pub use winit;
 
+pub mod dock;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
@@ -23,7 +25,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 18;
+pub const WEF_API_VERSION: u32 = 19;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -305,6 +307,25 @@ pub struct WefBackendApi {
       *const c_char,             // default_value
       Option<WefDialogResultFn>, // callback
       *mut c_void,               // callback_data
+    ),
+  >,
+  pub set_dock_badge:
+    Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+  pub bounce_dock: Option<unsafe extern "C" fn(*mut c_void, c_int)>,
+  pub set_dock_menu: Option<
+    unsafe extern "C" fn(
+      *mut c_void,
+      *mut WefValue,
+      Option<WefMenuClickFn>,
+      *mut c_void,
+    ),
+  >,
+  pub set_dock_visible: Option<unsafe extern "C" fn(*mut c_void, bool)>,
+  pub set_dock_reopen_handler: Option<
+    unsafe extern "C" fn(
+      *mut c_void,
+      Option<dock::WefDockReopenFn>,
+      *mut c_void,
     ),
   >,
 }
@@ -830,6 +851,11 @@ pub fn create_api_base() -> WefBackendApi {
     open_devtools: None,
     set_js_namespace: None,
     show_dialog: None,
+    set_dock_badge: None,
+    bounce_dock: None,
+    set_dock_menu: None,
+    set_dock_visible: None,
+    set_dock_reopen_handler: None,
   }
 }
 
@@ -1449,6 +1475,9 @@ pub enum CommonEvent {
     task: unsafe extern "C" fn(*mut c_void),
     data: usize,
   },
+  /// App-scoped dock / taskbar op queued via `dock::queue_op`.
+  /// The app handler calls `dock::drain_and_apply` to process pending ops.
+  DockTask,
 }
 
 // --- Trait for backend state access ---
@@ -1981,6 +2010,98 @@ macro_rules! define_common_backend_fns {
         );
       }
     }
+
+    unsafe extern "C" fn backend_set_dock_badge(
+      _data: *mut ::std::ffi::c_void,
+      badge: *const ::std::ffi::c_char,
+    ) {
+      let text = if badge.is_null() {
+        None
+      } else {
+        Some(
+          ::std::ffi::CStr::from_ptr(badge).to_string_lossy().into_owned(),
+        )
+      };
+      $crate::dock::queue_op($crate::dock::DockOp::SetBadge(text));
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::DockTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_bounce_dock(
+      _data: *mut ::std::ffi::c_void,
+      kind: ::std::ffi::c_int,
+    ) {
+      $crate::dock::queue_op($crate::dock::DockOp::Bounce(kind));
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::DockTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_dock_menu(
+      _data: *mut ::std::ffi::c_void,
+      template: *mut $crate::WefValue,
+      callback: Option<$crate::WefMenuClickFn>,
+      callback_data: *mut ::std::ffi::c_void,
+    ) {
+      let pm = if template.is_null() {
+        None
+      } else {
+        let items = $crate::parse_menu_template(template);
+        $crate::value_free(template);
+        Some($crate::dock::PendingDockMenu {
+          items,
+          callback,
+          callback_data: callback_data as usize,
+        })
+      };
+      $crate::dock::queue_op($crate::dock::DockOp::SetMenu(pm));
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::DockTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_dock_visible(
+      _data: *mut ::std::ffi::c_void,
+      visible: bool,
+    ) {
+      $crate::dock::queue_op($crate::dock::DockOp::SetVisible(visible));
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::DockTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_dock_reopen_handler(
+      _data: *mut ::std::ffi::c_void,
+      handler: Option<$crate::dock::WefDockReopenFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      let h = handler.map(|f| (f, user_data as usize));
+      $crate::dock::queue_op($crate::dock::DockOp::SetReopenHandler(h));
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::DockTask,
+          ),
+        );
+      }
+    }
   };
 }
 
@@ -2022,6 +2143,11 @@ macro_rules! fill_common_api {
     $api.show_dialog = Some(backend_show_dialog);
     $api.set_application_menu = Some(backend_set_application_menu);
     $api.show_context_menu = Some(backend_show_context_menu);
+    $api.set_dock_badge = Some(backend_set_dock_badge);
+    $api.bounce_dock = Some(backend_bounce_dock);
+    $api.set_dock_menu = Some(backend_set_dock_menu);
+    $api.set_dock_visible = Some(backend_set_dock_visible);
+    $api.set_dock_reopen_handler = Some(backend_set_dock_reopen_handler);
   };
 }
 

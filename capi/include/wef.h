@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 18
+#define WEF_API_VERSION 19
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN 0
@@ -69,6 +69,16 @@ typedef void (*wef_menu_click_fn)(void* user_data, uint32_t window_id,
 #define WEF_DIALOG_ALERT 0
 #define WEF_DIALOG_CONFIRM 1
 #define WEF_DIALOG_PROMPT 2
+
+// Dock / taskbar bounce / flash types. Values match macOS
+// NSRequestUserAttentionType so the ABI passes through unchanged.
+#define WEF_DOCK_BOUNCE_INFORMATIONAL 10
+#define WEF_DOCK_BOUNCE_CRITICAL 0
+
+// Callback fired when the user clicks the dock / taskbar icon for an app that
+// has no visible windows (macOS only; Windows/Linux have no equivalent event).
+// has_visible_windows is true if any app window is currently on-screen.
+typedef void (*wef_dock_reopen_fn)(void* user_data, bool has_visible_windows);
 
 // Callback for dialog results.
 typedef void (*wef_dialog_result_fn)(
@@ -335,6 +345,42 @@ struct wef_backend_api {
       const char* default_value,  // For prompt: default input text. NULL for
                                   // alert/confirm.
       wef_dialog_result_fn callback, void* callback_data);
+
+  // --- Dock / taskbar ---
+  //
+  // Semantics are app-scoped on macOS (all operate on the process's Dock
+  // tile) and focused-window-scoped on Windows/Linux (taskbar button for the
+  // currently-focused WEF window). Backends that don't support an operation
+  // on a given platform leave the function pointer NULL.
+
+  // Set or clear a short text badge on the app's dock / taskbar icon.
+  // Pass NULL or "" to clear. macOS: NSDockTile badgeLabel. Windows: renders
+  // text to a small overlay icon via GDI+ + ITaskbarList3::SetOverlayIcon.
+  // Linux: prepends "(text) " to the focused window's title.
+  void (*set_dock_badge)(void* backend_data, const char* badge_or_null);
+
+  // Request the user's attention by bouncing the dock icon (macOS) or
+  // flashing the focused window's taskbar button (Windows) or setting the
+  // urgency hint (Linux). `type` is WEF_DOCK_BOUNCE_*.
+  void (*bounce_dock)(void* backend_data, int type);
+
+  // Set a custom menu for the app's dock icon (macOS only).
+  // menu_template uses the same format as set_application_menu. on_click is
+  // called with the id of the clicked item. window_id in the callback will
+  // be 0 since the menu is app-scoped. Windows/Linux: leave NULL.
+  void (*set_dock_menu)(void* backend_data, wef_value_t* menu_template,
+                        wef_menu_click_fn on_click, void* on_click_data);
+
+  // Show or hide the app from the dock / task switcher (macOS activation
+  // policy). Windows/Linux: leave NULL (no app-level equivalent).
+  void (*set_dock_visible)(void* backend_data, bool visible);
+
+  // Register a callback invoked when the user clicks the dock icon for an
+  // app that has no visible windows (macOS). The backend always swallows
+  // the default "show hidden window" behavior — the user callback is
+  // informational. Windows/Linux: leave NULL.
+  void (*set_dock_reopen_handler)(void* backend_data, wef_dock_reopen_fn fn,
+                                  void* user_data);
 };
 
 #ifdef __cplusplus

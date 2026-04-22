@@ -105,6 +105,28 @@ within a backend.
 CEF, Servo, and Winit on Linux cannot support menus because they create raw
 X11/Wayland windows without a GTK container.
 
+#### Dock / taskbar
+
+The dock is a macOS concept; on Windows the analog is the taskbar button, on
+Linux it's the window-manager urgency hint / title convention.
+
+| Feature         | CEF   | WebView | Servo | Winit |
+|-----------------|-------|---------|-------|-------|
+| Bounce / flash  | ✅     | ✅       | ✅     | ✅     |
+| Badge           | ✅     | ✅       | ✅     | ✅     |
+| Dock menu       | macOS | macOS   | macOS | macOS |
+| Hide dock icon  | macOS | macOS   | macOS | macOS |
+| Reopen callback | macOS | macOS   | macOS | macOS |
+
+On macOS, the badge uses `NSDockTile.badgeLabel` (native red overlay on the
+dock icon). On Windows and Linux, all four backends implement the badge as a
+`"(N) "` prefix on the window title — the convention used by Slack, Discord,
+Telegram, etc. Taskbars and window managers surface the title, so the badge
+appears on the taskbar button / window manager overview. Proper Windows
+overlay icons (`ITaskbarList3::SetOverlayIcon`) and Linux libunity counts
+are future work. The dock menu, dock visibility, and reopen callback have
+no clean cross-platform analog.
+
 #### Native dialogs
 
 | Feature                        | CEF | WebView | Servo | Winit |

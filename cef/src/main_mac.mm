@@ -49,6 +49,11 @@
 }
 @end
 
+// Dock state lives in runtime_loader_mac.mm.
+extern NSMenu* g_dock_menu;
+extern wef_dock_reopen_fn g_dock_reopen_fn;
+extern void* g_dock_reopen_data;
+
 @interface WefAppDelegate : NSObject <NSApplicationDelegate>
 @end
 
@@ -64,7 +69,16 @@
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)sender
                     hasVisibleWindows:(BOOL)hasVisibleWindows {
+  if (g_dock_reopen_fn) {
+    g_dock_reopen_fn(g_dock_reopen_data, hasVisibleWindows ? true : false);
+  }
+  // Always swallow the default "show last hidden window" behavior — the
+  // embedder's callback decides what to do.
   return NO;
+}
+
+- (NSMenu*)applicationDockMenu:(NSApplication*)sender {
+  return g_dock_menu;
 }
 @end
 

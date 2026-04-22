@@ -101,6 +101,8 @@ struct App {
   windows: HashMap<u32, WindowInfo>,
   // Reverse map from winit WindowId to our window_id
   winit_to_wef: HashMap<winit::window::WindowId, u32>,
+  // Most recently focused WEF window (for app-scoped dock ops on Windows/Linux).
+  focused_wef_id: Option<u32>,
 }
 
 impl App {
@@ -108,7 +110,13 @@ impl App {
     Self {
       windows: HashMap::new(),
       winit_to_wef: HashMap::new(),
+      focused_wef_id: None,
     }
+  }
+
+  fn focused_window(&self) -> Option<(&Window, u32)> {
+    let id = self.focused_wef_id.or_else(|| self.windows.keys().next().copied())?;
+    self.windows.get(&id).map(|info| (&info.window, id))
   }
 
   fn create_window(
@@ -191,6 +199,11 @@ impl ApplicationHandler<UserEvent> for App {
         }
         CommonEvent::ShowDialog { window_id: 0 } => {
           wef_backend_winit_common::handle_global_dialog::<BackendState>();
+        }
+        CommonEvent::DockTask => {
+          wef_backend_winit_common::dock::drain_and_apply(
+            self.focused_window(),
+          );
         }
         other => {
           let wid = match other {
@@ -357,6 +370,11 @@ impl ApplicationHandler<UserEvent> for App {
         });
       }
       WindowEvent::Focused(focused) => {
+        if focused {
+          self.focused_wef_id = Some(wef_id);
+        } else if self.focused_wef_id == Some(wef_id) {
+          self.focused_wef_id = None;
+        }
         wef_backend_winit_common::dispatch_focused_event(
           &state.common.handlers,
           wef_id,

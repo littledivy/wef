@@ -534,7 +534,8 @@ static NSMenuItem* CreateRoleMenuItem(const std::string& role) {
 }
 
 static NSMenu* BuildMenuFromValue(wef_value_t* val,
-                                  const wef_backend_api_t* api) {
+                                  const wef_backend_api_t* api, id target,
+                                  SEL action) {
   if (!val || !api->value_is_list(val))
     return nil;
   NSMenu* menu = [[NSMenu alloc] init];
@@ -581,7 +582,7 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val,
     if (submenuVal && api->value_is_list(submenuVal)) {
       NSMenuItem* submenuItem = [[NSMenuItem alloc] init];
       [submenuItem setTitle:label];
-      NSMenu* submenu = BuildMenuFromValue(submenuVal, api);
+      NSMenu* submenu = BuildMenuFromValue(submenuVal, api, target, action);
       [submenu setTitle:label];
       [submenuItem setSubmenu:submenu];
       [menu addItem:submenuItem];
@@ -600,10 +601,10 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val,
     }
     NSMenuItem* nsItem =
         [[NSMenuItem alloc] initWithTitle:label
-                                   action:@selector(menuItemClicked:)
+                                   action:action
                             keyEquivalent:keyEquiv];
     [nsItem setKeyEquivalentModifierMask:modMask];
-    [nsItem setTarget:[WefMenuTarget shared]];
+    [nsItem setTarget:target];
     wef_value_t* idVal = api->value_dict_get(itemVal, "id");
     if (idVal && api->value_is_string(idVal)) {
       size_t idLen = 0;
@@ -642,7 +643,9 @@ void Backend_ShowContextMenu_Mac(void* data, uint32_t window_id, int x, int y,
 
   void* handle = browser->GetHost()->GetWindowHandle();
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api);
+    NSMenu* menu = BuildMenuFromValue(menu_template, api,
+                                      [WefMenuTarget shared],
+                                      @selector(menuItemClicked:));
     if (!menu)
       return;
 
@@ -670,7 +673,9 @@ void Backend_SetApplicationMenu_Mac(void* data, uint32_t window_id,
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   const wef_backend_api_t* api = &loader->GetBackendApi();
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menubar = BuildMenuFromValue(menu_template, api);
+    NSMenu* menubar = BuildMenuFromValue(menu_template, api,
+                                         [WefMenuTarget shared],
+                                         @selector(menuItemClicked:));
     if (menubar) {
       // Store per-window
       {
@@ -684,4 +689,97 @@ void Backend_SetApplicationMenu_Mac(void* data, uint32_t window_id,
       }
     }
   });
+}
+
+// --- Dock (macOS) ---
+
+// Dock menu + reopen handler storage (consumed by WefAppDelegate in
+// main_mac.mm — declared extern there).
+NSMenu* g_dock_menu = nil;
+static wef_menu_click_fn g_dock_click_fn = nullptr;
+static void* g_dock_click_data = nullptr;
+wef_dock_reopen_fn g_dock_reopen_fn = nullptr;
+void* g_dock_reopen_data = nullptr;
+
+@interface WefDockMenuTarget : NSObject
++ (instancetype)shared;
+- (void)dockMenuItemClicked:(id)sender;
+@end
+
+@implementation WefDockMenuTarget
+
++ (instancetype)shared {
+  static WefDockMenuTarget* instance = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    instance = [[WefDockMenuTarget alloc] init];
+  });
+  return instance;
+}
+
+- (void)dockMenuItemClicked:(id)sender {
+  NSMenuItem* item = (NSMenuItem*)sender;
+  NSString* itemId = [item representedObject];
+  if (itemId && g_dock_click_fn) {
+    // window_id = 0 because dock menu is app-scoped.
+    g_dock_click_fn(g_dock_click_data, 0, [itemId UTF8String]);
+  }
+}
+
+@end
+
+void Backend_SetDockBadge_Mac(void* /*data*/, const char* badge_or_null) {
+  NSString* ns = badge_or_null && *badge_or_null
+                     ? [NSString stringWithUTF8String:badge_or_null]
+                     : nil;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [[NSApp dockTile] setBadgeLabel:ns];
+  });
+}
+
+void Backend_BounceDock_Mac(void* /*data*/, int type) {
+  NSRequestUserAttentionType t = (type == WEF_DOCK_BOUNCE_CRITICAL)
+                                     ? NSCriticalRequest
+                                     : NSInformationalRequest;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [NSApp requestUserAttention:t];
+  });
+}
+
+void Backend_SetDockMenu_Mac(void* data, wef_value_t* menu_template,
+                             wef_menu_click_fn on_click, void* on_click_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  const wef_backend_api_t* api = &loader->GetBackendApi();
+  if (!menu_template) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      g_dock_menu = nil;
+      g_dock_click_fn = nullptr;
+      g_dock_click_data = nullptr;
+    });
+    return;
+  }
+  g_dock_click_fn = on_click;
+  g_dock_click_data = on_click_data;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menu = BuildMenuFromValue(menu_template, api,
+                                      [WefDockMenuTarget shared],
+                                      @selector(dockMenuItemClicked:));
+    g_dock_menu = menu;
+  });
+}
+
+void Backend_SetDockVisible_Mac(void* /*data*/, bool visible) {
+  NSApplicationActivationPolicy policy = visible
+                                             ? NSApplicationActivationPolicyRegular
+                                             : NSApplicationActivationPolicyAccessory;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    [NSApp setActivationPolicy:policy];
+  });
+}
+
+void Backend_SetDockReopenHandler_Mac(void* /*data*/,
+                                      wef_dock_reopen_fn handler,
+                                      void* user_data) {
+  g_dock_reopen_fn = handler;
+  g_dock_reopen_data = user_data;
 }

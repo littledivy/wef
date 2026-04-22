@@ -449,6 +449,9 @@ class WebView2Backend : public WefBackend {
                   const std::string& message, const std::string& default_value,
                   wef_dialog_result_fn callback, void* callback_data) override;
 
+  void BounceDock(int type) override;
+  void SetDockBadge(const char* badge_or_null) override;
+
   void HandleJsMessage(uint32_t window_id, const std::wstring& json);
 
  private:
@@ -1232,6 +1235,67 @@ void WebView2Backend::ShowDialog(uint32_t window_id, int dialog_type,
     } else {
       if (callback)
         callback(callback_data, 0, nullptr);
+    }
+  }
+}
+
+// ============================================================================
+// Dock / taskbar (Windows)
+// ============================================================================
+
+void WebView2Backend::BounceDock(int type) {
+  std::lock_guard<std::mutex> lock(windows_mutex_);
+  for (auto& [wid, state] : windows_) {
+    if (!state.hwnd)
+      continue;
+    FLASHWINFO fi = {sizeof(FLASHWINFO), state.hwnd, 0, 0, 0};
+    if (type == WEF_DOCK_BOUNCE_CRITICAL) {
+      fi.dwFlags = FLASHW_ALL | FLASHW_TIMER;
+      fi.uCount = 0;
+    } else {
+      fi.dwFlags = FLASHW_TIMERNOFG;
+      fi.uCount = 3;
+    }
+    FlashWindowEx(&fi);
+  }
+}
+
+// Badge via title prefix. See CEF backend for the same best-effort model.
+static std::mutex g_wv_badge_mutex;
+static std::map<uint32_t, std::wstring> g_wv_saved_titles;
+
+static std::wstring Utf8ToWide(const std::string& s) {
+  if (s.empty())
+    return std::wstring();
+  int len = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+  std::wstring out(len, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), out.data(), len);
+  return out;
+}
+
+void WebView2Backend::SetDockBadge(const char* badge_or_null) {
+  std::string badge =
+      (badge_or_null && *badge_or_null) ? std::string(badge_or_null) : "";
+  std::lock_guard<std::mutex> wlock(windows_mutex_);
+  std::lock_guard<std::mutex> block(g_wv_badge_mutex);
+  for (auto& [wid, state] : windows_) {
+    if (!state.hwnd)
+      continue;
+    if (!badge.empty()) {
+      if (g_wv_saved_titles.find(wid) == g_wv_saved_titles.end()) {
+        wchar_t buf[512];
+        int n = GetWindowTextW(state.hwnd, buf, 512);
+        g_wv_saved_titles[wid] = std::wstring(buf, n);
+      }
+      std::wstring prefixed =
+          L"(" + Utf8ToWide(badge) + L") " + g_wv_saved_titles[wid];
+      SetWindowTextW(state.hwnd, prefixed.c_str());
+    } else {
+      auto it = g_wv_saved_titles.find(wid);
+      if (it != g_wv_saved_titles.end()) {
+        SetWindowTextW(state.hwnd, it->second.c_str());
+        g_wv_saved_titles.erase(it);
+      }
     }
   }
 }

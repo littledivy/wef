@@ -865,6 +865,153 @@ extern void Backend_ShowContextMenu_Mac(void* data, uint32_t window_id, int x,
                                         int y, wef_value_t* menu_template,
                                         wef_menu_click_fn on_click,
                                         void* on_click_data);
+extern void Backend_SetDockBadge_Mac(void* data, const char* badge_or_null);
+extern void Backend_BounceDock_Mac(void* data, int type);
+extern void Backend_SetDockMenu_Mac(void* data, wef_value_t* menu_template,
+                                    wef_menu_click_fn on_click,
+                                    void* on_click_data);
+extern void Backend_SetDockVisible_Mac(void* data, bool visible);
+extern void Backend_SetDockReopenHandler_Mac(void* data,
+                                             wef_dock_reopen_fn handler,
+                                             void* user_data);
+#endif
+
+// --- Dock / taskbar (Windows + Linux) ---
+//
+// The dock is a macOS concept; on Windows the analog is the taskbar button
+// (per-window), and on Linux it's the WM urgency hint. Bounce maps cleanly:
+//   - Windows: FlashWindowEx on every WEF window's HWND.
+//   - Linux:   X11 UrgencyHint on every WEF window's X11 Window.
+// Badge is implemented as a `"(N) " prefix on each window's title — the
+// convention used by Slack/Discord/Telegram. If user code updates the title
+// while a badge is active, the badge falls off (best-effort v1; proper
+// Windows overlay icons and Linux libunity are future work). Menu, visible,
+// and reopen have no clean analog.
+
+#if !defined(__APPLE__)
+#include <map>
+#include <mutex>
+#include <string>
+
+#include "include/views/cef_browser_view.h"
+#include "include/views/cef_window.h"
+
+// Badge is implemented as a title prefix. Per window we remember the
+// "original" title at the moment a badge is applied, so clearing can
+// restore it. If user code updates the window title while a badge is
+// active, the badge is visually lost — that's a best-effort v1
+// limitation; calling set_dock_badge again re-applies it on top of the
+// (now-stale) saved original.
+static std::mutex g_cef_badge_mutex;
+static std::map<uint32_t, std::string> g_cef_saved_titles;
+
+static void Backend_SetDockBadge_TitlePrefix(void* data,
+                                             const char* badge_or_null) {
+  std::string badge =
+      (badge_or_null && *badge_or_null) ? std::string(badge_or_null) : "";
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+
+  loader->ForEachBrowserWithId(
+      [&badge](uint32_t wid, CefRefPtr<CefBrowser> browser) {
+        CefPostTask(
+            TID_UI,
+            base::BindOnce(
+                [](uint32_t wid, CefRefPtr<CefBrowser> b, std::string bg) {
+                  auto bv = CefBrowserView::GetForBrowser(b);
+                  if (!bv)
+                    return;
+                  auto win = bv->GetWindow();
+                  if (!win)
+                    return;
+                  std::lock_guard<std::mutex> lock(g_cef_badge_mutex);
+                  if (!bg.empty()) {
+                    if (g_cef_saved_titles.find(wid) ==
+                        g_cef_saved_titles.end()) {
+                      g_cef_saved_titles[wid] = win->GetTitle().ToString();
+                    }
+                    win->SetTitle("(" + bg + ") " + g_cef_saved_titles[wid]);
+                  } else {
+                    auto it = g_cef_saved_titles.find(wid);
+                    if (it != g_cef_saved_titles.end()) {
+                      win->SetTitle(it->second);
+                      g_cef_saved_titles.erase(it);
+                    }
+                  }
+                },
+                wid, browser, badge));
+      });
+}
+#endif  // !__APPLE__
+
+#if defined(_WIN32)
+#include <windows.h>
+
+static void Backend_BounceDock_Win(void* data, int type) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->ForEachBrowser([type](CefRefPtr<CefBrowser> browser) {
+    CefPostTask(
+        TID_UI,
+        base::BindOnce(
+            [](CefRefPtr<CefBrowser> b, int t) {
+              HWND hwnd = b->GetHost()->GetWindowHandle();
+              if (!hwnd)
+                return;
+              FLASHWINFO fi = {sizeof(FLASHWINFO), hwnd, 0, 0, 0};
+              if (t == WEF_DOCK_BOUNCE_CRITICAL) {
+                fi.dwFlags = FLASHW_ALL | FLASHW_TIMER;
+                fi.uCount = 0;
+              } else {
+                fi.dwFlags = FLASHW_TIMERNOFG;
+                fi.uCount = 3;
+              }
+              FlashWindowEx(&fi);
+            },
+            browser, type));
+  });
+}
+#elif defined(__linux__)
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+#include <gdk/gdk.h>
+#ifdef GDK_WINDOWING_X11
+#include <gdk/gdkx.h>
+#endif
+
+static void Backend_BounceDock_Linux(void* data, int /*type*/) {
+  // X11 urgency hint is binary — there's no informational vs critical. Set
+  // it on every WEF window; WMs will surface this (taskbar flash, workspace
+  // indicator, etc.).
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->ForEachBrowser([](CefRefPtr<CefBrowser> browser) {
+    CefPostTask(TID_UI,
+                base::BindOnce(
+                    [](CefRefPtr<CefBrowser> b) {
+#ifdef GDK_WINDOWING_X11
+                      GdkDisplay* gdk_display = gdk_display_get_default();
+                      if (!gdk_display || !GDK_IS_X11_DISPLAY(gdk_display))
+                        return;
+                      Display* display =
+                          GDK_DISPLAY_XDISPLAY(gdk_display);
+                      ::Window win =
+                          (::Window)b->GetHost()->GetWindowHandle();
+                      if (!win)
+                        return;
+                      XWMHints* hints = XGetWMHints(display, win);
+                      if (!hints)
+                        hints = XAllocWMHints();
+                      if (hints) {
+                        hints->flags |= XUrgencyHint;
+                        XSetWMHints(display, win, hints);
+                        XFree(hints);
+                        XFlush(display);
+                      }
+#else
+                      (void)b;
+#endif
+                    },
+                    browser));
+  });
+}
 #endif
 
 static void Backend_OpenDevTools(void* data, uint32_t window_id) {
@@ -1160,6 +1307,24 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.open_devtools = Backend_OpenDevTools;
   backend_api_.set_js_namespace = Backend_SetJsNamespace;
   backend_api_.show_dialog = Backend_ShowDialog;
+
+  // --- Dock / taskbar ---
+#if defined(__APPLE__)
+  backend_api_.set_dock_badge = Backend_SetDockBadge_Mac;
+  backend_api_.bounce_dock = Backend_BounceDock_Mac;
+  backend_api_.set_dock_menu = Backend_SetDockMenu_Mac;
+  backend_api_.set_dock_visible = Backend_SetDockVisible_Mac;
+  backend_api_.set_dock_reopen_handler = Backend_SetDockReopenHandler_Mac;
+#elif defined(_WIN32)
+  backend_api_.bounce_dock = Backend_BounceDock_Win;
+  backend_api_.set_dock_badge = Backend_SetDockBadge_TitlePrefix;
+  // Menu/visible/reopen have no Windows analog — left nullptr; the
+  // runtime-side Rust wrapper silently no-ops when the pointer is missing.
+#elif defined(__linux__)
+  backend_api_.bounce_dock = Backend_BounceDock_Linux;
+  backend_api_.set_dock_badge = Backend_SetDockBadge_TitlePrefix;
+  // Menu/visible/reopen: left nullptr (no clean Linux analog).
+#endif
 }
 
 // --- RuntimeLoader lifecycle ---
