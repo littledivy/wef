@@ -777,26 +777,6 @@ dependencies = [
 
 [[package]]
 name = "bindgen"
-version = "0.71.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f58bf3d7db68cfbac37cfc485a8d711e87e064c3d0fe0435b92f7a407f9d6b3"
-dependencies = [
- "bitflags 2.10.0",
- "cexpr",
- "clang-sys",
- "itertools 0.13.0",
- "log",
- "prettyplease",
- "proc-macro2",
- "quote",
- "regex",
- "rustc-hash 2.1.1",
- "shlex",
- "syn 2.0.114",
-]
-
-[[package]]
-name = "bindgen"
 version = "0.72.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "993776b509cfb49c750f11b8f07a46fa23e0a1386ffc01fb1e7d343efc387895"
@@ -5279,7 +5259,7 @@ version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "298bc7f83d5cca3789e47779e92cda492b75f11e03995bf558475bd9df2f639b"
 dependencies = [
- "bindgen 0.72.1",
+ "bindgen",
  "cc",
  "walkdir",
 ]
@@ -5290,7 +5270,7 @@ version = "0.14.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "36f3329b0f19f40511bd7266d68ffbedf6d3d59157451927ec8d58ea010f6cda"
 dependencies = [
- "bindgen 0.72.1",
+ "bindgen",
  "cc",
  "encoding_rs",
  "libc",
@@ -5305,7 +5285,7 @@ version = "0.140.5-10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7047586e1b71e6405d42e4dfcefdcea209fea39adf2f60122bf72f192e19fbd1"
 dependencies = [
- "bindgen 0.72.1",
+ "bindgen",
  "cc",
  "encoding_c",
  "encoding_c_mem",
@@ -9584,7 +9564,7 @@ version = "145.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "61d9a107e16bae35a0be2bb0096ac1d2318aac352c82edd796ab2b9cac66d8f0"
 dependencies = [
- "bindgen 0.72.1",
+ "bindgen",
  "bitflags 2.10.0",
  "fslock",
  "gzip-header",
@@ -10182,7 +10162,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 name = "wef"
 version = "0.1.0"
 dependencies = [
- "bindgen 0.71.1",
+ "bindgen",
  "tokio",
 ]
 
