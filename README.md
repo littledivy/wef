@@ -6,9 +6,12 @@ technologies with your choice of browser engine.
 ### How it works
 
 wef is built around a C ABI that separates browser engines (backends) from
-application logic (runtimes). Prebuilt backends for [CEF](./cef), system
-[WebView](./webview) and [Servo](./servo) implement the `wef_backend_api_t`
-interface defined in [`capi/include/wef.h`](capi/include/wef.h)
+application logic (runtimes). Prebuilt backends for [CEF](./cef) and the
+system [WebView](./webview) implement the `wef_backend_api_t` interface
+defined in [`capi/include/wef.h`](capi/include/wef.h), and a
+[Winit](./winit) backend handles windowing without a web engine. (A
+Servo-based backend lives on the [`servo`](https://github.com/littledivy/wef/tree/servo)
+branch.)
 
 Runtimes are shared libraries compiled with user application logic. When the
 backend starts, it loads the runtime dylib and hands control to the runtime. The
@@ -44,22 +47,25 @@ runs a multi-process architecture identical to a full browser — you get the sa
 renderer, GPU process, and DevTools you would in Chrome, bundled into your app.
 The system [WebView](./webview) backend delegates to the platform's native web
 engine (WKWebView on macOS, WebView2 on Windows, WebKitGTK on Linux), so the
-engine is never bundled and your app stays small. The [Servo](./servo) backend
-uses Mozilla's experimental Rust-based engine with GPU-accelerated rendering via
-WebRender; it is still early and the JS bridge is stubbed out.
+engine is never bundled and your app stays small. The [Winit](./winit)
+backend is engine-free — it creates native windows for apps that draw their
+own content (GPU surfaces, custom renderers) without loading a web engine.
 
-|             | CEF             | WebView         | Servo           | Winit           |
-| ----------- | --------------- | --------------- | --------------- | --------------- |
-| **macOS**   | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
-| **Windows** | x86_64          | x86_64          | ❌              | x86_64          |
-| **Linux**   | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
-| **Android** | ❌              | ❌              | ❌              | ❌              |
+An experimental [Servo](https://github.com/littledivy/wef/tree/servo)
+backend is preserved on a branch for future work.
+
+|             | CEF             | WebView         | Winit           |
+| ----------- | --------------- | --------------- | --------------- |
+| **macOS**   | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
+| **Windows** | x86_64          | x86_64          | x86_64          |
+| **Linux**   | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
+| **Android** | ❌              | ❌              | ❌              |
 
 |             | Engine        | Multi-process | Bundled | JS bridge |
 | ----------- | ------------- | ------------- | ------- | --------- |
 | **CEF**     | Chromium 144  | ✅            | ✅      | ✅        |
 | **WebView** | System native | ❌            | ❌      | ✅        |
-| **Servo**   | Servo         | ❌            | ✅      | ❌        |
+| **Winit**   | none          | ❌            | ❌      | ❌        |
 
 ### Feature support matrix
 
@@ -68,41 +74,41 @@ within a backend.
 
 #### Window management
 
-| Feature                   | CEF | WebView | Servo | Winit |
-| ------------------------- | --- | ------- | ----- | ----- |
-| Create / close window     | ✅  | ✅      | ✅    | ✅    |
-| Navigate (load URL)       | ✅  | ✅      | ✅    | ❌    |
-| Set title                 | ✅  | ✅      | ✅    | ✅    |
-| Execute JavaScript        | ✅  | ✅      | ✅    | ❌    |
-| Set / get window size     | ✅  | ✅      | ✅    | ✅    |
-| Set / get window position | ✅  | ✅      | ✅    | ✅    |
-| Set / get resizable       | ✅  | ✅      | ✅    | ✅    |
-| Set / get always on top   | ✅  | ✅      | ✅    | ✅    |
-| Show / hide / is visible  | ✅  | ✅      | ✅    | ✅    |
-| Focus                     | ✅  | ✅      | ✅    | ✅    |
-| Quit                      | ✅  | ✅      | ✅    | ✅    |
-| Post UI task              | ✅  | ✅      | ✅    | ✅    |
+| Feature                   | CEF | WebView | Winit |
+| ------------------------- | --- | ------- | ----- |
+| Create / close window     | ✅  | ✅      | ✅    |
+| Navigate (load URL)       | ✅  | ✅      | ❌    |
+| Set title                 | ✅  | ✅      | ✅    |
+| Execute JavaScript        | ✅  | ✅      | ❌    |
+| Set / get window size     | ✅  | ✅      | ✅    |
+| Set / get window position | ✅  | ✅      | ✅    |
+| Set / get resizable       | ✅  | ✅      | ✅    |
+| Set / get always on top   | ✅  | ✅      | ✅    |
+| Show / hide / is visible  | ✅  | ✅      | ✅    |
+| Focus                     | ✅  | ✅      | ✅    |
+| Quit                      | ✅  | ✅      | ✅    |
+| Post UI task              | ✅  | ✅      | ✅    |
 
 #### JavaScript interop
 
-| Feature                           | CEF | WebView | Servo | Winit |
-| --------------------------------- | --- | ------- | ----- | ----- |
-| JS call handler (native bindings) | ✅  | ✅      | ❌    | ❌    |
-| Respond to JS calls               | ✅  | ✅      | ❌    | ❌    |
-| Invoke JS callbacks               | ✅  | ✅      | ❌    | ❌    |
-| Release JS callbacks              | ✅  | ✅      | ❌    | ❌    |
-| Custom JS namespace               | ✅  | ✅      | ❌    | ❌    |
-| Execute JS with result callback   | ✅  | ✅      | ❌    | ❌    |
+| Feature                           | CEF | WebView | Winit |
+| --------------------------------- | --- | ------- | ----- |
+| JS call handler (native bindings) | ✅  | ✅      | ❌    |
+| Respond to JS calls               | ✅  | ✅      | ❌    |
+| Invoke JS callbacks               | ✅  | ✅      | ❌    |
+| Release JS callbacks              | ✅  | ✅      | ❌    |
+| Custom JS namespace               | ✅  | ✅      | ❌    |
+| Execute JS with result callback   | ✅  | ✅      | ❌    |
 
 #### Menus
 
-| Feature          | CEF            | WebView | Servo          | Winit          |
-| ---------------- | -------------- | ------- | -------------- | -------------- |
-| Application menu | macOS, Windows | ✅      | macOS, Windows | macOS, Windows |
-| Context menu     | macOS, Windows | ✅      | macOS, Windows | macOS, Windows |
-| Open DevTools    | ✅             | ✅      | ❌             | ❌             |
+| Feature          | CEF            | WebView | Winit          |
+| ---------------- | -------------- | ------- | -------------- |
+| Application menu | macOS, Windows | ✅      | macOS, Windows |
+| Context menu     | macOS, Windows | ✅      | macOS, Windows |
+| Open DevTools    | ✅             | ✅      | ❌             |
 
-CEF, Servo, and Winit on Linux cannot support menus because they create raw
+CEF and Winit on Linux cannot support menus because they create raw
 X11/Wayland windows without a GTK container.
 
 #### Dock / taskbar
@@ -110,17 +116,17 @@ X11/Wayland windows without a GTK container.
 The dock is a macOS concept; on Windows the analog is the taskbar button, on
 Linux it's the window-manager urgency hint / title convention.
 
-| Feature         | CEF   | WebView | Servo | Winit |
-|-----------------|-------|---------|-------|-------|
-| Bounce / flash  | ✅     | ✅       | ✅     | ✅     |
-| Badge           | ✅     | ✅       | ✅     | ✅     |
-| Dock menu       | macOS | macOS   | macOS | macOS |
-| Hide dock icon  | macOS | macOS   | macOS | macOS |
-| Reopen callback | macOS | macOS   | macOS | macOS |
+| Feature         | CEF   | WebView | Winit |
+|-----------------|-------|---------|-------|
+| Bounce / flash  | ✅    | ✅      | ✅    |
+| Badge           | ✅    | ✅      | ✅    |
+| Dock menu       | macOS | macOS   | macOS |
+| Hide dock icon  | macOS | macOS   | macOS |
+| Reopen callback | macOS | macOS   | macOS |
 
 On macOS, the badge uses `NSDockTile.badgeLabel` (native red overlay on the
-dock icon). On Windows and Linux, all four backends implement the badge as a
-`"(N) "` prefix on the window title — the convention used by Slack, Discord,
+dock icon). On Windows and Linux, all three backends implement the badge as
+a `"(N) "` prefix on the window title — the convention used by Slack, Discord,
 Telegram, etc. Taskbars and window managers surface the title, so the badge
 appears on the taskbar button / window manager overview. Proper Windows
 overlay icons (`ITaskbarList3::SetOverlayIcon`) and Linux libunity counts
@@ -158,36 +164,36 @@ live. Winit polls once per event-loop tick.
 
 #### Native dialogs
 
-| Feature                        | CEF | WebView | Servo | Winit |
-| ------------------------------ | --- | ------- | ----- | ----- |
-| Alert                          | ✅  | ✅      | ✅    | ✅    |
-| Confirm                        | ✅  | ✅      | ✅    | ✅    |
-| Prompt                         | ✅  | ✅      | ✅    | ✅    |
-| Browser JS dialogs (native UI) | ✅  | ✅      | ❌    | ❌    |
+| Feature                        | CEF | WebView | Winit |
+| ------------------------------ | --- | ------- | ----- |
+| Alert                          | ✅  | ✅      | ✅    |
+| Confirm                        | ✅  | ✅      | ✅    |
+| Prompt                         | ✅  | ✅      | ✅    |
+| Browser JS dialogs (native UI) | ✅  | ✅      | ❌    |
 
 #### Input events
 
-| Feature               | CEF | WebView | Servo | Winit |
-| --------------------- | --- | ------- | ----- | ----- |
-| Keyboard events       | ✅  | ✅      | ✅    | ✅    |
-| Mouse click events    | ✅  | ✅      | ✅    | ✅    |
-| Mouse move events     | ✅  | ✅      | ✅    | ✅    |
-| Wheel / scroll events | ✅  | ✅      | ✅    | ✅    |
-| Cursor enter / leave  | ✅  | ✅      | ✅    | ✅    |
+| Feature               | CEF | WebView | Winit |
+| --------------------- | --- | ------- | ----- |
+| Keyboard events       | ✅  | ✅      | ✅    |
+| Mouse click events    | ✅  | ✅      | ✅    |
+| Mouse move events     | ✅  | ✅      | ✅    |
+| Wheel / scroll events | ✅  | ✅      | ✅    |
+| Cursor enter / leave  | ✅  | ✅      | ✅    |
 
 #### Window events
 
-| Feature         | CEF | WebView | Servo | Winit |
-| --------------- | --- | ------- | ----- | ----- |
-| Focus / blur    | ✅  | ✅      | ✅    | ✅    |
-| Resize          | ✅  | ✅      | ✅    | ✅    |
-| Move            | ✅  | ✅      | ✅    | ✅    |
-| Close requested | ✅  | ✅      | ✅    | ✅    |
+| Feature         | CEF | WebView | Winit |
+| --------------- | --- | ------- | ----- |
+| Focus / blur    | ✅  | ✅      | ✅    |
+| Resize          | ✅  | ✅      | ✅    |
+| Move            | ✅  | ✅      | ✅    |
+| Close requested | ✅  | ✅      | ✅    |
 
 #### Window handles (GPU surface creation)
 
-| Feature                | CEF | WebView | Servo | Winit |
-| ---------------------- | --- | ------- | ----- | ----- |
-| Get window handle      | ❌  | ❌      | ❌    | ✅    |
-| Get display handle     | ❌  | ❌      | ❌    | ✅    |
-| Get window handle type | ❌  | ❌      | ❌    | ✅    |
+| Feature                | CEF | WebView | Winit |
+| ---------------------- | --- | ------- | ----- |
+| Get window handle      | ❌  | ❌      | ✅    |
+| Get display handle     | ❌  | ❌      | ✅    |
+| Get window handle type | ❌  | ❌      | ✅    |

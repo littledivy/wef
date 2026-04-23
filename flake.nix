@@ -97,10 +97,6 @@
         webviewOutputs = webviewFlake.outputs { self = webviewFlake; inherit nixpkgs flake-utils; inherit wefInclude; };
         webviewApp = webviewOutputs.packages.${system}.default;
 
-        servoFlake = import ./servo/flake.nix;
-        servoOutputs = servoFlake.outputs { self = servoFlake; inherit nixpkgs flake-utils rust-overlay; };
-        servoApp = servoOutputs.packages.${system}.default;
-
       in {
         packages = {
           hello = helloRuntime;
@@ -108,7 +104,6 @@
 
           cef = cefApp;
           webview = webviewApp;
-          servo = servoApp;
 
           cef-hello = pkgs.stdenv.mkDerivation {
             pname = "wef-cef-hello";
@@ -124,40 +119,6 @@ SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 exec "$SCRIPT_DIR/Applications/wef.app/Contents/MacOS/wef" --runtime "$SCRIPT_DIR/lib/libhello_runtime.dylib" "$@"
 EOF
               chmod +x $out/bin/wef-cef-hello
-            '';
-          };
-
-          servo-hello = pkgs.stdenv.mkDerivation {
-            pname = "wef-servo-hello";
-            version = "0.1.0";
-            dontUnpack = true;
-            installPhase = ''
-              mkdir -p $out/bin $out/lib
-              cp ${servoApp}/bin/wef_servo $out/bin/
-              cp ${helloRuntime}/lib/libhello_runtime.dylib $out/lib/
-              cat > $out/bin/wef-servo-hello <<'EOF'
-#!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-WEF_RUNTIME_PATH="$SCRIPT_DIR/lib/libhello_runtime.dylib" exec "$SCRIPT_DIR/bin/wef_servo" "$@"
-EOF
-              chmod +x $out/bin/wef-servo-hello
-            '';
-          };
-
-          servo-ddcore = pkgs.stdenv.mkDerivation {
-            pname = "wef-servo-ddcore";
-            version = "0.1.0";
-            dontUnpack = true;
-            installPhase = ''
-              mkdir -p $out/bin $out/lib
-              cp ${servoApp}/bin/wef_servo $out/bin/
-              cp ${ddcoreRuntime}/lib/libddcore_runtime.dylib $out/lib/
-              cat > $out/bin/wef-servo-ddcore <<'EOF'
-#!/bin/bash
-SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-WEF_RUNTIME_PATH="$SCRIPT_DIR/lib/libddcore_runtime.dylib" exec "$SCRIPT_DIR/bin/wef_servo" "$@"
-EOF
-              chmod +x $out/bin/wef-servo-ddcore
             '';
           };
 
@@ -282,7 +243,7 @@ EOF
 
           shellHook = ''
             echo "wef dev shell"
-            echo "nix build .#servo-hello"
+            echo "nix build .#cef-hello"
           '';
         };
       }

@@ -11,7 +11,7 @@ defined in `capi/include/wef.h`.
 ┌──────────────────┐         ┌───────────────────┐
 │  Backend (exe)   │ ──C ABI──▶  Runtime (dylib) │
 │  CEF / WebView / ◀─────────│  User app logic   │
-│  Servo / Winit   │         │  (links wef capi) │
+│  Winit           │         │  (links wef capi) │
 └──────────────────┘         └───────────────────┘
 ```
 
@@ -21,8 +21,10 @@ defined in `capi/include/wef.h`.
 | ---------- | ------------------------------------------------- | ------------------ | -------------------- |
 | `cef/`     | Chromium Embedded Framework                       | C++                | CEF Views (internal) |
 | `webview/` | System webview (WKWebView / WebView2 / WebKitGTK) | C++ (per-platform) | Created directly     |
-| `servo/`   | Servo                                             | Rust (winit)       | Created directly     |
 | `winit/`   | None (winit only, no web content)                 | Rust (winit)       | Created directly     |
+
+An experimental Servo backend lives on the
+[`servo`](https://github.com/littledivy/wef/tree/servo) branch.
 
 ### Runtime (capi)
 
@@ -62,8 +64,9 @@ underlying engine. This is an interception model, not a consumption model.
 
 ### Winit backend code sharing (`backend-winit-common`)
 
-The `servo/` and `winit/` backends both use winit for windowing. Shared code
-lives in `backend-winit-common/src/lib.rs`:
+The `winit/` backend uses winit for windowing; the Servo backend on the
+`servo` branch shares this same code. Shared code lives in
+`backend-winit-common/src/lib.rs`:
 
 - **`BackendAccess` trait**: each backend implements this to provide access to
   its `CommonState`, event loop proxy, and event type mapping.
@@ -79,8 +82,8 @@ lives in `backend-winit-common/src/lib.rs`:
 
 To add a new winit-based API: add the pending state to `CommonState`, the
 function to `define_common_backend_fns!`, the assignment to `fill_common_api!`,
-and the dispatch to `handle_common_event()`. Both servo and winit backends pick
-it up automatically.
+and the dispatch to `handle_common_event()`. The winit backend picks it up
+automatically (and the Servo branch, if rebased).
 
 ### Pending state pattern (async window ops)
 
