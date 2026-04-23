@@ -55,17 +55,17 @@ An experimental [Servo](https://github.com/littledivy/wef/tree/servo)
 backend is preserved on a branch for future work.
 
 |             | CEF             | WebView         | Winit           |
-| ----------- | --------------- | --------------- | --------------- |
+|-------------|-----------------|-----------------|-----------------|
 | **macOS**   | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
 | **Windows** | x86_64          | x86_64          | x86_64          |
 | **Linux**   | x86_64, aarch64 | x86_64, aarch64 | x86_64, aarch64 |
-| **Android** | ❌              | ❌              | ❌              |
+| **Android** | ❌               | ❌               | ❌               |
 
 |             | Engine        | Multi-process | Bundled | JS bridge |
-| ----------- | ------------- | ------------- | ------- | --------- |
-| **CEF**     | Chromium 144  | ✅            | ✅      | ✅        |
-| **WebView** | System native | ❌            | ❌      | ✅        |
-| **Winit**   | none          | ❌            | ❌      | ❌        |
+|-------------|---------------|---------------|---------|-----------|
+| **CEF**     | Chromium 144  | ✅             | ✅       | ✅         |
+| **WebView** | System native | ❌             | ❌       | ✅         |
+| **Winit**   | none          | ❌             | ❌       | ❌         |
 
 ### Feature support matrix
 
@@ -75,38 +75,38 @@ within a backend.
 #### Window management
 
 | Feature                   | CEF | WebView | Winit |
-| ------------------------- | --- | ------- | ----- |
-| Create / close window     | ✅  | ✅      | ✅    |
-| Navigate (load URL)       | ✅  | ✅      | ❌    |
-| Set title                 | ✅  | ✅      | ✅    |
-| Execute JavaScript        | ✅  | ✅      | ❌    |
-| Set / get window size     | ✅  | ✅      | ✅    |
-| Set / get window position | ✅  | ✅      | ✅    |
-| Set / get resizable       | ✅  | ✅      | ✅    |
-| Set / get always on top   | ✅  | ✅      | ✅    |
-| Show / hide / is visible  | ✅  | ✅      | ✅    |
-| Focus                     | ✅  | ✅      | ✅    |
-| Quit                      | ✅  | ✅      | ✅    |
-| Post UI task              | ✅  | ✅      | ✅    |
+|---------------------------|-----|---------|-------|
+| Create / close window     | ✅   | ✅       | ✅     |
+| Navigate (load URL)       | ✅   | ✅       | ❌     |
+| Set title                 | ✅   | ✅       | ✅     |
+| Execute JavaScript        | ✅   | ✅       | ❌     |
+| Set / get window size     | ✅   | ✅       | ✅     |
+| Set / get window position | ✅   | ✅       | ✅     |
+| Set / get resizable       | ✅   | ✅       | ✅     |
+| Set / get always on top   | ✅   | ✅       | ✅     |
+| Show / hide / is visible  | ✅   | ✅       | ✅     |
+| Focus                     | ✅   | ✅       | ✅     |
+| Quit                      | ✅   | ✅       | ✅     |
+| Post UI task              | ✅   | ✅       | ✅     |
 
 #### JavaScript interop
 
 | Feature                           | CEF | WebView | Winit |
-| --------------------------------- | --- | ------- | ----- |
-| JS call handler (native bindings) | ✅  | ✅      | ❌    |
-| Respond to JS calls               | ✅  | ✅      | ❌    |
-| Invoke JS callbacks               | ✅  | ✅      | ❌    |
-| Release JS callbacks              | ✅  | ✅      | ❌    |
-| Custom JS namespace               | ✅  | ✅      | ❌    |
-| Execute JS with result callback   | ✅  | ✅      | ❌    |
+|-----------------------------------|-----|---------|-------|
+| JS call handler (native bindings) | ✅   | ✅       | ❌     |
+| Respond to JS calls               | ✅   | ✅       | ❌     |
+| Invoke JS callbacks               | ✅   | ✅       | ❌     |
+| Release JS callbacks              | ✅   | ✅       | ❌     |
+| Custom JS namespace               | ✅   | ✅       | ❌     |
+| Execute JS with result callback   | ✅   | ✅       | ❌     |
 
 #### Menus
 
 | Feature          | CEF            | WebView | Winit          |
-| ---------------- | -------------- | ------- | -------------- |
-| Application menu | macOS, Windows | ✅      | macOS, Windows |
-| Context menu     | macOS, Windows | ✅      | macOS, Windows |
-| Open DevTools    | ✅             | ✅      | ❌             |
+|------------------|----------------|---------|----------------|
+| Application menu | macOS, Windows | ✅       | macOS, Windows |
+| Context menu     | macOS, Windows | ✅       | macOS, Windows |
+| Open DevTools    | ✅              | ✅       | ❌              |
 
 CEF and Winit on Linux cannot support menus because they create raw
 X11/Wayland windows without a GTK container.
@@ -118,8 +118,8 @@ Linux it's the window-manager urgency hint / title convention.
 
 | Feature         | CEF   | WebView | Winit |
 |-----------------|-------|---------|-------|
-| Bounce / flash  | ✅    | ✅      | ✅    |
-| Badge           | ✅    | ✅      | ✅    |
+| Bounce / flash  | ✅     | ✅       | ✅     |
+| Badge           | ✅     | ✅       | ✅     |
 | Dock menu       | macOS | macOS   | macOS |
 | Hide dock icon  | macOS | macOS   | macOS |
 | Reopen callback | macOS | macOS   | macOS |
@@ -140,13 +140,13 @@ macOS menu bar extras (NSStatusItem), Windows system tray
 (Shell_NotifyIcon), Linux via libappindicator. Each tray icon has its own
 PNG image, tooltip, left-click handler, and right-click menu.
 
-| Feature              | CEF            | WebView        | Winit |
-| -------------------- | -------------- | -------------- | ----- |
-| Tray icon            | macOS, Windows | ✅             | ✅    |
-| Tooltip              | macOS, Windows | macOS, Windows | ✅    |
-| Right-click menu     | macOS, Windows | ✅             | ✅    |
-| Left-click handler   | macOS, Windows | macOS, Windows | ✅    |
-| Double-click handler | macOS, Windows | macOS, Windows | ✅    |
+| Feature              | CEF            | WebView        | Winit          |
+|----------------------|----------------|----------------|----------------|
+| Tray icon            | macOS, Windows | ✅              | ✅              |
+| Tooltip              | macOS, Windows | macOS, Windows | ✅              |
+| Right-click menu     | macOS, Windows | ✅              | ✅              |
+| Left-click handler   | macOS, Windows | macOS, Windows | ✅              |
+| Double-click handler | macOS, Windows | macOS, Windows | ✅              |
 | Dark-mode icon       | macOS, Windows | macOS, Windows | macOS, Windows |
 
 CEF on Linux is a no-op — CEF Views creates raw X11 windows without GTK, so
@@ -165,35 +165,35 @@ live. Winit polls once per event-loop tick.
 #### Native dialogs
 
 | Feature                        | CEF | WebView | Winit |
-| ------------------------------ | --- | ------- | ----- |
-| Alert                          | ✅  | ✅      | ✅    |
-| Confirm                        | ✅  | ✅      | ✅    |
-| Prompt                         | ✅  | ✅      | ✅    |
-| Browser JS dialogs (native UI) | ✅  | ✅      | ❌    |
+|--------------------------------|-----|---------|-------|
+| Alert                          | ✅   | ✅       | ✅     |
+| Confirm                        | ✅   | ✅       | ✅     |
+| Prompt                         | ✅   | ✅       | ✅     |
+| Browser JS dialogs (native UI) | ✅   | ✅       | ❌     |
 
 #### Input events
 
 | Feature               | CEF | WebView | Winit |
-| --------------------- | --- | ------- | ----- |
-| Keyboard events       | ✅  | ✅      | ✅    |
-| Mouse click events    | ✅  | ✅      | ✅    |
-| Mouse move events     | ✅  | ✅      | ✅    |
-| Wheel / scroll events | ✅  | ✅      | ✅    |
-| Cursor enter / leave  | ✅  | ✅      | ✅    |
+|-----------------------|-----|---------|-------|
+| Keyboard events       | ✅   | ✅       | ✅     |
+| Mouse click events    | ✅   | ✅       | ✅     |
+| Mouse move events     | ✅   | ✅       | ✅     |
+| Wheel / scroll events | ✅   | ✅       | ✅     |
+| Cursor enter / leave  | ✅   | ✅       | ✅     |
 
 #### Window events
 
 | Feature         | CEF | WebView | Winit |
-| --------------- | --- | ------- | ----- |
-| Focus / blur    | ✅  | ✅      | ✅    |
-| Resize          | ✅  | ✅      | ✅    |
-| Move            | ✅  | ✅      | ✅    |
-| Close requested | ✅  | ✅      | ✅    |
+|-----------------|-----|---------|-------|
+| Focus / blur    | ✅   | ✅       | ✅     |
+| Resize          | ✅   | ✅       | ✅     |
+| Move            | ✅   | ✅       | ✅     |
+| Close requested | ✅   | ✅       | ✅     |
 
 #### Window handles (GPU surface creation)
 
 | Feature                | CEF | WebView | Winit |
-| ---------------------- | --- | ------- | ----- |
-| Get window handle      | ❌  | ❌      | ✅    |
-| Get display handle     | ❌  | ❌      | ✅    |
-| Get window handle type | ❌  | ❌      | ✅    |
+|------------------------|-----|---------|-------|
+| Get window handle      | ❌   | ❌       | ✅     |
+| Get display handle     | ❌   | ❌       | ✅     |
+| Get window handle type | ❌   | ❌       | ✅     |
