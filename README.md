@@ -105,11 +105,16 @@ within a backend.
 | Feature          | CEF            | WebView | Winit          |
 |------------------|----------------|---------|----------------|
 | Application menu | macOS, Windows | ✅       | macOS, Windows |
-| Context menu     | macOS, Windows | ✅       | macOS, Windows |
+| Context menu     | ✅              | ✅       | macOS, Windows |
 | Open DevTools    | ✅              | ✅       | ❌              |
 
-CEF and Winit on Linux cannot support menus because they create raw
-X11/Wayland windows without a GTK container.
+Context menus work on CEF Linux because `GtkMenu` popups don't need a
+GtkWindow container. Application menu on CEF Linux still doesn't work:
+a `GtkMenuBar` has to be packed into a GtkWindow above the browser, and
+reparenting CEF into a client-owned GtkWindow via `CefWindowInfo::SetAsChild`
+breaks on XWayland (cross-client X11 child windows aren't supported
+natively by Wayland). OSR would sidestep it but is out of scope. Winit on
+Linux has the same constraint.
 
 #### Dock / taskbar
 
@@ -142,19 +147,19 @@ PNG image, tooltip, left-click handler, and right-click menu.
 
 | Feature              | CEF            | WebView        | Winit          |
 |----------------------|----------------|----------------|----------------|
-| Tray icon            | macOS, Windows | ✅              | ✅              |
+| Tray icon            | ✅              | ✅              | ✅              |
 | Tooltip              | macOS, Windows | macOS, Windows | ✅              |
-| Right-click menu     | macOS, Windows | ✅              | ✅              |
+| Right-click menu     | ✅              | ✅              | ✅              |
 | Left-click handler   | macOS, Windows | macOS, Windows | ✅              |
 | Double-click handler | macOS, Windows | macOS, Windows | ✅              |
 | Dark-mode icon       | macOS, Windows | macOS, Windows | macOS, Windows |
 
-CEF on Linux is a no-op — CEF Views creates raw X11 windows without GTK, so
-libappindicator isn't reachable. StatusNotifierItem over D-Bus is future
-work. On Linux in general (WebView and Winit), left-click and double-click
-are swallowed by the menu (AppIndicator convention), tooltips are absent
-from the StatusNotifierItem spec, and dark-mode icon swapping is left to
-the DE since libappindicator renders through the theme.
+CEF on Linux uses libappindicator (the same as WebView); this is independent
+of the main browser window, so no GtkWindow is required. On Linux in general
+(CEF, WebView, Winit), left-click and double-click are swallowed by the menu
+(AppIndicator convention), tooltips are absent from the StatusNotifierItem
+spec, and dark-mode icon swapping is left to the DE since libappindicator
+renders through the theme.
 
 Dark-mode icon swapping: when both `icon(...)` and `icon_dark(...)` are set,
 the backends observe the system appearance (NSDistributedNotificationCenter
