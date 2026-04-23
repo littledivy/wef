@@ -893,6 +893,32 @@ extern void Backend_SetTrayDoubleClickHandler_Mac(void* data, uint32_t tray_id,
                                                   void* user_data);
 extern void Backend_SetTrayIconDark_Mac(void* data, uint32_t tray_id,
                                         const void* png_bytes, size_t len);
+#elif defined(__linux__)
+// Defined in runtime_loader_linux.cc
+extern void Backend_ShowContextMenu_Linux(void* data, uint32_t window_id,
+                                          int x, int y,
+                                          wef_value_t* menu_template,
+                                          wef_menu_click_fn on_click,
+                                          void* on_click_data);
+extern uint32_t Backend_CreateTrayIcon_Linux(void* data);
+extern void Backend_DestroyTrayIcon_Linux(void* data, uint32_t tray_id);
+extern void Backend_SetTrayIcon_Linux(void* data, uint32_t tray_id,
+                                      const void* png_bytes, size_t len);
+extern void Backend_SetTrayTooltip_Linux(void* data, uint32_t tray_id,
+                                         const char* tooltip_or_null);
+extern void Backend_SetTrayMenu_Linux(void* data, uint32_t tray_id,
+                                      wef_value_t* menu_template,
+                                      wef_menu_click_fn on_click,
+                                      void* on_click_data);
+extern void Backend_SetTrayClickHandler_Linux(void* data, uint32_t tray_id,
+                                              wef_tray_click_fn handler,
+                                              void* user_data);
+extern void Backend_SetTrayDoubleClickHandler_Linux(void* data,
+                                                    uint32_t tray_id,
+                                                    wef_tray_click_fn handler,
+                                                    void* user_data);
+extern void Backend_SetTrayIconDark_Linux(void* data, uint32_t tray_id,
+                                          const void* png_bytes, size_t len);
 #endif
 
 // --- Dock / taskbar (Windows + Linux) ---
@@ -1847,14 +1873,16 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_application_menu = Backend_SetApplicationMenu_Mac;
   backend_api_.show_context_menu = Backend_ShowContextMenu_Mac;
 #else
-  // Linux: CEF Views creates raw X11 windows (not GtkWindows), so there is
-  // no GTK container to attach a GtkMenuBar to. Application menus would
-  // require D-Bus menu protocol or drawing a custom menu bar, which is
-  // future work (see issue #3 — Wayland/Phase 4).
+  // Linux: in-window menu bar (set_application_menu) requires packing a
+  // GtkMenuBar above the browser, which means the top-level window must be
+  // a GtkWindow we own. CEF Views creates the native window itself, so an
+  // embedded menubar isn't reachable without reparenting CEF into a GTK
+  // host — and that path breaks on XWayland (cross-client X11 child
+  // windows aren't supported in Wayland-native ways). Context menus and
+  // tray menus still work because GtkMenu popups don't need a GtkWindow.
   backend_api_.set_application_menu = [](void*, uint32_t, wef_value_t*,
                                          wef_menu_click_fn, void*) {};
-  backend_api_.show_context_menu = [](void*, uint32_t, int, int, wef_value_t*,
-                                      wef_menu_click_fn, void*) {};
+  backend_api_.show_context_menu = Backend_ShowContextMenu_Linux;
 #endif
 
   backend_api_.open_devtools = Backend_OpenDevTools;
@@ -1901,9 +1929,15 @@ void RuntimeLoader::InitializeBackendApi() {
       Backend_SetTrayDoubleClickHandler_Win;
   backend_api_.set_tray_icon_dark = Backend_SetTrayIconDark_Win;
 #elif defined(__linux__)
-  // Tray on CEF Linux is a no-op — CEF Views uses raw X11 without GTK, so
-  // there's no clean path to libappindicator. StatusNotifierItem via D-Bus
-  // is future work.
+  backend_api_.create_tray_icon = Backend_CreateTrayIcon_Linux;
+  backend_api_.destroy_tray_icon = Backend_DestroyTrayIcon_Linux;
+  backend_api_.set_tray_icon = Backend_SetTrayIcon_Linux;
+  backend_api_.set_tray_tooltip = Backend_SetTrayTooltip_Linux;
+  backend_api_.set_tray_menu = Backend_SetTrayMenu_Linux;
+  backend_api_.set_tray_click_handler = Backend_SetTrayClickHandler_Linux;
+  backend_api_.set_tray_double_click_handler =
+      Backend_SetTrayDoubleClickHandler_Linux;
+  backend_api_.set_tray_icon_dark = Backend_SetTrayIconDark_Linux;
 #endif
 }
 
