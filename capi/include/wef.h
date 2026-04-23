@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define WEF_API_VERSION 19
+#define WEF_API_VERSION 21
 
 // Window handle types for get_window_handle_type
 #define WEF_WINDOW_HANDLE_UNKNOWN 0
@@ -79,6 +79,10 @@ typedef void (*wef_menu_click_fn)(void* user_data, uint32_t window_id,
 // has no visible windows (macOS only; Windows/Linux have no equivalent event).
 // has_visible_windows is true if any app window is currently on-screen.
 typedef void (*wef_dock_reopen_fn)(void* user_data, bool has_visible_windows);
+
+// Callback fired when the user left-clicks a tray / status-bar icon.
+// (Right-click is reserved for the tray's menu.)
+typedef void (*wef_tray_click_fn)(void* user_data, uint32_t tray_id);
 
 // Callback for dialog results.
 typedef void (*wef_dialog_result_fn)(
@@ -381,6 +385,54 @@ struct wef_backend_api {
   // informational. Windows/Linux: leave NULL.
   void (*set_dock_reopen_handler)(void* backend_data, wef_dock_reopen_fn fn,
                                   void* user_data);
+
+  // --- Tray / status-bar icon ---
+  //
+  // A tray icon is an explicitly-created, persistent icon in the OS status
+  // area (macOS menu bar extras, Windows system tray, Linux AppIndicator).
+  // Each call to create_tray_icon returns a new id; destroy removes it.
+  // Backends that don't support tray icons leave these NULL.
+
+  // Create a new empty tray icon. Returns a tray_id > 0, or 0 on failure.
+  uint32_t (*create_tray_icon)(void* backend_data);
+
+  // Destroy a tray icon created via create_tray_icon.
+  void (*destroy_tray_icon)(void* backend_data, uint32_t tray_id);
+
+  // Set the icon image (PNG-encoded bytes). Required before the icon is
+  // visible on most platforms.
+  void (*set_tray_icon)(void* backend_data, uint32_t tray_id,
+                        const void* png_bytes, size_t len);
+
+  // Set or clear the tooltip shown on hover. Pass NULL or "" to clear.
+  void (*set_tray_tooltip)(void* backend_data, uint32_t tray_id,
+                           const char* tooltip_or_null);
+
+  // Set the context (right-click) menu. menu_template uses the same format
+  // as set_application_menu. on_click is called with the id of the clicked
+  // item; the window_id argument of the callback is 0 (tray menus are
+  // app-scoped, not window-scoped). Pass NULL menu_template to clear.
+  void (*set_tray_menu)(void* backend_data, uint32_t tray_id,
+                        wef_value_t* menu_template,
+                        wef_menu_click_fn on_click, void* on_click_data);
+
+  // Register a handler for left-click on the tray icon.
+  void (*set_tray_click_handler)(void* backend_data, uint32_t tray_id,
+                                 wef_tray_click_fn handler, void* user_data);
+
+  // Register a handler for left-double-click. Fires after a quick second
+  // click; the single-click handler (if any) still fires for the first
+  // click. No-op on Linux (AppIndicator has no click events).
+  void (*set_tray_double_click_handler)(void* backend_data, uint32_t tray_id,
+                                        wef_tray_click_fn handler,
+                                        void* user_data);
+
+  // Set the icon used when the OS is in dark mode. When set, the backend
+  // swaps between the primary (light) icon from set_tray_icon and this
+  // one based on the current system appearance. Pass NULL/zero len to
+  // clear the dark variant (then the primary icon is used in both modes).
+  void (*set_tray_icon_dark)(void* backend_data, uint32_t tray_id,
+                             const void* png_bytes, size_t len);
 };
 
 #ifdef __cplusplus

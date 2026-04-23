@@ -205,6 +205,9 @@ impl ApplicationHandler<UserEvent> for App {
             self.focused_window(),
           );
         }
+        CommonEvent::TrayTask => {
+          wef_backend_winit_common::tray::drain_and_apply();
+        }
         other => {
           let wid = match other {
             CommonEvent::SetTitle { window_id }
@@ -237,6 +240,7 @@ impl ApplicationHandler<UserEvent> for App {
     _event_loop: &winit::event_loop::ActiveEventLoop,
   ) {
     wef_backend_winit_common::poll_menu_events();
+    wef_backend_winit_common::tray::poll_tray_events();
   }
 
   fn window_event(

@@ -127,6 +127,35 @@ overlay icons (`ITaskbarList3::SetOverlayIcon`) and Linux libunity counts
 are future work. The dock menu, dock visibility, and reopen callback have
 no clean cross-platform analog.
 
+#### Tray / status bar
+
+Tray icons are explicitly-created, persistent icons in the OS status area:
+macOS menu bar extras (NSStatusItem), Windows system tray
+(Shell_NotifyIcon), Linux via libappindicator. Each tray icon has its own
+PNG image, tooltip, left-click handler, and right-click menu.
+
+| Feature              | CEF            | WebView        | Winit |
+| -------------------- | -------------- | -------------- | ----- |
+| Tray icon            | macOS, Windows | ✅             | ✅    |
+| Tooltip              | macOS, Windows | macOS, Windows | ✅    |
+| Right-click menu     | macOS, Windows | ✅             | ✅    |
+| Left-click handler   | macOS, Windows | macOS, Windows | ✅    |
+| Double-click handler | macOS, Windows | macOS, Windows | ✅    |
+| Dark-mode icon       | macOS, Windows | macOS, Windows | macOS, Windows |
+
+CEF on Linux is a no-op — CEF Views creates raw X11 windows without GTK, so
+libappindicator isn't reachable. StatusNotifierItem over D-Bus is future
+work. On Linux in general (WebView and Winit), left-click and double-click
+are swallowed by the menu (AppIndicator convention), tooltips are absent
+from the StatusNotifierItem spec, and dark-mode icon swapping is left to
+the DE since libappindicator renders through the theme.
+
+Dark-mode icon swapping: when both `icon(...)` and `icon_dark(...)` are set,
+the backends observe the system appearance (NSDistributedNotificationCenter
+`AppleInterfaceThemeChangedNotification` on macOS, `WM_SETTINGCHANGE` /
+`ImmersiveColorSet` + `AppsUseLightTheme` registry on Windows) and swap
+live. Winit polls once per event-loop tick.
+
 #### Native dialogs
 
 | Feature                        | CEF | WebView | Servo | Winit |

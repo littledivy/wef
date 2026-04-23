@@ -69,15 +69,21 @@ elseif(PLATFORM_LINUX)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(WEBKITGTK REQUIRED webkit2gtk-4.1)
   pkg_check_modules(GTK REQUIRED gtk+-3.0)
+  pkg_check_modules(APPINDICATOR appindicator3-0.1)
+  if(NOT APPINDICATOR_FOUND)
+    pkg_check_modules(APPINDICATOR ayatana-appindicator3-0.1)
+  endif()
 
   target_include_directories(${WEF_TARGET} PRIVATE
     ${WEBKITGTK_INCLUDE_DIRS}
     ${GTK_INCLUDE_DIRS}
+    ${APPINDICATOR_INCLUDE_DIRS}
   )
 
   target_link_libraries(${WEF_TARGET}
     ${WEBKITGTK_LIBRARIES}
     ${GTK_LIBRARIES}
+    ${APPINDICATOR_LIBRARIES}
     dl
     pthread
   )
@@ -85,7 +91,14 @@ elseif(PLATFORM_LINUX)
   target_compile_options(${WEF_TARGET} PRIVATE
     ${WEBKITGTK_CFLAGS_OTHER}
     ${GTK_CFLAGS_OTHER}
+    ${APPINDICATOR_CFLAGS_OTHER}
   )
+
+  if(APPINDICATOR_FOUND)
+    target_compile_definitions(${WEF_TARGET} PRIVATE WEF_HAVE_APPINDICATOR=1)
+  else()
+    message(STATUS "libappindicator not found — tray icon will be a no-op on this build")
+  endif()
 
 elseif(PLATFORM_WINDOWS)
   add_executable(${WEF_TARGET} WIN32

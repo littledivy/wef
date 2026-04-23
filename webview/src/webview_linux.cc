@@ -614,6 +614,17 @@ class WebKitGTKBackend : public WefBackend {
   void BounceDock(int type) override;
   void SetDockBadge(const char* badge_or_null) override;
 
+  uint32_t CreateTrayIcon() override;
+  void DestroyTrayIcon(uint32_t tray_id) override;
+  void SetTrayIcon(uint32_t tray_id, const void* png_bytes,
+                   size_t len) override;
+  void SetTrayTooltip(uint32_t tray_id, const char* tooltip_or_null) override;
+  void SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
+                   const wef_backend_api_t* api, wef_menu_click_fn on_click,
+                   void* on_click_data) override;
+  void SetTrayClickHandler(uint32_t tray_id, wef_tray_click_fn handler,
+                           void* user_data) override;
+
   void HandleJsMessage(uint32_t window_id, const char* json);
 
  private:
@@ -1613,6 +1624,225 @@ void WebKitGTKBackend::SetDockBadge(const char* badge_or_null) {
       }
     }
   }
+}
+
+// ============================================================================
+// Tray / status bar (Linux) — libappindicator if available
+// ============================================================================
+
+#ifdef WEF_HAVE_APPINDICATOR
+extern "C" {
+#include <libappindicator/app-indicator.h>
+}
+
+namespace {
+struct LinuxTrayEntry {
+  AppIndicator* indicator;
+  GtkWidget* menu;
+  // Map from dynamically-allocated item command id strings (we use a
+  // counter) back to the user-space menu item id.
+  std::map<std::string, std::string> cmd_to_id;
+  wef_menu_click_fn menu_click_fn;
+  void* menu_click_data;
+  wef_tray_click_fn click_fn;  // unused on Linux — AppIndicator has no
+  void* click_data;            // left-click; left-click shows the menu.
+};
+std::mutex g_linux_tray_mutex;
+std::map<uint32_t, LinuxTrayEntry> g_linux_trays;
+std::atomic<uint32_t> g_linux_next_tray_id{1};
+std::atomic<uint64_t> g_linux_next_cmd{1};
+
+struct MenuActivateCtx {
+  uint32_t tray_id;
+  std::string item_id;
+};
+
+void OnLinuxTrayMenuActivate(GtkMenuItem* /*item*/, gpointer user_data) {
+  auto* ctx = static_cast<MenuActivateCtx*>(user_data);
+  wef_menu_click_fn fn = nullptr;
+  void* data = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(g_linux_tray_mutex);
+    auto it = g_linux_trays.find(ctx->tray_id);
+    if (it != g_linux_trays.end()) {
+      fn = it->second.menu_click_fn;
+      data = it->second.menu_click_data;
+    }
+  }
+  if (fn) fn(data, ctx->tray_id, ctx->item_id.c_str());
+}
+
+void DestroyMenuActivateCtx(gpointer data, GClosure* /*closure*/) {
+  delete static_cast<MenuActivateCtx*>(data);
+}
+
+GtkWidget* BuildLinuxTrayMenu(uint32_t tray_id, wef_value_t* val,
+                              const wef_backend_api_t* api) {
+  if (!val || !api->value_is_list(val)) return nullptr;
+  GtkWidget* menu = gtk_menu_new();
+  size_t count = api->value_list_size(val);
+  for (size_t i = 0; i < count; ++i) {
+    wef_value_t* itemVal = api->value_list_get(val, i);
+    if (!itemVal || !api->value_is_dict(itemVal)) continue;
+    wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
+    if (typeVal && api->value_is_string(typeVal)) {
+      size_t len = 0;
+      char* s = api->value_get_string(typeVal, &len);
+      if (s && std::string(s) == "separator") {
+        gtk_menu_shell_append(GTK_MENU_SHELL(menu),
+                              gtk_separator_menu_item_new());
+        api->value_free_string(s);
+        continue;
+      }
+      if (s) api->value_free_string(s);
+    }
+    wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
+    std::string label;
+    if (labelVal && api->value_is_string(labelVal)) {
+      size_t len = 0;
+      char* s = api->value_get_string(labelVal, &len);
+      if (s) { label = std::string(s, len); api->value_free_string(s); }
+    }
+    wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
+    if (submenuVal && api->value_is_list(submenuVal)) {
+      GtkWidget* parent = gtk_menu_item_new_with_label(label.c_str());
+      GtkWidget* sub = BuildLinuxTrayMenu(tray_id, submenuVal, api);
+      if (sub) gtk_menu_item_set_submenu(GTK_MENU_ITEM(parent), sub);
+      gtk_menu_shell_append(GTK_MENU_SHELL(menu), parent);
+      continue;
+    }
+    wef_value_t* idVal = api->value_dict_get(itemVal, "id");
+    std::string item_id;
+    if (idVal && api->value_is_string(idVal)) {
+      size_t len = 0;
+      char* s = api->value_get_string(idVal, &len);
+      if (s) { item_id = std::string(s, len); api->value_free_string(s); }
+    }
+    GtkWidget* mi = gtk_menu_item_new_with_label(label.c_str());
+    wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
+    if (enabledVal && api->value_is_bool(enabledVal) &&
+        !api->value_get_bool(enabledVal)) {
+      gtk_widget_set_sensitive(mi, FALSE);
+    }
+    if (!item_id.empty()) {
+      auto* ctx = new MenuActivateCtx{tray_id, item_id};
+      g_signal_connect_data(
+          mi, "activate", G_CALLBACK(OnLinuxTrayMenuActivate), ctx,
+          DestroyMenuActivateCtx, (GConnectFlags)0);
+    }
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
+  }
+  gtk_widget_show_all(menu);
+  return menu;
+}
+}  // namespace
+#endif  // WEF_HAVE_APPINDICATOR
+
+uint32_t WebKitGTKBackend::CreateTrayIcon() {
+#ifdef WEF_HAVE_APPINDICATOR
+  uint32_t tray_id =
+      g_linux_next_tray_id.fetch_add(1, std::memory_order_relaxed);
+  std::string idstr = "wef-tray-" + std::to_string(tray_id);
+  AppIndicator* ind =
+      app_indicator_new(idstr.c_str(), "",
+                        APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
+  if (!ind) return 0;
+  app_indicator_set_status(ind, APP_INDICATOR_STATUS_ACTIVE);
+  // AppIndicator requires a non-null menu to be visible in most DEs.
+  GtkWidget* placeholder = gtk_menu_new();
+  gtk_widget_show_all(placeholder);
+  app_indicator_set_menu(ind, GTK_MENU(placeholder));
+  LinuxTrayEntry entry{};
+  entry.indicator = ind;
+  entry.menu = placeholder;
+  std::lock_guard<std::mutex> lock(g_linux_tray_mutex);
+  g_linux_trays[tray_id] = std::move(entry);
+  return tray_id;
+#else
+  return 0;
+#endif
+}
+
+void WebKitGTKBackend::DestroyTrayIcon(uint32_t tray_id) {
+#ifdef WEF_HAVE_APPINDICATOR
+  std::lock_guard<std::mutex> lock(g_linux_tray_mutex);
+  auto it = g_linux_trays.find(tray_id);
+  if (it == g_linux_trays.end()) return;
+  if (it->second.indicator) {
+    app_indicator_set_status(it->second.indicator,
+                             APP_INDICATOR_STATUS_PASSIVE);
+    g_object_unref(it->second.indicator);
+  }
+  g_linux_trays.erase(it);
+#else
+  (void)tray_id;
+#endif
+}
+
+void WebKitGTKBackend::SetTrayIcon(uint32_t tray_id, const void* png_bytes,
+                                   size_t len) {
+#ifdef WEF_HAVE_APPINDICATOR
+  if (!png_bytes || len == 0) return;
+  // AppIndicator on most DEs reads icons by name from the icon theme, not
+  // from raw bytes. Write the bytes to a per-tray temp file and point the
+  // indicator at its full path.
+  std::string path = "/tmp/wef-tray-" + std::to_string(tray_id) + ".png";
+  FILE* f = fopen(path.c_str(), "wb");
+  if (!f) return;
+  fwrite(png_bytes, 1, len, f);
+  fclose(f);
+  std::lock_guard<std::mutex> lock(g_linux_tray_mutex);
+  auto it = g_linux_trays.find(tray_id);
+  if (it == g_linux_trays.end() || !it->second.indicator) return;
+  app_indicator_set_icon_full(it->second.indicator, path.c_str(), "");
+#else
+  (void)tray_id; (void)png_bytes; (void)len;
+#endif
+}
+
+void WebKitGTKBackend::SetTrayTooltip(uint32_t /*tray_id*/,
+                                      const char* /*tooltip_or_null*/) {
+  // AppIndicator / StatusNotifier has no tooltip concept. The title is
+  // visible in some DEs — a v1 approximation would be app_indicator_set_title,
+  // but most users expect tooltips not to appear, so we no-op.
+}
+
+void WebKitGTKBackend::SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
+                                    const wef_backend_api_t* api,
+                                    wef_menu_click_fn on_click,
+                                    void* on_click_data) {
+#ifdef WEF_HAVE_APPINDICATOR
+  GtkWidget* new_menu =
+      menu_template ? BuildLinuxTrayMenu(tray_id, menu_template, api) : nullptr;
+  if (menu_template) api->value_free(menu_template);
+  std::lock_guard<std::mutex> lock(g_linux_tray_mutex);
+  auto it = g_linux_trays.find(tray_id);
+  if (it == g_linux_trays.end()) {
+    if (new_menu) gtk_widget_destroy(new_menu);
+    return;
+  }
+  if (new_menu) {
+    app_indicator_set_menu(it->second.indicator, GTK_MENU(new_menu));
+    it->second.menu = new_menu;
+  } else {
+    GtkWidget* empty = gtk_menu_new();
+    gtk_widget_show_all(empty);
+    app_indicator_set_menu(it->second.indicator, GTK_MENU(empty));
+    it->second.menu = empty;
+  }
+  it->second.menu_click_fn = on_click;
+  it->second.menu_click_data = on_click_data;
+#else
+  (void)tray_id; (void)menu_template; (void)api; (void)on_click;
+  (void)on_click_data;
+#endif
+}
+
+void WebKitGTKBackend::SetTrayClickHandler(uint32_t /*tray_id*/,
+                                           wef_tray_click_fn /*handler*/,
+                                           void* /*user_data*/) {
+  // AppIndicator has no left-click event; the indicator's menu pops up on
+  // any click. Left-click handlers are a no-op on Linux.
 }
 
 // ============================================================================

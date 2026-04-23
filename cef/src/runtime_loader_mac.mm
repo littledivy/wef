@@ -4,6 +4,8 @@
 
 #include "runtime_loader.h"
 
+#include <atomic>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -782,4 +784,303 @@ void Backend_SetDockReopenHandler_Mac(void* /*data*/,
                                       void* user_data) {
   g_dock_reopen_fn = handler;
   g_dock_reopen_data = user_data;
+}
+
+// --- Tray / status-bar icon (macOS) ---
+
+struct TrayEntry {
+  NSStatusItem* item;
+  NSMenu* menu;
+  wef_menu_click_fn menu_click_fn;
+  void* menu_click_data;
+  wef_tray_click_fn click_fn;
+  void* click_data;
+  wef_tray_click_fn dblclick_fn;
+  void* dblclick_data;
+  NSImage* light_image;
+  NSImage* dark_image;
+};
+
+static std::map<uint32_t, TrayEntry>& TrayMap() {
+  static std::map<uint32_t, TrayEntry> map;
+  return map;
+}
+
+static std::atomic<uint32_t> g_next_tray_id{1};
+
+@interface WefTrayTarget : NSObject
++ (instancetype)shared;
+- (void)trayClicked:(id)sender;
+- (void)trayMenuItemClicked:(id)sender;
+@end
+
+@implementation WefTrayTarget
++ (instancetype)shared {
+  static WefTrayTarget* instance = nil;
+  static dispatch_once_t onceToken;
+  dispatch_once(&onceToken, ^{
+    instance = [[WefTrayTarget alloc] init];
+  });
+  return instance;
+}
+
+- (void)trayClicked:(id)sender {
+  NSStatusBarButton* button = (NSStatusBarButton*)sender;
+  NSNumber* tagObj = [button cell].representedObject;
+  if (!tagObj)
+    return;
+  uint32_t tray_id = (uint32_t)[tagObj unsignedIntValue];
+  auto& map = TrayMap();
+  auto it = map.find(tray_id);
+  if (it == map.end())
+    return;
+  NSEvent* event = [NSApp currentEvent];
+  if (event && event.type == NSEventTypeRightMouseUp && it->second.menu) {
+    [it->second.item popUpStatusItemMenu:it->second.menu];
+    return;
+  }
+  if (event && event.clickCount >= 2 && it->second.dblclick_fn) {
+    it->second.dblclick_fn(it->second.dblclick_data, tray_id);
+    return;
+  }
+  if (it->second.click_fn) {
+    it->second.click_fn(it->second.click_data, tray_id);
+  }
+}
+
+- (void)trayMenuItemClicked:(id)sender {
+  NSMenuItem* item = (NSMenuItem*)sender;
+  NSArray* pair = [item representedObject];
+  if (!pair || [pair count] != 2)
+    return;
+  NSNumber* tagObj = pair[0];
+  NSString* itemId = pair[1];
+  uint32_t tray_id = (uint32_t)[tagObj unsignedIntValue];
+  auto& map = TrayMap();
+  auto it = map.find(tray_id);
+  if (it == map.end() || !it->second.menu_click_fn)
+    return;
+  it->second.menu_click_fn(it->second.menu_click_data, tray_id,
+                           [itemId UTF8String]);
+}
+@end
+
+// Tag each tray-menu item with (tray_id, item_id) so the shared click
+// handler can route the click correctly.
+static void TagTrayMenuItems(NSMenu* menu, uint32_t tray_id) {
+  for (NSMenuItem* mi in [menu itemArray]) {
+    if ([mi hasSubmenu]) {
+      TagTrayMenuItems([mi submenu], tray_id);
+      continue;
+    }
+    if ([mi isSeparatorItem])
+      continue;
+    id rep = [mi representedObject];
+    if (![rep isKindOfClass:[NSString class]])
+      continue;
+    NSArray* pair =
+        @[ [NSNumber numberWithUnsignedInt:tray_id], (NSString*)rep ];
+    [mi setRepresentedObject:pair];
+    [mi setTarget:[WefTrayTarget shared]];
+    [mi setAction:@selector(trayMenuItemClicked:)];
+  }
+}
+
+uint32_t Backend_CreateTrayIcon_Mac(void* /*data*/) {
+  uint32_t tray_id = g_next_tray_id.fetch_add(1, std::memory_order_relaxed);
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSStatusItem* item = [[NSStatusBar systemStatusBar]
+        statusItemWithLength:NSSquareStatusItemLength];
+    if (!item)
+      return;
+    NSStatusBarButton* button = [item button];
+    if (button) {
+      [[button cell] setRepresentedObject:@(tray_id)];
+      [button setTarget:[WefTrayTarget shared]];
+      [button setAction:@selector(trayClicked:)];
+      [button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
+    }
+    TrayEntry entry = {};
+    entry.item = item;
+    TrayMap()[tray_id] = entry;
+  });
+  return tray_id;
+}
+
+void Backend_DestroyTrayIcon_Mac(void* /*data*/, uint32_t tray_id) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    if (it->second.item) {
+      [[NSStatusBar systemStatusBar] removeStatusItem:it->second.item];
+    }
+    map.erase(it);
+  });
+}
+
+static bool SystemIsDarkMode() {
+  if (@available(macOS 10.14, *)) {
+    NSAppearance* appearance = [NSApp effectiveAppearance];
+    NSAppearanceName match = [appearance
+        bestMatchFromAppearancesWithNames:@[
+          NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+        ]];
+    return [match isEqualToString:NSAppearanceNameDarkAqua];
+  }
+  return false;
+}
+
+static void ApplyActiveIconForTray(TrayEntry& entry) {
+  if (!entry.item)
+    return;
+  bool dark = SystemIsDarkMode();
+  NSImage* chosen =
+      (dark && entry.dark_image) ? entry.dark_image : entry.light_image;
+  if (chosen)
+    [[entry.item button] setImage:chosen];
+}
+
+static NSImage* ImageFromPng(const void* bytes, size_t len) {
+  if (!bytes || len == 0)
+    return nil;
+  NSData* data = [NSData dataWithBytes:bytes length:len];
+  NSImage* image = [[NSImage alloc] initWithData:data];
+  if (!image)
+    return nil;
+  [image setSize:NSMakeSize(18, 18)];
+  // Treating the supplied PNG as a template gives the best menu-bar
+  // appearance in most cases. Users who want a full-color icon should
+  // simply not mark it as template — but our API doesn't expose that yet,
+  // so default to template for v1 (matches Electron's behavior).
+  [image setTemplate:YES];
+  return image;
+}
+
+// One-shot installer for a distributed-notification observer that fires
+// on system theme changes (light <-> dark). Re-applies every tray icon.
+static void EnsureTrayAppearanceObserver() {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"AppleInterfaceThemeChangedNotification"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* /*n*/) {
+                  for (auto& [tid, entry] : TrayMap()) {
+                    ApplyActiveIconForTray(entry);
+                  }
+                }];
+  });
+}
+
+void Backend_SetTrayIcon_Mac(void* /*data*/, uint32_t tray_id,
+                             const void* png_bytes, size_t len) {
+  if (!png_bytes || len == 0)
+    return;
+  NSData* data = [NSData dataWithBytes:png_bytes length:len];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end() || !it->second.item)
+      return;
+    NSImage* image = ImageFromPng([data bytes], [data length]);
+    if (!image)
+      return;
+    it->second.light_image = image;
+    EnsureTrayAppearanceObserver();
+    ApplyActiveIconForTray(it->second);
+  });
+}
+
+void Backend_SetTrayIconDark_Mac(void* /*data*/, uint32_t tray_id,
+                                 const void* png_bytes, size_t len) {
+  NSData* data = (png_bytes && len > 0)
+                     ? [NSData dataWithBytes:png_bytes length:len]
+                     : nil;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end() || !it->second.item)
+      return;
+    it->second.dark_image =
+        data ? ImageFromPng([data bytes], [data length]) : nil;
+    EnsureTrayAppearanceObserver();
+    ApplyActiveIconForTray(it->second);
+  });
+}
+
+void Backend_SetTrayTooltip_Mac(void* /*data*/, uint32_t tray_id,
+                                const char* tooltip_or_null) {
+  NSString* tip = (tooltip_or_null && *tooltip_or_null)
+                      ? [NSString stringWithUTF8String:tooltip_or_null]
+                      : nil;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end() || !it->second.item)
+      return;
+    [[it->second.item button] setToolTip:tip];
+  });
+}
+
+void Backend_SetTrayMenu_Mac(void* data, uint32_t tray_id,
+                             wef_value_t* menu_template,
+                             wef_menu_click_fn on_click, void* on_click_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  const wef_backend_api_t* api = &loader->GetBackendApi();
+  if (!menu_template) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      auto& map = TrayMap();
+      auto it = map.find(tray_id);
+      if (it == map.end())
+        return;
+      it->second.menu = nil;
+      it->second.menu_click_fn = nullptr;
+      it->second.menu_click_data = nullptr;
+    });
+    return;
+  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menu = BuildMenuFromValue(menu_template, api,
+                                      [WefTrayTarget shared],
+                                      @selector(trayMenuItemClicked:));
+    if (!menu)
+      return;
+    TagTrayMenuItems(menu, tray_id);
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    it->second.menu = menu;
+    it->second.menu_click_fn = on_click;
+    it->second.menu_click_data = on_click_data;
+  });
+}
+
+void Backend_SetTrayClickHandler_Mac(void* /*data*/, uint32_t tray_id,
+                                     wef_tray_click_fn handler,
+                                     void* user_data) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    it->second.click_fn = handler;
+    it->second.click_data = user_data;
+  });
+}
+
+void Backend_SetTrayDoubleClickHandler_Mac(void* /*data*/, uint32_t tray_id,
+                                           wef_tray_click_fn handler,
+                                           void* user_data) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = TrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    it->second.dblclick_fn = handler;
+    it->second.dblclick_data = user_data;
+  });
 }

@@ -27,7 +27,7 @@ pub use mouse::*;
 /// (`github.com/denoland/wef/releases/tag/v{VERSION}`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const WEF_API_VERSION: u32 = 19;
+pub const WEF_API_VERSION: u32 = 21;
 
 pub const WEF_WINDOW_HANDLE_UNKNOWN: i32 = 0;
 pub const WEF_WINDOW_HANDLE_APPKIT: i32 = 1;
@@ -57,6 +57,15 @@ static DOCK_MENU_HANDLER: OnceLock<
 > = OnceLock::new();
 static DOCK_REOPEN_HANDLER: OnceLock<
   Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>,
+> = OnceLock::new();
+static TRAY_MENU_HANDLERS: OnceLock<
+  Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>>,
+> = OnceLock::new();
+static TRAY_CLICK_HANDLERS: OnceLock<
+  Mutex<HashMap<u32, Box<dyn Fn() + Send + Sync>>>,
+> = OnceLock::new();
+static TRAY_DBLCLICK_HANDLERS: OnceLock<
+  Mutex<HashMap<u32, Box<dyn Fn() + Send + Sync>>>,
 > = OnceLock::new();
 
 enum BindingHandler {
@@ -1294,6 +1303,308 @@ where
   if let Some(f) = api.set_dock_reopen_handler {
     unsafe {
       f(api.backend_data, Some(dock_reopen_callback), std::ptr::null_mut());
+    }
+  }
+}
+
+// --- Tray / status-bar icon ---
+
+fn tray_menu_handlers(
+) -> &'static Mutex<HashMap<u32, Box<dyn Fn(&str) + Send + Sync>>> {
+  TRAY_MENU_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn tray_click_handlers(
+) -> &'static Mutex<HashMap<u32, Box<dyn Fn() + Send + Sync>>> {
+  TRAY_CLICK_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn tray_dblclick_handlers(
+) -> &'static Mutex<HashMap<u32, Box<dyn Fn() + Send + Sync>>> {
+  TRAY_DBLCLICK_HANDLERS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+unsafe extern "C" fn tray_menu_click_callback(
+  _user_data: *mut c_void,
+  tray_id: u32,
+  item_id: *const c_char,
+) {
+  if item_id.is_null() {
+    return;
+  }
+  let id = CStr::from_ptr(item_id).to_string_lossy();
+  let handlers = tray_menu_handlers().lock().unwrap();
+  if let Some(handler) = handlers.get(&tray_id) {
+    handler(&id);
+  }
+}
+
+unsafe extern "C" fn tray_click_callback(
+  _user_data: *mut c_void,
+  tray_id: u32,
+) {
+  let handlers = tray_click_handlers().lock().unwrap();
+  if let Some(handler) = handlers.get(&tray_id) {
+    handler();
+  }
+}
+
+unsafe extern "C" fn tray_dblclick_callback(
+  _user_data: *mut c_void,
+  tray_id: u32,
+) {
+  let handlers = tray_dblclick_handlers().lock().unwrap();
+  if let Some(handler) = handlers.get(&tray_id) {
+    handler();
+  }
+}
+
+/// A persistent icon in the OS status area (macOS menu bar extras, Windows
+/// system tray, Linux AppIndicator). Multiple icons may be created.
+///
+/// The native icon is destroyed when the `TrayIcon` is dropped. Clone via
+/// [`TrayIcon::id`] + [`TrayIcon::from_id`] if you need multiple handles.
+pub struct TrayIcon {
+  id: u32,
+  owned: bool,
+}
+
+impl TrayIcon {
+  /// Create a new tray icon. Returns a `TrayIcon` with `id == 0` if the
+  /// backend doesn't support tray icons (e.g. CEF on Linux).
+  pub fn new() -> Self {
+    let api = api();
+    let id = if let Some(f) = api.create_tray_icon {
+      unsafe { f(api.backend_data) }
+    } else {
+      0
+    };
+    TrayIcon { id, owned: true }
+  }
+
+  /// Wrap an existing tray id (doesn't create a new native icon; doesn't
+  /// destroy on drop).
+  pub fn from_id(id: u32) -> Self {
+    TrayIcon { id, owned: false }
+  }
+
+  pub fn id(&self) -> u32 {
+    self.id
+  }
+
+  /// Set the icon image from PNG-encoded bytes.
+  pub fn icon(self, png_bytes: &[u8]) -> Self {
+    self.set_icon(png_bytes);
+    self
+  }
+
+  /// Set the tooltip shown on hover.
+  pub fn tooltip(self, text: &str) -> Self {
+    self.set_tooltip(Some(text));
+    self
+  }
+
+  /// Set the right-click context menu.
+  pub fn menu<F>(self, template: &[MenuItem], on_click: F) -> Self
+  where
+    F: Fn(&str) + Send + Sync + 'static,
+  {
+    self.set_menu(template, on_click);
+    self
+  }
+
+  /// Register a left-click handler. Right-click is reserved for the menu.
+  pub fn on_click<F>(self, handler: F) -> Self
+  where
+    F: Fn() + Send + Sync + 'static,
+  {
+    {
+      let mut handlers = tray_click_handlers().lock().unwrap();
+      handlers.insert(self.id, Box::new(handler));
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_click_handler {
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          Some(tray_click_callback),
+          std::ptr::null_mut(),
+        );
+      }
+    }
+    self
+  }
+
+  /// Register a left-double-click handler. Fires in addition to `on_click`
+  /// for the first of the two clicks. No-op on Linux.
+  pub fn on_double_click<F>(self, handler: F) -> Self
+  where
+    F: Fn() + Send + Sync + 'static,
+  {
+    self.set_double_click_handler(handler);
+    self
+  }
+
+  /// Set the icon used when the OS is in dark mode. Cleared when passed an
+  /// empty slice.
+  pub fn icon_dark(self, png_bytes: &[u8]) -> Self {
+    self.set_icon_dark(png_bytes);
+    self
+  }
+
+  pub fn set_icon(&self, png_bytes: &[u8]) {
+    if self.id == 0 {
+      return;
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_icon {
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          png_bytes.as_ptr() as *const c_void,
+          png_bytes.len(),
+        );
+      }
+    }
+  }
+
+  pub fn set_icon_dark(&self, png_bytes: &[u8]) {
+    if self.id == 0 {
+      return;
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_icon_dark {
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          if png_bytes.is_empty() {
+            std::ptr::null()
+          } else {
+            png_bytes.as_ptr() as *const c_void
+          },
+          png_bytes.len(),
+        );
+      }
+    }
+  }
+
+  pub fn set_double_click_handler<F>(&self, handler: F)
+  where
+    F: Fn() + Send + Sync + 'static,
+  {
+    if self.id == 0 {
+      return;
+    }
+    {
+      let mut handlers = tray_dblclick_handlers().lock().unwrap();
+      handlers.insert(self.id, Box::new(handler));
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_double_click_handler {
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          Some(tray_dblclick_callback),
+          std::ptr::null_mut(),
+        );
+      }
+    }
+  }
+
+  pub fn set_tooltip(&self, text: Option<&str>) {
+    if self.id == 0 {
+      return;
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_tooltip {
+      match text {
+        Some(t) if !t.is_empty() => {
+          let c_text = CString::new(t).expect("Invalid tooltip");
+          unsafe { f(api.backend_data, self.id, c_text.as_ptr()) };
+        }
+        _ => unsafe { f(api.backend_data, self.id, std::ptr::null()) },
+      }
+    }
+  }
+
+  pub fn set_menu<F>(&self, template: &[MenuItem], on_click: F)
+  where
+    F: Fn(&str) + Send + Sync + 'static,
+  {
+    if self.id == 0 {
+      return;
+    }
+    let value = Value::List(template.iter().map(|i| i.to_value()).collect());
+    {
+      let mut handlers = tray_menu_handlers().lock().unwrap();
+      handlers.insert(self.id, Box::new(on_click));
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_menu {
+      let raw = value.to_raw();
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          raw,
+          Some(tray_menu_click_callback),
+          std::ptr::null_mut(),
+        );
+      }
+    }
+  }
+
+  pub fn clear_menu(&self) {
+    if self.id == 0 {
+      return;
+    }
+    {
+      let mut handlers = tray_menu_handlers().lock().unwrap();
+      handlers.remove(&self.id);
+    }
+    let api = api();
+    if let Some(f) = api.set_tray_menu {
+      unsafe {
+        f(
+          api.backend_data,
+          self.id,
+          std::ptr::null_mut(),
+          None,
+          std::ptr::null_mut(),
+        );
+      }
+    }
+  }
+}
+
+impl Default for TrayIcon {
+  fn default() -> Self {
+    Self::new()
+  }
+}
+
+impl Drop for TrayIcon {
+  fn drop(&mut self) {
+    if !self.owned || self.id == 0 {
+      return;
+    }
+    // Clean up handler maps so we don't hold stale closures.
+    if let Some(m) = TRAY_MENU_HANDLERS.get() {
+      m.lock().unwrap().remove(&self.id);
+    }
+    if let Some(m) = TRAY_CLICK_HANDLERS.get() {
+      m.lock().unwrap().remove(&self.id);
+    }
+    if let Some(m) = TRAY_DBLCLICK_HANDLERS.get() {
+      m.lock().unwrap().remove(&self.id);
+    }
+    let api = api();
+    if let Some(f) = api.destroy_tray_icon {
+      unsafe { f(api.backend_data, self.id) };
     }
   }
 }

@@ -367,6 +367,27 @@ class WefBackend {
   virtual void SetDockVisible(bool /*visible*/) {}
   virtual void SetDockReopenHandler(wef_dock_reopen_fn /*handler*/,
                                     void* /*user_data*/) {}
+
+  // --- Tray / status-bar icon ---
+  virtual uint32_t CreateTrayIcon() { return 0; }
+  virtual void DestroyTrayIcon(uint32_t /*tray_id*/) {}
+  virtual void SetTrayIcon(uint32_t /*tray_id*/, const void* /*png_bytes*/,
+                           size_t /*len*/) {}
+  virtual void SetTrayTooltip(uint32_t /*tray_id*/,
+                              const char* /*tooltip_or_null*/) {}
+  virtual void SetTrayMenu(uint32_t /*tray_id*/,
+                           wef_value_t* /*menu_template*/,
+                           const wef_backend_api_t* /*api*/,
+                           wef_menu_click_fn /*on_click*/,
+                           void* /*on_click_data*/) {}
+  virtual void SetTrayClickHandler(uint32_t /*tray_id*/,
+                                   wef_tray_click_fn /*handler*/,
+                                   void* /*user_data*/) {}
+  virtual void SetTrayDoubleClickHandler(uint32_t /*tray_id*/,
+                                         wef_tray_click_fn /*handler*/,
+                                         void* /*user_data*/) {}
+  virtual void SetTrayIconDark(uint32_t /*tray_id*/,
+                               const void* /*png_bytes*/, size_t /*len*/) {}
 };
 
 WefBackend* CreateWefBackend();

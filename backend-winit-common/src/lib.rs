@@ -3,6 +3,7 @@
 pub use winit;
 
 pub mod dock;
+pub mod tray;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -25,7 +26,7 @@ use winit::window::{Window, WindowLevel};
 
 // --- Constants ---
 
-pub const WEF_API_VERSION: u32 = 19;
+pub const WEF_API_VERSION: u32 = 21;
 
 #[allow(dead_code)]
 pub const WEF_WINDOW_HANDLE_UNKNOWN: c_int = 0;
@@ -328,6 +329,39 @@ pub struct WefBackendApi {
       *mut c_void,
     ),
   >,
+  pub create_tray_icon: Option<unsafe extern "C" fn(*mut c_void) -> u32>,
+  pub destroy_tray_icon: Option<unsafe extern "C" fn(*mut c_void, u32)>,
+  pub set_tray_icon:
+    Option<unsafe extern "C" fn(*mut c_void, u32, *const c_void, usize)>,
+  pub set_tray_tooltip:
+    Option<unsafe extern "C" fn(*mut c_void, u32, *const c_char)>,
+  pub set_tray_menu: Option<
+    unsafe extern "C" fn(
+      *mut c_void,
+      u32,
+      *mut WefValue,
+      Option<WefMenuClickFn>,
+      *mut c_void,
+    ),
+  >,
+  pub set_tray_click_handler: Option<
+    unsafe extern "C" fn(
+      *mut c_void,
+      u32,
+      Option<tray::WefTrayClickFn>,
+      *mut c_void,
+    ),
+  >,
+  pub set_tray_double_click_handler: Option<
+    unsafe extern "C" fn(
+      *mut c_void,
+      u32,
+      Option<tray::WefTrayClickFn>,
+      *mut c_void,
+    ),
+  >,
+  pub set_tray_icon_dark:
+    Option<unsafe extern "C" fn(*mut c_void, u32, *const c_void, usize)>,
 }
 
 unsafe impl Send for WefBackendApi {}
@@ -856,6 +890,14 @@ pub fn create_api_base() -> WefBackendApi {
     set_dock_menu: None,
     set_dock_visible: None,
     set_dock_reopen_handler: None,
+    create_tray_icon: None,
+    destroy_tray_icon: None,
+    set_tray_icon: None,
+    set_tray_tooltip: None,
+    set_tray_menu: None,
+    set_tray_click_handler: None,
+    set_tray_double_click_handler: None,
+    set_tray_icon_dark: None,
   }
 }
 
@@ -1107,7 +1149,7 @@ thread_local! {
     RefCell::new(HashMap::new());
 }
 
-fn register_menu_callbacks(
+pub fn register_menu_callbacks(
   items: &[ParsedMenuItem],
   callback: Option<WefMenuClickFn>,
   callback_data: usize,
@@ -1478,6 +1520,9 @@ pub enum CommonEvent {
   /// App-scoped dock / taskbar op queued via `dock::queue_op`.
   /// The app handler calls `dock::drain_and_apply` to process pending ops.
   DockTask,
+  /// Tray / status-bar op queued via `tray::queue_op`.
+  /// The app handler calls `tray::drain_and_apply` on the main thread.
+  TrayTask,
 }
 
 // --- Trait for backend state access ---
@@ -2102,6 +2147,156 @@ macro_rules! define_common_backend_fns {
         );
       }
     }
+
+    unsafe extern "C" fn backend_create_tray_icon(
+      _data: *mut ::std::ffi::c_void,
+    ) -> u32 {
+      let tray_id = $crate::tray::allocate_tray_id();
+      $crate::tray::queue_op($crate::tray::TrayOp::Create { tray_id });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+      tray_id
+    }
+
+    unsafe extern "C" fn backend_destroy_tray_icon(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+    ) {
+      $crate::tray::queue_op($crate::tray::TrayOp::Destroy { tray_id });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_tray_icon(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+      png_bytes: *const ::std::ffi::c_void,
+      len: usize,
+    ) {
+      let png = $crate::tray::slice_to_vec(png_bytes, len);
+      $crate::tray::queue_op($crate::tray::TrayOp::SetIcon { tray_id, png });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_tray_tooltip(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+      tooltip: *const ::std::ffi::c_char,
+    ) {
+      let text = $crate::tray::cstr_opt(tooltip);
+      $crate::tray::queue_op($crate::tray::TrayOp::SetTooltip {
+        tray_id,
+        text,
+      });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_tray_menu(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+      template: *mut $crate::WefValue,
+      callback: Option<$crate::WefMenuClickFn>,
+      callback_data: *mut ::std::ffi::c_void,
+    ) {
+      if template.is_null() {
+        $crate::tray::queue_op($crate::tray::TrayOp::ClearMenu { tray_id });
+      } else {
+        let items = $crate::parse_menu_template(template);
+        $crate::value_free(template);
+        $crate::tray::queue_op($crate::tray::TrayOp::SetMenu {
+          tray_id,
+          items,
+          callback,
+          callback_data: callback_data as usize,
+        });
+      }
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_tray_click_handler(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+      handler: Option<$crate::tray::WefTrayClickFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      $crate::tray::queue_op($crate::tray::TrayOp::SetClickHandler {
+        tray_id,
+        handler,
+        user_data: user_data as usize,
+      });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_tray_double_click_handler(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+      handler: Option<$crate::tray::WefTrayClickFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      $crate::tray::queue_op($crate::tray::TrayOp::SetDoubleClickHandler {
+        tray_id,
+        handler,
+        user_data: user_data as usize,
+      });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
+
+    unsafe extern "C" fn backend_set_tray_icon_dark(
+      _data: *mut ::std::ffi::c_void,
+      tray_id: u32,
+      png_bytes: *const ::std::ffi::c_void,
+      len: usize,
+    ) {
+      let png = $crate::tray::slice_to_vec(png_bytes, len);
+      $crate::tray::queue_op($crate::tray::TrayOp::SetIconDark { tray_id, png });
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.proxy().send_event(
+          <$B as $crate::BackendAccess>::common_event(
+            $crate::CommonEvent::TrayTask,
+          ),
+        );
+      }
+    }
   };
 }
 
@@ -2148,6 +2343,15 @@ macro_rules! fill_common_api {
     $api.set_dock_menu = Some(backend_set_dock_menu);
     $api.set_dock_visible = Some(backend_set_dock_visible);
     $api.set_dock_reopen_handler = Some(backend_set_dock_reopen_handler);
+    $api.create_tray_icon = Some(backend_create_tray_icon);
+    $api.destroy_tray_icon = Some(backend_destroy_tray_icon);
+    $api.set_tray_icon = Some(backend_set_tray_icon);
+    $api.set_tray_tooltip = Some(backend_set_tray_tooltip);
+    $api.set_tray_menu = Some(backend_set_tray_menu);
+    $api.set_tray_click_handler = Some(backend_set_tray_click_handler);
+    $api.set_tray_double_click_handler =
+      Some(backend_set_tray_double_click_handler);
+    $api.set_tray_icon_dark = Some(backend_set_tray_icon_dark);
   };
 }
 

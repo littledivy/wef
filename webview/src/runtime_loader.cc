@@ -634,6 +634,68 @@ static void Backend_SetDockReopenHandler(void* data,
   }
 }
 
+// --- Tray / status bar ---
+
+static uint32_t Backend_CreateTrayIcon(void* data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    return backend->CreateTrayIcon();
+  return 0;
+}
+
+static void Backend_DestroyTrayIcon(void* data, uint32_t tray_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->DestroyTrayIcon(tray_id);
+}
+
+static void Backend_SetTrayIcon(void* data, uint32_t tray_id,
+                                const void* png_bytes, size_t len) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->SetTrayIcon(tray_id, png_bytes, len);
+}
+
+static void Backend_SetTrayTooltip(void* data, uint32_t tray_id,
+                                   const char* tooltip_or_null) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->SetTrayTooltip(tray_id, tooltip_or_null);
+}
+
+static void Backend_SetTrayMenu(void* data, uint32_t tray_id,
+                                wef_value_t* menu_template,
+                                wef_menu_click_fn on_click,
+                                void* on_click_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->SetTrayMenu(tray_id, menu_template, &loader->GetBackendApi(),
+                         on_click, on_click_data);
+}
+
+static void Backend_SetTrayClickHandler(void* data, uint32_t tray_id,
+                                        wef_tray_click_fn handler,
+                                        void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->SetTrayClickHandler(tray_id, handler, user_data);
+}
+
+static void Backend_SetTrayDoubleClickHandler(void* data, uint32_t tray_id,
+                                              wef_tray_click_fn handler,
+                                              void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->SetTrayDoubleClickHandler(tray_id, handler, user_data);
+}
+
+static void Backend_SetTrayIconDark(void* data, uint32_t tray_id,
+                                    const void* png_bytes, size_t len) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  if (WefBackend* backend = loader->GetBackend())
+    backend->SetTrayIconDark(tray_id, png_bytes, len);
+}
+
 void RuntimeLoader::InitializeBackendApi() {
   memset(&backend_api_, 0, sizeof(backend_api_));
   backend_api_.version = WEF_API_VERSION;
@@ -737,6 +799,16 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_dock_menu = Backend_SetDockMenu;
   backend_api_.set_dock_visible = Backend_SetDockVisible;
   backend_api_.set_dock_reopen_handler = Backend_SetDockReopenHandler;
+
+  backend_api_.create_tray_icon = Backend_CreateTrayIcon;
+  backend_api_.destroy_tray_icon = Backend_DestroyTrayIcon;
+  backend_api_.set_tray_icon = Backend_SetTrayIcon;
+  backend_api_.set_tray_tooltip = Backend_SetTrayTooltip;
+  backend_api_.set_tray_menu = Backend_SetTrayMenu;
+  backend_api_.set_tray_click_handler = Backend_SetTrayClickHandler;
+  backend_api_.set_tray_double_click_handler =
+      Backend_SetTrayDoubleClickHandler;
+  backend_api_.set_tray_icon_dark = Backend_SetTrayIconDark;
 }
 
 RuntimeLoader::RuntimeLoader() {

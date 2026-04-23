@@ -6,6 +6,7 @@
 #include "runtime_loader.h"
 #include "wef_json.h"
 
+#include <atomic>
 #include <map>
 #include <mutex>
 
@@ -86,6 +87,21 @@ class WKWebViewBackend : public WefBackend {
   void SetDockVisible(bool visible) override;
   void SetDockReopenHandler(wef_dock_reopen_fn handler,
                             void* user_data) override;
+
+  uint32_t CreateTrayIcon() override;
+  void DestroyTrayIcon(uint32_t tray_id) override;
+  void SetTrayIcon(uint32_t tray_id, const void* png_bytes,
+                   size_t len) override;
+  void SetTrayTooltip(uint32_t tray_id, const char* tooltip_or_null) override;
+  void SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
+                   const wef_backend_api_t* api, wef_menu_click_fn on_click,
+                   void* on_click_data) override;
+  void SetTrayClickHandler(uint32_t tray_id, wef_tray_click_fn handler,
+                           void* user_data) override;
+  void SetTrayDoubleClickHandler(uint32_t tray_id, wef_tray_click_fn handler,
+                                 void* user_data) override;
+  void SetTrayIconDark(uint32_t tray_id, const void* png_bytes,
+                       size_t len) override;
 
   void HandleJsMessage(uint32_t window_id, uint64_t call_id,
                        const std::string& method, wef::ValuePtr args);
@@ -1870,6 +1886,289 @@ void WKWebViewBackend::SetDockReopenHandler(wef_dock_reopen_fn handler,
                                             void* user_data) {
   g_wv_dock_reopen_fn = handler;
   g_wv_dock_reopen_data = user_data;
+}
+
+// --- Tray / status-bar icon (macOS) ---
+
+namespace {
+struct WvTrayEntry {
+  NSStatusItem* item;
+  NSMenu* menu;
+  wef_menu_click_fn menu_click_fn;
+  void* menu_click_data;
+  wef_tray_click_fn click_fn;
+  void* click_data;
+  wef_tray_click_fn dblclick_fn;
+  void* dblclick_data;
+  NSImage* light_image;
+  NSImage* dark_image;
+};
+std::map<uint32_t, WvTrayEntry>& WvTrayMap() {
+  static std::map<uint32_t, WvTrayEntry> m;
+  return m;
+}
+std::atomic<uint32_t> g_wv_next_tray_id{1};
+
+bool WvSystemIsDarkMode() {
+  if (@available(macOS 10.14, *)) {
+    NSAppearance* appearance = [NSApp effectiveAppearance];
+    NSAppearanceName match = [appearance
+        bestMatchFromAppearancesWithNames:@[
+          NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+        ]];
+    return [match isEqualToString:NSAppearanceNameDarkAqua];
+  }
+  return false;
+}
+
+NSImage* WvImageFromPng(const void* bytes, size_t len) {
+  if (!bytes || len == 0) return nil;
+  NSData* data = [NSData dataWithBytes:bytes length:len];
+  NSImage* image = [[NSImage alloc] initWithData:data];
+  if (!image) return nil;
+  [image setSize:NSMakeSize(18, 18)];
+  [image setTemplate:YES];
+  return image;
+}
+
+void WvApplyActiveIcon(WvTrayEntry& entry) {
+  if (!entry.item) return;
+  bool dark = WvSystemIsDarkMode();
+  NSImage* chosen =
+      (dark && entry.dark_image) ? entry.dark_image : entry.light_image;
+  if (chosen) [[entry.item button] setImage:chosen];
+}
+
+void WvEnsureAppearanceObserver() {
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    [[NSDistributedNotificationCenter defaultCenter]
+        addObserverForName:@"AppleInterfaceThemeChangedNotification"
+                    object:nil
+                     queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification* /*n*/) {
+                  for (auto& [tid, entry] : WvTrayMap()) {
+                    WvApplyActiveIcon(entry);
+                  }
+                }];
+  });
+}
+}  // namespace
+
+@interface WefWvTrayTarget : NSObject
++ (instancetype)shared;
+- (void)trayClicked:(id)sender;
+- (void)trayMenuItemClicked:(id)sender;
+@end
+
+@implementation WefWvTrayTarget
++ (instancetype)shared {
+  static WefWvTrayTarget* instance = nil;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    instance = [[WefWvTrayTarget alloc] init];
+  });
+  return instance;
+}
+
+- (void)trayClicked:(id)sender {
+  NSStatusBarButton* button = (NSStatusBarButton*)sender;
+  NSNumber* tagObj = [[button cell] representedObject];
+  if (!tagObj)
+    return;
+  uint32_t tray_id = (uint32_t)[tagObj unsignedIntValue];
+  auto& map = WvTrayMap();
+  auto it = map.find(tray_id);
+  if (it == map.end())
+    return;
+  NSEvent* event = [NSApp currentEvent];
+  if (event && event.type == NSEventTypeRightMouseUp && it->second.menu) {
+    [it->second.item popUpStatusItemMenu:it->second.menu];
+    return;
+  }
+  if (event && event.clickCount >= 2 && it->second.dblclick_fn) {
+    it->second.dblclick_fn(it->second.dblclick_data, tray_id);
+    return;
+  }
+  if (it->second.click_fn)
+    it->second.click_fn(it->second.click_data, tray_id);
+}
+
+- (void)trayMenuItemClicked:(id)sender {
+  NSMenuItem* item = (NSMenuItem*)sender;
+  NSArray* pair = [item representedObject];
+  if (!pair || [pair count] != 2)
+    return;
+  uint32_t tray_id = (uint32_t)[(NSNumber*)pair[0] unsignedIntValue];
+  NSString* itemId = pair[1];
+  auto& map = WvTrayMap();
+  auto it = map.find(tray_id);
+  if (it == map.end() || !it->second.menu_click_fn)
+    return;
+  it->second.menu_click_fn(it->second.menu_click_data, tray_id,
+                           [itemId UTF8String]);
+}
+@end
+
+static void TagWvTrayMenuItems(NSMenu* menu, uint32_t tray_id) {
+  for (NSMenuItem* mi in [menu itemArray]) {
+    if ([mi hasSubmenu]) {
+      TagWvTrayMenuItems([mi submenu], tray_id);
+      continue;
+    }
+    if ([mi isSeparatorItem])
+      continue;
+    id rep = [mi representedObject];
+    if (![rep isKindOfClass:[NSString class]])
+      continue;
+    NSArray* pair =
+        @[ [NSNumber numberWithUnsignedInt:tray_id], (NSString*)rep ];
+    [mi setRepresentedObject:pair];
+    [mi setTarget:[WefWvTrayTarget shared]];
+    [mi setAction:@selector(trayMenuItemClicked:)];
+  }
+}
+
+uint32_t WKWebViewBackend::CreateTrayIcon() {
+  uint32_t tray_id = g_wv_next_tray_id.fetch_add(1, std::memory_order_relaxed);
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSStatusItem* item = [[NSStatusBar systemStatusBar]
+        statusItemWithLength:NSSquareStatusItemLength];
+    if (!item)
+      return;
+    NSStatusBarButton* button = [item button];
+    if (button) {
+      [[button cell] setRepresentedObject:@(tray_id)];
+      [button setTarget:[WefWvTrayTarget shared]];
+      [button setAction:@selector(trayClicked:)];
+      [button sendActionOn:NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp];
+    }
+    WvTrayEntry entry = {};
+    entry.item = item;
+    WvTrayMap()[tray_id] = entry;
+  });
+  return tray_id;
+}
+
+void WKWebViewBackend::DestroyTrayIcon(uint32_t tray_id) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    if (it->second.item)
+      [[NSStatusBar systemStatusBar] removeStatusItem:it->second.item];
+    map.erase(it);
+  });
+}
+
+void WKWebViewBackend::SetTrayIcon(uint32_t tray_id, const void* png_bytes,
+                                    size_t len) {
+  if (!png_bytes || len == 0)
+    return;
+  NSData* data = [NSData dataWithBytes:png_bytes length:len];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end() || !it->second.item)
+      return;
+    NSImage* image = WvImageFromPng([data bytes], [data length]);
+    if (!image)
+      return;
+    it->second.light_image = image;
+    WvEnsureAppearanceObserver();
+    WvApplyActiveIcon(it->second);
+  });
+}
+
+void WKWebViewBackend::SetTrayIconDark(uint32_t tray_id, const void* png_bytes,
+                                       size_t len) {
+  NSData* data = (png_bytes && len > 0)
+                     ? [NSData dataWithBytes:png_bytes length:len]
+                     : nil;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end() || !it->second.item)
+      return;
+    it->second.dark_image =
+        data ? WvImageFromPng([data bytes], [data length]) : nil;
+    WvEnsureAppearanceObserver();
+    WvApplyActiveIcon(it->second);
+  });
+}
+
+void WKWebViewBackend::SetTrayDoubleClickHandler(uint32_t tray_id,
+                                                 wef_tray_click_fn handler,
+                                                 void* user_data) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    it->second.dblclick_fn = handler;
+    it->second.dblclick_data = user_data;
+  });
+}
+
+void WKWebViewBackend::SetTrayTooltip(uint32_t tray_id,
+                                      const char* tooltip_or_null) {
+  NSString* tip = (tooltip_or_null && *tooltip_or_null)
+                      ? [NSString stringWithUTF8String:tooltip_or_null]
+                      : nil;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end() || !it->second.item)
+      return;
+    [[it->second.item button] setToolTip:tip];
+  });
+}
+
+void WKWebViewBackend::SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
+                                    const wef_backend_api_t* api,
+                                    wef_menu_click_fn on_click,
+                                    void* on_click_data) {
+  if (!menu_template) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+      auto& map = WvTrayMap();
+      auto it = map.find(tray_id);
+      if (it == map.end())
+        return;
+      it->second.menu = nil;
+      it->second.menu_click_fn = nullptr;
+      it->second.menu_click_data = nullptr;
+    });
+    return;
+  }
+  dispatch_async(dispatch_get_main_queue(), ^{
+    NSMenu* menu = BuildMenuFromValue(menu_template, api,
+                                      [WefWvTrayTarget shared],
+                                      @selector(trayMenuItemClicked:));
+    if (!menu)
+      return;
+    TagWvTrayMenuItems(menu, tray_id);
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    it->second.menu = menu;
+    it->second.menu_click_fn = on_click;
+    it->second.menu_click_data = on_click_data;
+  });
+}
+
+void WKWebViewBackend::SetTrayClickHandler(uint32_t tray_id,
+                                            wef_tray_click_fn handler,
+                                            void* user_data) {
+  dispatch_async(dispatch_get_main_queue(), ^{
+    auto& map = WvTrayMap();
+    auto it = map.find(tray_id);
+    if (it == map.end())
+      return;
+    it->second.click_fn = handler;
+    it->second.click_data = user_data;
+  });
 }
 
 WefBackend* CreateWefBackend() {
