@@ -201,6 +201,10 @@ elseif(OS_LINUX)
   find_package(PkgConfig REQUIRED)
   pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
   pkg_check_modules(XI2 REQUIRED xi)
+  pkg_check_modules(APPINDICATOR appindicator3-0.1)
+  if(NOT APPINDICATOR_FOUND)
+    pkg_check_modules(APPINDICATOR ayatana-appindicator3-0.1)
+  endif()
 
   set(WEF_SRCS_COMMON
     src/app.cc
@@ -211,6 +215,7 @@ elseif(OS_LINUX)
 
   set(WEF_SRCS_LINUX
     src/main_linux.cc
+    src/runtime_loader_linux.cc
     ${WEF_RENDERER_SRCS}
   )
 
@@ -221,14 +226,21 @@ elseif(OS_LINUX)
   # not part of Chromium's runtime, so its entry-time canary no longer matches
   # at return, tripping __stack_chk_fail. Disable stack protection to bypass.
   target_compile_options(${CEF_TARGET} PRIVATE -fno-stack-protector)
-  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS} ${GTK3_LIBRARIES} ${XI2_LIBRARIES})
-  target_link_directories(${CEF_TARGET} PRIVATE ${GTK3_LIBRARY_DIRS} ${XI2_LIBRARY_DIRS})
+  target_link_libraries(${CEF_TARGET} libcef_dll_wrapper ${CEF_LIB_RELEASE} ${CEF_STANDARD_LIBS} ${GTK3_LIBRARIES} ${XI2_LIBRARIES} ${APPINDICATOR_LIBRARIES})
+  target_link_directories(${CEF_TARGET} PRIVATE ${GTK3_LIBRARY_DIRS} ${XI2_LIBRARY_DIRS} ${APPINDICATOR_LIBRARY_DIRS})
   target_include_directories(${CEF_TARGET} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${WEF_INCLUDE_DIR}"
     ${GTK3_INCLUDE_DIRS}
     ${XI2_INCLUDE_DIRS}
+    ${APPINDICATOR_INCLUDE_DIRS}
   )
+
+  if(APPINDICATOR_FOUND)
+    target_compile_definitions(${CEF_TARGET} PRIVATE WEF_HAVE_APPINDICATOR=1)
+  else()
+    message(STATUS "libappindicator not found — tray icon will be a no-op on this build")
+  endif()
 
   # Set RPATH so the executable finds libcef.so next to it
   set_target_properties(${CEF_TARGET} PROPERTIES

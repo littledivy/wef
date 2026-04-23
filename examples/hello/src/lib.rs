@@ -125,6 +125,7 @@ fn hello_main() {
 <html>
 <head>
     <meta charset="utf-8">
+    <title>WEF hello example</title>
     <style>
         body {
             font-family: system-ui, -apple-system, sans-serif;
