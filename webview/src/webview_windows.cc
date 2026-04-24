@@ -11,6 +11,10 @@
 #include <wincodec.h>
 #include <wrl.h>
 
+// windows.h defines CreateWindow as a macro which conflicts with
+// WefBackend::CreateWindow
+#undef CreateWindow
+
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "windowscodecs.lib")
 
