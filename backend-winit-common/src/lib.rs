@@ -418,57 +418,77 @@ unsafe fn wef_free(ptr: *mut WefValue) {
 
 // --- Value functions ---
 
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_null(val: *mut WefValue) -> bool {
   if val.is_null() {
     return true;
   }
   matches!(wef_ref(val), SimpleValue::Null)
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_bool(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::Bool(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_int(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::Int(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_double(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::Double(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_string(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::String(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_list(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::List(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_dict(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::Dict(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_binary(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
   }
   matches!(wef_ref(val), SimpleValue::Binary(_))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_is_callback(_val: *mut WefValue) -> bool {
   false // no callback support in winit backend
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_get_bool(val: *mut WefValue) -> bool {
   if val.is_null() {
     return false;
@@ -478,6 +498,8 @@ pub unsafe extern "C" fn value_get_bool(val: *mut WefValue) -> bool {
     _ => false,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_get_int(val: *mut WefValue) -> c_int {
   if val.is_null() {
     return 0;
@@ -487,6 +509,8 @@ pub unsafe extern "C" fn value_get_int(val: *mut WefValue) -> c_int {
     _ => 0,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_get_double(val: *mut WefValue) -> f64 {
   if val.is_null() {
     return 0.0;
@@ -496,6 +520,8 @@ pub unsafe extern "C" fn value_get_double(val: *mut WefValue) -> f64 {
     _ => 0.0,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_get_string(
   val: *mut WefValue,
   len: *mut usize,
@@ -521,11 +547,15 @@ pub unsafe extern "C" fn value_get_string(
     }
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_free_string(s: *mut c_char) {
   if !s.is_null() {
     let _ = CString::from_raw(s);
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_list_size(val: *mut WefValue) -> usize {
   if val.is_null() {
     return 0;
@@ -535,6 +565,8 @@ pub unsafe extern "C" fn value_list_size(val: *mut WefValue) -> usize {
     _ => 0,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_list_get(
   val: *mut WefValue,
   idx: usize,
@@ -549,6 +581,8 @@ pub unsafe extern "C" fn value_list_get(
     _ => std::ptr::null_mut(),
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_dict_get(
   val: *mut WefValue,
   key: *const c_char,
@@ -566,6 +600,8 @@ pub unsafe extern "C" fn value_dict_get(
     _ => std::ptr::null_mut(),
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_dict_has(
   val: *mut WefValue,
   key: *const c_char,
@@ -581,6 +617,8 @@ pub unsafe extern "C" fn value_dict_has(
     _ => false,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_dict_size(val: *mut WefValue) -> usize {
   if val.is_null() {
     return 0;
@@ -590,6 +628,8 @@ pub unsafe extern "C" fn value_dict_size(val: *mut WefValue) -> usize {
     _ => 0,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_dict_keys(
   val: *mut WefValue,
   count: *mut usize,
@@ -624,6 +664,8 @@ pub unsafe extern "C" fn value_dict_keys(
     }
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_free_keys(keys: *mut *mut c_char, count: usize) {
   if keys.is_null() {
     return;
@@ -637,6 +679,8 @@ pub unsafe extern "C" fn value_free_keys(keys: *mut *mut c_char, count: usize) {
   let layout = std::alloc::Layout::array::<*mut c_char>(count).unwrap();
   std::alloc::dealloc(keys as *mut u8, layout);
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_get_binary(
   val: *mut WefValue,
   len: *mut usize,
@@ -662,30 +706,42 @@ pub unsafe extern "C" fn value_get_binary(
     }
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_get_callback_id(_val: *mut WefValue) -> u64 {
   0
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_null(_data: *mut c_void) -> *mut WefValue {
   sv_to_wef(SimpleValue::Null)
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_bool(
   _data: *mut c_void,
   v: bool,
 ) -> *mut WefValue {
   sv_to_wef(SimpleValue::Bool(v))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_int(
   _data: *mut c_void,
   v: c_int,
 ) -> *mut WefValue {
   sv_to_wef(SimpleValue::Int(v))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_double(
   _data: *mut c_void,
   v: f64,
 ) -> *mut WefValue {
   sv_to_wef(SimpleValue::Double(v))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_string(
   _data: *mut c_void,
   v: *const c_char,
@@ -696,12 +752,18 @@ pub unsafe extern "C" fn value_string(
   let s = CStr::from_ptr(v).to_string_lossy().into_owned();
   sv_to_wef(SimpleValue::String(s))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_list(_data: *mut c_void) -> *mut WefValue {
   sv_to_wef(SimpleValue::List(Vec::new()))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_dict(_data: *mut c_void) -> *mut WefValue {
   sv_to_wef(SimpleValue::Dict(Vec::new()))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_binary(
   _data: *mut c_void,
   d: *const c_void,
@@ -713,6 +775,8 @@ pub unsafe extern "C" fn value_binary(
   let data = std::slice::from_raw_parts(d as *const u8, len).to_vec();
   sv_to_wef(SimpleValue::Binary(data))
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_list_append(
   list: *mut WefValue,
   val: *mut WefValue,
@@ -728,6 +792,8 @@ pub unsafe extern "C" fn value_list_append(
     _ => false,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_list_set(
   list: *mut WefValue,
   idx: usize,
@@ -749,6 +815,8 @@ pub unsafe extern "C" fn value_list_set(
     _ => false,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_dict_set(
   dict: *mut WefValue,
   key: *const c_char,
@@ -774,15 +842,21 @@ pub unsafe extern "C" fn value_dict_set(
     _ => false,
   }
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn value_free(val: *mut WefValue) {
   wef_free(val);
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn set_js_call_handler(
   _data: *mut c_void,
   _handler: WefJsCallFn,
   _user_data: *mut c_void,
 ) {
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn js_call_respond(
   _data: *mut c_void,
   _call_id: u64,
@@ -792,6 +866,8 @@ pub unsafe extern "C" fn js_call_respond(
   wef_free(result);
   wef_free(error);
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn invoke_js_callback(
   _data: *mut c_void,
   _cb_id: u64,
@@ -799,6 +875,8 @@ pub unsafe extern "C" fn invoke_js_callback(
 ) {
   wef_free(args);
 }
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn release_js_callback(_data: *mut c_void, _cb_id: u64) {}
 
 /// Fill the value/JS stub fields of a WefBackendApi. Backend-specific fields
@@ -922,6 +1000,8 @@ struct WindowHandleInfo {
 
 unsafe impl Send for WindowHandleInfo {}
 
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn backend_get_window_handle(
   _data: *mut c_void,
   window_id: u32,
@@ -934,6 +1014,8 @@ pub unsafe extern "C" fn backend_get_window_handle(
     .unwrap_or(std::ptr::null_mut())
 }
 
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn backend_get_display_handle(
   _data: *mut c_void,
   _window_id: u32,
@@ -941,6 +1023,8 @@ pub unsafe extern "C" fn backend_get_display_handle(
   DISPLAY_HANDLE.load(Ordering::Acquire)
 }
 
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe extern "C" fn backend_get_window_handle_type(
   _data: *mut c_void,
   _window_id: u32,
@@ -955,7 +1039,7 @@ pub fn store_window_handles(window_id: u32, window: &Window) {
     match wh.as_raw() {
       #[cfg(target_os = "macos")]
       RawWindowHandle::AppKit(handle) => {
-        handle_ptr = handle.ns_view.as_ptr() as *mut c_void;
+        handle_ptr = handle.ns_view.as_ptr();
         WINDOW_HANDLE_TYPE.store(WEF_WINDOW_HANDLE_APPKIT, Ordering::Release);
       }
       #[cfg(target_os = "windows")]
@@ -1073,6 +1157,8 @@ unsafe fn wef_dict_string(dict: *mut WefValue, key: &str) -> Option<String> {
 }
 
 /// Parse a WefValue list into a vec of ParsedMenuItem.
+/// # Safety
+/// Caller must pass valid pointers as defined by the WEF C API contract.
 pub unsafe fn parse_menu_template(
   template: *mut WefValue,
 ) -> Vec<ParsedMenuItem> {
@@ -1187,7 +1273,7 @@ pub fn register_menu_callbacks(
 fn build_muda_menu(items: &[ParsedMenuItem]) -> muda::Menu {
   let menu = muda::Menu::new();
   for item in items {
-    let _ = append_muda_item_to_menu(&menu, item);
+    append_muda_item_to_menu(&menu, item);
   }
   menu
 }
@@ -2889,7 +2975,7 @@ pub fn dispatch_mouse_click_event(
       if *last_btn == Some(button)
         && *count < 2
         && last_time
-          .map_or(false, |t| now.duration_since(t) < DOUBLE_CLICK_INTERVAL)
+          .is_some_and(|t| now.duration_since(t) < DOUBLE_CLICK_INTERVAL)
       {
         *count = 2;
       } else if *count >= 2 || *last_btn != Some(button) {

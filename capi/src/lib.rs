@@ -1,5 +1,7 @@
 // Copyright 2025 Divy Srivastava. All rights reserved. MIT license.
 
+#![allow(clippy::type_complexity)]
+
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::future::Future;
@@ -91,7 +93,10 @@ fn js_call_notify() -> &'static Notify {
   JS_CALL_NOTIFY.get_or_init(Notify::new)
 }
 
-pub fn init_api(api: *const WefBackendApi) -> c_int {
+/// # Safety
+/// `api` must be either null or a valid pointer to a `WefBackendApi` with
+/// static lifetime.
+pub unsafe fn init_api(api: *const WefBackendApi) -> c_int {
   if api.is_null() {
     return -1;
   }
@@ -132,6 +137,9 @@ pub enum Value {
 }
 
 impl Value {
+  /// # Safety
+  /// `ptr` must be null or a valid pointer to a `WefValue` produced by the
+  /// backend API.
   pub unsafe fn from_raw(ptr: *mut WefValue) -> Option<Self> {
     if ptr.is_null() {
       return None;
@@ -1767,10 +1775,13 @@ impl KeyModifiers {
 macro_rules! main {
   ($main_fn:expr) => {
     #[no_mangle]
-    pub extern "C" fn wef_runtime_init(
+    /// # Safety
+    /// `api` must be either null or a valid pointer to a `WefBackendApi`
+    /// with static lifetime supplied by the host runtime.
+    pub unsafe extern "C" fn wef_runtime_init(
       api: *const $crate::WefBackendApi,
     ) -> std::ffi::c_int {
-      $crate::init_api(api)
+      unsafe { $crate::init_api(api) }
     }
 
     #[no_mangle]

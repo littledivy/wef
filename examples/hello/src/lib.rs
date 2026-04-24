@@ -54,14 +54,14 @@ fn hello_main() {
       .bind("greet", |call| {
         let name = call
           .args
-          .get(0)
+          .first()
           .and_then(|v| v.as_string())
           .unwrap_or("World")
           .to_string();
         call.resolve(Value::String(format!("Hello, {}!", name)));
       })
       .bind("add", |call| {
-        let a = call.args.get(0).and_then(|v| v.as_int()).unwrap_or(0);
+        let a = call.args.first().and_then(|v| v.as_int()).unwrap_or(0);
         let b = call.args.get(1).and_then(|v| v.as_int()).unwrap_or(0);
         call.resolve(Value::Int(a + b));
       })
@@ -73,14 +73,14 @@ fn hello_main() {
         call.resolve(Value::Dict(info));
       })
       .bind("setDockBadge", |call| {
-        let text = call.args.get(0).and_then(|v| v.as_string());
+        let text = call.args.first().and_then(|v| v.as_string());
         wef::set_dock_badge(text);
         call.resolve(Value::Null);
       })
       .bind("bounceDock", |call| {
         let critical = call
           .args
-          .get(0)
+          .first()
           .and_then(|v| v.as_bool())
           .unwrap_or(false);
         wef::bounce_dock(if critical {
@@ -93,7 +93,7 @@ fn hello_main() {
       .bind("setDockVisible", |call| {
         let visible = call
           .args
-          .get(0)
+          .first()
           .and_then(|v| v.as_bool())
           .unwrap_or(true);
         wef::set_dock_visible(visible);

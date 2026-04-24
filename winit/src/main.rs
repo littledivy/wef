@@ -133,7 +133,7 @@ impl App {
           Window::default_attributes(),
         )
       })
-      .unwrap_or_else(|| Window::default_attributes());
+      .unwrap_or_else(Window::default_attributes);
 
     let window = event_loop
       .create_window(attrs)
