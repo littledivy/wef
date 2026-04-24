@@ -1,8 +1,8 @@
 [package]
-name = "wef"
+name = "just-wef"
 version = "0.1.0"
 edition = "2021"
-description = "Web embedded framework"
+description = "Just a Web embedded framework"
 license = "MIT"
 
 [lib]
