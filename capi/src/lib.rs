@@ -1173,8 +1173,8 @@ pub enum DockBounceType {
   Critical,
 }
 
-fn dock_menu_handler(
-) -> &'static Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>> {
+fn dock_menu_handler() -> &'static Mutex<Option<Box<dyn Fn(&str) + Send + Sync>>>
+{
   DOCK_MENU_HANDLER.get_or_init(|| Mutex::new(None))
 }
 
@@ -1275,7 +1275,12 @@ pub fn clear_dock_menu() {
   let api = api();
   if let Some(f) = api.set_dock_menu {
     unsafe {
-      f(api.backend_data, std::ptr::null_mut(), None, std::ptr::null_mut());
+      f(
+        api.backend_data,
+        std::ptr::null_mut(),
+        None,
+        std::ptr::null_mut(),
+      );
     }
   }
 }
@@ -1310,7 +1315,11 @@ where
   let api = api();
   if let Some(f) = api.set_dock_reopen_handler {
     unsafe {
-      f(api.backend_data, Some(dock_reopen_callback), std::ptr::null_mut());
+      f(
+        api.backend_data,
+        Some(dock_reopen_callback),
+        std::ptr::null_mut(),
+      );
     }
   }
 }

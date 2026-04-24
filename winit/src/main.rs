@@ -115,7 +115,9 @@ impl App {
   }
 
   fn focused_window(&self) -> Option<(&Window, u32)> {
-    let id = self.focused_wef_id.or_else(|| self.windows.keys().next().copied())?;
+    let id = self
+      .focused_wef_id
+      .or_else(|| self.windows.keys().next().copied())?;
     self.windows.get(&id).map(|info| (&info.window, id))
   }
 

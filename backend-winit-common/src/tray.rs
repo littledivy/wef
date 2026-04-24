@@ -11,8 +11,10 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 
 use tray_icon::menu::Menu as TrayMenu;
-use tray_icon::{Icon, TrayIcon, TrayIconAttributes, TrayIconBuilder,
-                TrayIconEvent, TrayIconEventReceiver};
+use tray_icon::{
+  Icon, TrayIcon, TrayIconAttributes, TrayIconBuilder, TrayIconEvent,
+  TrayIconEventReceiver,
+};
 
 use crate::{ParsedMenuItem, WefMenuClickFn};
 
@@ -254,7 +256,10 @@ fn append_item_to_menu(menu: &TrayMenu, item: &ParsedMenuItem) {
   }
 }
 
-fn append_item_to_submenu(submenu: &tray_icon::menu::Submenu, item: &ParsedMenuItem) {
+fn append_item_to_submenu(
+  submenu: &tray_icon::menu::Submenu,
+  item: &ParsedMenuItem,
+) {
   use tray_icon::menu::{MenuItem, PredefinedMenuItem, Submenu};
   match item {
     ParsedMenuItem::Submenu {
@@ -335,7 +340,9 @@ fn apply_active_icon(tray_id: u32) {
     }
   };
   let Some(bytes) = png else { return };
-  let Some(icon) = decode_png(&bytes) else { return };
+  let Some(icon) = decode_png(&bytes) else {
+    return;
+  };
   let mut guard = trays();
   if let Some(entry) = guard.as_mut().and_then(|m| m.get_mut(&tray_id)) {
     let _ = entry.icon.set_icon(Some(icon));
@@ -388,13 +395,8 @@ fn is_dark_mode() -> bool {
     .collect();
   unsafe {
     let mut key: HKEY = std::ptr::null_mut();
-    if RegOpenKeyExW(
-      HKEY_CURRENT_USER,
-      subkey.as_ptr(),
-      0,
-      KEY_READ,
-      &mut key,
-    ) != 0
+    if RegOpenKeyExW(HKEY_CURRENT_USER, subkey.as_ptr(), 0, KEY_READ, &mut key)
+      != 0
     {
       return false;
     }
@@ -467,9 +469,7 @@ pub fn poll_tray_events() {
         }
         (tid, false)
       }
-      TrayIconEvent::DoubleClick {
-        ref id, button, ..
-      } => {
+      TrayIconEvent::DoubleClick { ref id, button, .. } => {
         if button != tray_icon::MouseButton::Left {
           continue;
         }

@@ -310,8 +310,7 @@ pub struct WefBackendApi {
       *mut c_void,               // callback_data
     ),
   >,
-  pub set_dock_badge:
-    Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
+  pub set_dock_badge: Option<unsafe extern "C" fn(*mut c_void, *const c_char)>,
   pub bounce_dock: Option<unsafe extern "C" fn(*mut c_void, c_int)>,
   pub set_dock_menu: Option<
     unsafe extern "C" fn(
@@ -2150,7 +2149,9 @@ macro_rules! define_common_backend_fns {
         None
       } else {
         Some(
-          ::std::ffi::CStr::from_ptr(badge).to_string_lossy().into_owned(),
+          ::std::ffi::CStr::from_ptr(badge)
+            .to_string_lossy()
+            .into_owned(),
         )
       };
       $crate::dock::queue_op($crate::dock::DockOp::SetBadge(text));
@@ -2374,7 +2375,10 @@ macro_rules! define_common_backend_fns {
       len: usize,
     ) {
       let png = $crate::tray::slice_to_vec(png_bytes, len);
-      $crate::tray::queue_op($crate::tray::TrayOp::SetIconDark { tray_id, png });
+      $crate::tray::queue_op($crate::tray::TrayOp::SetIconDark {
+        tray_id,
+        png,
+      });
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
         let _ = state.proxy().send_event(
           <$B as $crate::BackendAccess>::common_event(

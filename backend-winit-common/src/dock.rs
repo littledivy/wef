@@ -118,8 +118,9 @@ fn apply_title_prefix_badge(
   match text.as_deref() {
     Some(badge) if !badge.is_empty() => {
       let current = window.title();
-      let original =
-        originals.entry(window_id).or_insert_with(|| current.clone());
+      let original = originals
+        .entry(window_id)
+        .or_insert_with(|| current.clone());
       let new_title = format!("({}) {}", badge, original);
       window.set_title(&new_title);
     }
@@ -175,7 +176,8 @@ mod mac_menu {
   static DOCK_ITEM_IDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
   static DOCK_MENU_CALLBACK: Mutex<Option<(WefMenuClickFn, usize)>> =
     Mutex::new(None);
-  static DOCK_REOPEN: Mutex<Option<(WefDockReopenFn, usize)>> = Mutex::new(None);
+  static DOCK_REOPEN: Mutex<Option<(WefDockReopenFn, usize)>> =
+    Mutex::new(None);
 
   /// Runtime-add `applicationDockMenu:` and
   /// `applicationShouldHandleReopen:hasVisibleWindows:` to winit's
