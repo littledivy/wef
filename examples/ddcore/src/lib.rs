@@ -2,9 +2,9 @@ use deno_core::op2;
 use deno_core::v8;
 use deno_core::GarbageCollected;
 use deno_core::OpState;
+use just_wef::Window;
 use serde::Serialize;
 use sysinfo::{ProcessesToUpdate, System};
-use just_wef::Window;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
@@ -81,7 +81,8 @@ impl BrowserWindow {
 
   #[fast]
   fn execute_js(&self, #[string] script: &str) {
-    wef_window().execute_js::<fn(Result<just_wef::Value, just_wef::Value>)>(script, None);
+    wef_window()
+      .execute_js::<fn(Result<just_wef::Value, just_wef::Value>)>(script, None);
   }
 
   #[fast]
