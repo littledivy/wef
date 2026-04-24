@@ -1291,16 +1291,6 @@ void WebView2Backend::BounceDock(int type) {
 static std::mutex g_wv_badge_mutex;
 static std::map<uint32_t, std::wstring> g_wv_saved_titles;
 
-static std::wstring Utf8ToWide(const std::string& s) {
-  if (s.empty())
-    return std::wstring();
-  int len =
-      MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
-  std::wstring out(len, L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), out.data(), len);
-  return out;
-}
-
 void WebView2Backend::SetDockBadge(const char* badge_or_null) {
   std::string badge =
       (badge_or_null && *badge_or_null) ? std::string(badge_or_null) : "";
