@@ -802,14 +802,10 @@ pub unsafe extern "C" fn value_list_set(
     return false;
   }
   match wef_mut(list) {
-    SimpleValue::List(items) => {
-      if idx < items.len() {
-        wef_free(items[idx]);
-        items[idx] = val;
-        true
-      } else {
-        false
-      }
+    SimpleValue::List(items) if idx < items.len() => {
+      wef_free(items[idx]);
+      items[idx] = val;
+      true
     }
     _ => false,
   }
@@ -1053,7 +1049,7 @@ pub fn store_window_handles(window_id: u32, window: &Window) {
       }
       #[cfg(target_os = "linux")]
       RawWindowHandle::Wayland(handle) => {
-        handle_ptr = handle.surface.as_ptr() as *mut c_void;
+        handle_ptr = handle.surface.as_ptr();
         WINDOW_HANDLE_TYPE.store(WEF_WINDOW_HANDLE_WAYLAND, Ordering::Release);
       }
       _ => {}
@@ -1071,14 +1067,12 @@ pub fn store_window_handles(window_id: u32, window: &Window) {
       #[cfg(target_os = "linux")]
       RawDisplayHandle::Xlib(handle) => {
         if let Some(display) = handle.display {
-          DISPLAY_HANDLE
-            .store(display.as_ptr() as *mut c_void, Ordering::Release);
+          DISPLAY_HANDLE.store(display.as_ptr(), Ordering::Release);
         }
       }
       #[cfg(target_os = "linux")]
       RawDisplayHandle::Wayland(handle) => {
-        DISPLAY_HANDLE
-          .store(handle.display.as_ptr() as *mut c_void, Ordering::Release);
+        DISPLAY_HANDLE.store(handle.display.as_ptr(), Ordering::Release);
       }
       _ => {}
     }
