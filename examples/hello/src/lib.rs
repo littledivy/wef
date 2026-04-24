@@ -1,11 +1,11 @@
-use wef::{DockBounceType, MenuItem, TrayIcon, Value, Window};
+use just_wef::{DockBounceType, MenuItem, TrayIcon, Value, Window};
 
 const TRAY_PNG: &[u8] = include_bytes!("../tray.png");
 
 fn hello_main() {
   let rt = tokio::runtime::Runtime::new().unwrap();
   rt.block_on(async {
-    wef::on_dock_reopen(|has_visible| {
+    just_wef::on_dock_reopen(|has_visible| {
       println!("dock reopen fired; has_visible_windows = {}", has_visible);
     });
 
@@ -34,7 +34,7 @@ fn hello_main() {
         |id| {
           println!("tray menu clicked: {}", id);
           if id == "tray-quit" {
-            wef::quit();
+            just_wef::quit();
           }
         },
       )
@@ -74,7 +74,7 @@ fn hello_main() {
       })
       .bind("setDockBadge", |call| {
         let text = call.args.first().and_then(|v| v.as_string());
-        wef::set_dock_badge(text);
+        just_wef::set_dock_badge(text);
         call.resolve(Value::Null);
       })
       .bind("bounceDock", |call| {
@@ -83,7 +83,7 @@ fn hello_main() {
           .first()
           .and_then(|v| v.as_bool())
           .unwrap_or(false);
-        wef::bounce_dock(if critical {
+        just_wef::bounce_dock(if critical {
           DockBounceType::Critical
         } else {
           DockBounceType::Informational
@@ -96,7 +96,7 @@ fn hello_main() {
           .first()
           .and_then(|v| v.as_bool())
           .unwrap_or(true);
-        wef::set_dock_visible(visible);
+        just_wef::set_dock_visible(visible);
         call.resolve(Value::Null);
       })
       .bind("setDockMenu", |call| {
@@ -115,7 +115,7 @@ fn hello_main() {
             enabled: true,
           },
         ];
-        wef::set_dock_menu(&items, |id| {
+        just_wef::set_dock_menu(&items, |id| {
           println!("dock menu clicked: {}", id);
         });
         call.resolve(Value::Null);
@@ -213,8 +213,8 @@ fn hello_main() {
 </html>"#,
       );
 
-    wef::run().await;
+    just_wef::run().await;
   });
 }
 
-wef::main!(hello_main);
+just_wef::main!(hello_main);

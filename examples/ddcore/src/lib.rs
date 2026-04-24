@@ -4,7 +4,7 @@ use deno_core::GarbageCollected;
 use deno_core::OpState;
 use serde::Serialize;
 use sysinfo::{ProcessesToUpdate, System};
-use wef::Window;
+use just_wef::Window;
 
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::OnceLock;
@@ -81,12 +81,12 @@ impl BrowserWindow {
 
   #[fast]
   fn execute_js(&self, #[string] script: &str) {
-    wef_window().execute_js::<fn(Result<wef::Value, wef::Value>)>(script, None);
+    wef_window().execute_js::<fn(Result<just_wef::Value, just_wef::Value>)>(script, None);
   }
 
   #[fast]
   fn quit(&self) {
-    wef::quit();
+    just_wef::quit();
   }
 
   fn bind(
@@ -123,9 +123,9 @@ fn register_wef_binding(name: &str, callback: v8::Global<v8::Function>) {
     };
 
     match result {
-      Some(json) => call.resolve(wef::Value::String(json)),
+      Some(json) => call.resolve(just_wef::Value::String(json)),
       None => {
-        call.reject(wef::Value::String("Handler call failed".to_string()))
+        call.reject(just_wef::Value::String("Handler call failed".to_string()))
       }
     }
   });
@@ -257,7 +257,7 @@ deno_core::extension!(
   },
 );
 
-wef::main!(|| {
+just_wef::main!(|| {
   let rt = tokio::runtime::Runtime::new().unwrap();
   rt.block_on(async {
     let mut runtime = deno_core::JsRuntime::new(deno_core::RuntimeOptions {
@@ -275,6 +275,6 @@ wef::main!(|| {
       .await
       .ok();
 
-    wef::run().await;
+    just_wef::run().await;
   });
 });

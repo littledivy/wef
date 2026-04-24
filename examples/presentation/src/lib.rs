@@ -1,4 +1,4 @@
-use wef::Window;
+use just_wef::Window;
 
 fn presentation_main() {
   let mut args = std::env::args().skip(1);
@@ -43,8 +43,8 @@ fn presentation_main() {
       .title("WEF - Presentation")
       .load(&url);
 
-    wef::run().await;
+    just_wef::run().await;
   });
 }
 
-wef::main!(presentation_main);
+just_wef::main!(presentation_main);
