@@ -1050,8 +1050,7 @@ void WKWebViewBackend::SetTitle(uint32_t window_id, const std::string& title) {
   });
 }
 
-void WKWebViewBackend::ExecuteJs(uint32_t window_id,
-                                 const std::string& script,
+void WKWebViewBackend::ExecuteJs(uint32_t window_id, const std::string& script,
                                  wef_js_result_fn callback,
                                  void* callback_data) {
   std::string scriptCopy = script;
@@ -1060,12 +1059,14 @@ void WKWebViewBackend::ExecuteJs(uint32_t window_id,
       std::lock_guard<std::mutex> lock(windows_mutex_);
       auto* state = GetWindow(window_id);
       if (!state) {
-        if (callback) callback(nullptr, nullptr, callback_data);
+        if (callback)
+          callback(nullptr, nullptr, callback_data);
         return;
       }
       if (!callback) {
         [state->webview
-            evaluateJavaScript:[NSString stringWithUTF8String:scriptCopy.c_str()]
+            evaluateJavaScript:[NSString
+                                   stringWithUTF8String:scriptCopy.c_str()]
              completionHandler:nil];
         return;
       }
@@ -1086,12 +1087,16 @@ void WKWebViewBackend::ExecuteJs(uint32_t window_id,
              // Convert the result to JSON, then parse it back into a wef::Value
              NSError* jsonError = nil;
              NSData* jsonData = nil;
-             if ([NSJSONSerialization isValidJSONObject:@[result]]) {
+             if ([NSJSONSerialization isValidJSONObject:@[ result ]]) {
                // Wrap in array to handle primitives
-               jsonData = [NSJSONSerialization dataWithJSONObject:@[result] options:0 error:&jsonError];
+               jsonData = [NSJSONSerialization dataWithJSONObject:@[ result ]
+                                                          options:0
+                                                            error:&jsonError];
              }
              if (jsonData) {
-               NSString* jsonStr = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+               NSString* jsonStr =
+                   [[NSString alloc] initWithData:jsonData
+                                         encoding:NSUTF8StringEncoding];
                // Parse the wrapped array, extract first element
                auto parsed = json::ParseJson([jsonStr UTF8String]);
                if (parsed && parsed->IsList() && !parsed->GetList().empty()) {
@@ -1104,11 +1109,13 @@ void WKWebViewBackend::ExecuteJs(uint32_t window_id,
                // Handle numbers that aren't valid JSON objects on their own
                NSNumber* num = (NSNumber*)result;
                const char* objcType = [num objCType];
-               if (strcmp(objcType, @encode(BOOL)) == 0 || strcmp(objcType, @encode(char)) == 0) {
+               if (strcmp(objcType, @encode(BOOL)) == 0 ||
+                   strcmp(objcType, @encode(char)) == 0) {
                  auto val = wef::Value::Bool([num boolValue]);
                  wef_value wef(val);
                  callback(&wef, nullptr, callback_data);
-               } else if (strcmp(objcType, @encode(int)) == 0 || strcmp(objcType, @encode(long)) == 0 ||
+               } else if (strcmp(objcType, @encode(int)) == 0 ||
+                          strcmp(objcType, @encode(long)) == 0 ||
                           strcmp(objcType, @encode(long long)) == 0) {
                  auto val = wef::Value::Int([num intValue]);
                  wef_value wef(val);
@@ -1640,10 +1647,9 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val,
       }
     }
 
-    NSMenuItem* nsItem =
-        [[NSMenuItem alloc] initWithTitle:label
-                                   action:action
-                            keyEquivalent:keyEquiv];
+    NSMenuItem* nsItem = [[NSMenuItem alloc] initWithTitle:label
+                                                    action:action
+                                             keyEquivalent:keyEquiv];
     [nsItem setKeyEquivalentModifierMask:modMask];
     [nsItem setTarget:target];
 
@@ -1679,9 +1685,9 @@ void WKWebViewBackend::SetApplicationMenu(uint32_t window_id,
   g_webview_menu_click_data = on_click_data;
 
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menubar = BuildMenuFromValue(menu_template, api,
-                                         [WefMenuTarget shared],
-                                         @selector(menuItemClicked:));
+    NSMenu* menubar =
+        BuildMenuFromValue(menu_template, api, [WefMenuTarget shared],
+                           @selector(menuItemClicked:));
     if (menubar) {
       // Store the menu for this window
       {
@@ -1710,9 +1716,9 @@ void WKWebViewBackend::ShowContextMenu(uint32_t window_id, int x, int y,
   g_webview_menu_click_data = on_click_data;
 
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api,
-                                      [WefMenuTarget shared],
-                                      @selector(menuItemClicked:));
+    NSMenu* menu =
+        BuildMenuFromValue(menu_template, api, [WefMenuTarget shared],
+                           @selector(menuItemClicked:));
     if (!menu)
       return;
 
@@ -1866,9 +1872,9 @@ void WKWebViewBackend::SetDockMenu(wef_value_t* menu_template,
   g_wv_dock_click_fn = on_click;
   g_wv_dock_click_data = on_click_data;
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api,
-                                      [WefDockMenuTarget shared],
-                                      @selector(dockMenuItemClicked:));
+    NSMenu* menu =
+        BuildMenuFromValue(menu_template, api, [WefDockMenuTarget shared],
+                           @selector(dockMenuItemClicked:));
     g_wv_dock_menu = menu;
   });
 }
@@ -1912,31 +1918,34 @@ std::atomic<uint32_t> g_wv_next_tray_id{1};
 bool WvSystemIsDarkMode() {
   if (@available(macOS 10.14, *)) {
     NSAppearance* appearance = [NSApp effectiveAppearance];
-    NSAppearanceName match = [appearance
-        bestMatchFromAppearancesWithNames:@[
-          NSAppearanceNameAqua, NSAppearanceNameDarkAqua
-        ]];
+    NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[
+      NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+    ]];
     return [match isEqualToString:NSAppearanceNameDarkAqua];
   }
   return false;
 }
 
 NSImage* WvImageFromPng(const void* bytes, size_t len) {
-  if (!bytes || len == 0) return nil;
+  if (!bytes || len == 0)
+    return nil;
   NSData* data = [NSData dataWithBytes:bytes length:len];
   NSImage* image = [[NSImage alloc] initWithData:data];
-  if (!image) return nil;
+  if (!image)
+    return nil;
   [image setSize:NSMakeSize(18, 18)];
   [image setTemplate:YES];
   return image;
 }
 
 void WvApplyActiveIcon(WvTrayEntry& entry) {
-  if (!entry.item) return;
+  if (!entry.item)
+    return;
   bool dark = WvSystemIsDarkMode();
   NSImage* chosen =
       (dark && entry.dark_image) ? entry.dark_image : entry.light_image;
-  if (chosen) [[entry.item button] setImage:chosen];
+  if (chosen)
+    [[entry.item button] setImage:chosen];
 }
 
 void WvEnsureAppearanceObserver() {
@@ -2063,7 +2072,7 @@ void WKWebViewBackend::DestroyTrayIcon(uint32_t tray_id) {
 }
 
 void WKWebViewBackend::SetTrayIcon(uint32_t tray_id, const void* png_bytes,
-                                    size_t len) {
+                                   size_t len) {
   if (!png_bytes || len == 0)
     return;
   NSData* data = [NSData dataWithBytes:png_bytes length:len];
@@ -2126,9 +2135,9 @@ void WKWebViewBackend::SetTrayTooltip(uint32_t tray_id,
 }
 
 void WKWebViewBackend::SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
-                                    const wef_backend_api_t* api,
-                                    wef_menu_click_fn on_click,
-                                    void* on_click_data) {
+                                   const wef_backend_api_t* api,
+                                   wef_menu_click_fn on_click,
+                                   void* on_click_data) {
   if (!menu_template) {
     dispatch_async(dispatch_get_main_queue(), ^{
       auto& map = WvTrayMap();
@@ -2142,9 +2151,9 @@ void WKWebViewBackend::SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
     return;
   }
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api,
-                                      [WefWvTrayTarget shared],
-                                      @selector(trayMenuItemClicked:));
+    NSMenu* menu =
+        BuildMenuFromValue(menu_template, api, [WefWvTrayTarget shared],
+                           @selector(trayMenuItemClicked:));
     if (!menu)
       return;
     TagWvTrayMenuItems(menu, tray_id);
@@ -2159,8 +2168,8 @@ void WKWebViewBackend::SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
 }
 
 void WKWebViewBackend::SetTrayClickHandler(uint32_t tray_id,
-                                            wef_tray_click_fn handler,
-                                            void* user_data) {
+                                           wef_tray_click_fn handler,
+                                           void* user_data) {
   dispatch_async(dispatch_get_main_queue(), ^{
     auto& map = WvTrayMap();
     auto it = map.find(tray_id);

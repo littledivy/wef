@@ -88,7 +88,8 @@ extern void* g_wv_dock_reopen_data;
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)sender
                     hasVisibleWindows:(BOOL)hasVisibleWindows {
   if (g_wv_dock_reopen_fn) {
-    g_wv_dock_reopen_fn(g_wv_dock_reopen_data, hasVisibleWindows ? true : false);
+    g_wv_dock_reopen_fn(g_wv_dock_reopen_data,
+                        hasVisibleWindows ? true : false);
   }
   // Always swallow the default "show last hidden window" behavior — the
   // embedder's callback decides what to do.

@@ -71,12 +71,9 @@ void DestroyGtkMenuCallbackData(gpointer user_data, GClosure* /*closure*/) {
   delete static_cast<GtkMenuCallbackData*>(user_data);
 }
 
-GtkWidget* BuildGtkMenuFromValue(wef_value_t* val,
-                                 const wef_backend_api_t* api,
-                                 uint32_t window_id,
-                                 wef_menu_click_fn on_click,
-                                 void* on_click_data,
-                                 bool is_menu_bar) {
+GtkWidget* BuildGtkMenuFromValue(wef_value_t* val, const wef_backend_api_t* api,
+                                 uint32_t window_id, wef_menu_click_fn on_click,
+                                 void* on_click_data, bool is_menu_bar) {
   if (!val || !api->value_is_list(val))
     return nullptr;
 
@@ -138,8 +135,8 @@ GtkWidget* BuildGtkMenuFromValue(wef_value_t* val,
 
         if (!label.empty()) {
           GtkWidget* item = gtk_menu_item_new_with_label(label.c_str());
-          auto* cb_data = new GtkMenuCallbackData{on_click, on_click_data,
-                                                  window_id, role};
+          auto* cb_data =
+              new GtkMenuCallbackData{on_click, on_click_data, window_id, role};
           g_signal_connect_data(item, "activate",
                                 G_CALLBACK(OnGtkMenuItemActivate), cb_data,
                                 DestroyGtkMenuCallbackData, (GConnectFlags)0);
@@ -162,9 +159,8 @@ GtkWidget* BuildGtkMenuFromValue(wef_value_t* val,
     wef_value_t* submenuVal = api->value_dict_get(itemVal, "submenu");
     if (submenuVal && api->value_is_list(submenuVal)) {
       GtkWidget* parent = gtk_menu_item_new_with_label(label.c_str());
-      GtkWidget* submenu = BuildGtkMenuFromValue(submenuVal, api, window_id,
-                                                 on_click, on_click_data,
-                                                 false);
+      GtkWidget* submenu = BuildGtkMenuFromValue(
+          submenuVal, api, window_id, on_click, on_click_data, false);
       if (submenu)
         gtk_menu_item_set_submenu(GTK_MENU_ITEM(parent), submenu);
       gtk_menu_shell_append(GTK_MENU_SHELL(menu), parent);
@@ -183,9 +179,8 @@ GtkWidget* BuildGtkMenuFromValue(wef_value_t* val,
     }
 
     GtkWidget* gtkItem = gtk_menu_item_new_with_label(label.c_str());
-    auto* cb_data =
-        new GtkMenuCallbackData{on_click, on_click_data, window_id,
-                                itemId.empty() ? label : itemId};
+    auto* cb_data = new GtkMenuCallbackData{on_click, on_click_data, window_id,
+                                            itemId.empty() ? label : itemId};
     g_signal_connect_data(gtkItem, "activate",
                           G_CALLBACK(OnGtkMenuItemActivate), cb_data,
                           DestroyGtkMenuCallbackData, (GConnectFlags)0);
@@ -208,9 +203,8 @@ GtkWidget* BuildGtkMenuFromValue(wef_value_t* val,
 // Context menu
 // ---------------------------------------------------------------------------
 
-void Backend_ShowContextMenu_Linux(void* data, uint32_t window_id,
-                                   int /*x*/, int /*y*/,
-                                   wef_value_t* menu_template,
+void Backend_ShowContextMenu_Linux(void* data, uint32_t window_id, int /*x*/,
+                                   int /*y*/, wef_value_t* menu_template,
                                    wef_menu_click_fn on_click,
                                    void* on_click_data) {
   if (!menu_template)
@@ -218,24 +212,26 @@ void Backend_ShowContextMenu_Linux(void* data, uint32_t window_id,
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   const wef_backend_api_t* api = &loader->GetBackendApi();
 
-  CefPostTask(TID_UI, base::BindOnce(
-    [](uint32_t wid, wef_value_t* tmpl, const wef_backend_api_t* a,
-       wef_menu_click_fn cb, void* cb_data) {
-      EnsureGtkInit();
-      GtkWidget* menu =
-          BuildGtkMenuFromValue(tmpl, a, wid, cb, cb_data, false);
-      a->value_free(tmpl);
-      if (!menu)
-        return;
-      gtk_widget_show_all(menu);
-      // gtk_menu_popup_at_pointer uses the current X11 event to position the
-      // menu — in practice, the click that triggered show_context_menu is
-      // still fresh. (x,y) args from the WEF call are window-relative and
-      // would require a GdkWindow reference to honor; pointer-positioning is
-      // the robust fallback.
-      gtk_menu_popup_at_pointer(GTK_MENU(menu), nullptr);
-    },
-    window_id, menu_template, api, on_click, on_click_data));
+  CefPostTask(
+      TID_UI,
+      base::BindOnce(
+          [](uint32_t wid, wef_value_t* tmpl, const wef_backend_api_t* a,
+             wef_menu_click_fn cb, void* cb_data) {
+            EnsureGtkInit();
+            GtkWidget* menu =
+                BuildGtkMenuFromValue(tmpl, a, wid, cb, cb_data, false);
+            a->value_free(tmpl);
+            if (!menu)
+              return;
+            gtk_widget_show_all(menu);
+            // gtk_menu_popup_at_pointer uses the current X11 event to position
+            // the menu — in practice, the click that triggered
+            // show_context_menu is still fresh. (x,y) args from the WEF call
+            // are window-relative and would require a GdkWindow reference to
+            // honor; pointer-positioning is the robust fallback.
+            gtk_menu_popup_at_pointer(GTK_MENU(menu), nullptr);
+          },
+          window_id, menu_template, api, on_click, on_click_data));
 }
 
 // ---------------------------------------------------------------------------
@@ -353,9 +349,8 @@ GtkWidget* BuildLinuxTrayMenu(uint32_t tray_id, wef_value_t* val,
     }
     if (!item_id.empty()) {
       auto* ctx = new MenuActivateCtx{tray_id, item_id};
-      g_signal_connect_data(mi, "activate",
-                            G_CALLBACK(OnLinuxTrayMenuActivate), ctx,
-                            DestroyMenuActivateCtx, (GConnectFlags)0);
+      g_signal_connect_data(mi, "activate", G_CALLBACK(OnLinuxTrayMenuActivate),
+                            ctx, DestroyMenuActivateCtx, (GConnectFlags)0);
     }
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), mi);
   }
@@ -369,41 +364,49 @@ uint32_t Backend_CreateTrayIcon_Linux(void* /*data*/) {
   uint32_t tray_id =
       g_next_tray_id_linux.fetch_add(1, std::memory_order_relaxed);
   // Run on the UI thread so GTK calls stay thread-affine.
-  CefPostTask(TID_UI, base::BindOnce([](uint32_t tid) {
-    EnsureGtkInit();
-    std::string idstr = "wef-tray-" + std::to_string(tid);
-    AppIndicator* ind = app_indicator_new(
-        idstr.c_str(), "", APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
-    if (!ind)
-      return;
-    app_indicator_set_status(ind, APP_INDICATOR_STATUS_ACTIVE);
-    // AppIndicator requires a non-null menu to be visible in most DEs.
-    GtkWidget* placeholder = gtk_menu_new();
-    gtk_widget_show_all(placeholder);
-    app_indicator_set_menu(ind, GTK_MENU(placeholder));
+  CefPostTask(TID_UI,
+              base::BindOnce(
+                  [](uint32_t tid) {
+                    EnsureGtkInit();
+                    std::string idstr = "wef-tray-" + std::to_string(tid);
+                    AppIndicator* ind = app_indicator_new(
+                        idstr.c_str(), "",
+                        APP_INDICATOR_CATEGORY_APPLICATION_STATUS);
+                    if (!ind)
+                      return;
+                    app_indicator_set_status(ind, APP_INDICATOR_STATUS_ACTIVE);
+                    // AppIndicator requires a non-null menu to be visible in
+                    // most DEs.
+                    GtkWidget* placeholder = gtk_menu_new();
+                    gtk_widget_show_all(placeholder);
+                    app_indicator_set_menu(ind, GTK_MENU(placeholder));
 
-    LinuxTrayEntry entry{};
-    entry.indicator = ind;
-    entry.menu = placeholder;
-    std::lock_guard<std::mutex> lock(LinuxTrayMutex());
-    LinuxTrayMap()[tid] = std::move(entry);
-  }, tray_id));
+                    LinuxTrayEntry entry{};
+                    entry.indicator = ind;
+                    entry.menu = placeholder;
+                    std::lock_guard<std::mutex> lock(LinuxTrayMutex());
+                    LinuxTrayMap()[tid] = std::move(entry);
+                  },
+                  tray_id));
   return tray_id;
 }
 
 void Backend_DestroyTrayIcon_Linux(void* /*data*/, uint32_t tray_id) {
-  CefPostTask(TID_UI, base::BindOnce([](uint32_t tid) {
-    std::lock_guard<std::mutex> lock(LinuxTrayMutex());
-    auto it = LinuxTrayMap().find(tid);
-    if (it == LinuxTrayMap().end())
-      return;
-    if (it->second.indicator) {
-      app_indicator_set_status(it->second.indicator,
-                               APP_INDICATOR_STATUS_PASSIVE);
-      g_object_unref(it->second.indicator);
-    }
-    LinuxTrayMap().erase(it);
-  }, tray_id));
+  CefPostTask(TID_UI, base::BindOnce(
+                          [](uint32_t tid) {
+                            std::lock_guard<std::mutex> lock(LinuxTrayMutex());
+                            auto it = LinuxTrayMap().find(tid);
+                            if (it == LinuxTrayMap().end())
+                              return;
+                            if (it->second.indicator) {
+                              app_indicator_set_status(
+                                  it->second.indicator,
+                                  APP_INDICATOR_STATUS_PASSIVE);
+                              g_object_unref(it->second.indicator);
+                            }
+                            LinuxTrayMap().erase(it);
+                          },
+                          tray_id));
 }
 
 // AppIndicator on most DEs reads icons by name from the icon theme, not
@@ -442,35 +445,37 @@ void Backend_SetTrayMenu_Linux(void* data, uint32_t tray_id,
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   const wef_backend_api_t* api = &loader->GetBackendApi();
 
-  CefPostTask(TID_UI, base::BindOnce(
-    [](uint32_t tid, wef_value_t* tmpl, const wef_backend_api_t* a,
-       wef_menu_click_fn cb, void* cb_data) {
-      EnsureGtkInit();
-      GtkWidget* new_menu =
-          tmpl ? BuildLinuxTrayMenu(tid, tmpl, a) : nullptr;
-      if (tmpl)
-        a->value_free(tmpl);
+  CefPostTask(
+      TID_UI,
+      base::BindOnce(
+          [](uint32_t tid, wef_value_t* tmpl, const wef_backend_api_t* a,
+             wef_menu_click_fn cb, void* cb_data) {
+            EnsureGtkInit();
+            GtkWidget* new_menu =
+                tmpl ? BuildLinuxTrayMenu(tid, tmpl, a) : nullptr;
+            if (tmpl)
+              a->value_free(tmpl);
 
-      std::lock_guard<std::mutex> lock(LinuxTrayMutex());
-      auto it = LinuxTrayMap().find(tid);
-      if (it == LinuxTrayMap().end()) {
-        if (new_menu)
-          gtk_widget_destroy(new_menu);
-        return;
-      }
-      if (new_menu) {
-        app_indicator_set_menu(it->second.indicator, GTK_MENU(new_menu));
-        it->second.menu = new_menu;
-      } else {
-        GtkWidget* empty = gtk_menu_new();
-        gtk_widget_show_all(empty);
-        app_indicator_set_menu(it->second.indicator, GTK_MENU(empty));
-        it->second.menu = empty;
-      }
-      it->second.menu_click_fn = cb;
-      it->second.menu_click_data = cb_data;
-    },
-    tray_id, menu_template, api, on_click, on_click_data));
+            std::lock_guard<std::mutex> lock(LinuxTrayMutex());
+            auto it = LinuxTrayMap().find(tid);
+            if (it == LinuxTrayMap().end()) {
+              if (new_menu)
+                gtk_widget_destroy(new_menu);
+              return;
+            }
+            if (new_menu) {
+              app_indicator_set_menu(it->second.indicator, GTK_MENU(new_menu));
+              it->second.menu = new_menu;
+            } else {
+              GtkWidget* empty = gtk_menu_new();
+              gtk_widget_show_all(empty);
+              app_indicator_set_menu(it->second.indicator, GTK_MENU(empty));
+              it->second.menu = empty;
+            }
+            it->second.menu_click_fn = cb;
+            it->second.menu_click_data = cb_data;
+          },
+          tray_id, menu_template, api, on_click, on_click_data));
 }
 
 void Backend_SetTrayClickHandler_Linux(void* /*data*/, uint32_t /*tray_id*/,
@@ -488,8 +493,7 @@ void Backend_SetTrayDoubleClickHandler_Linux(void* /*data*/,
 }
 
 void Backend_SetTrayIconDark_Linux(void* /*data*/, uint32_t /*tray_id*/,
-                                   const void* /*png_bytes*/,
-                                   size_t /*len*/) {
+                                   const void* /*png_bytes*/, size_t /*len*/) {
   // StatusNotifier handles light/dark theming via the host's icon rendering;
   // there's no separate dark-variant API. No-op.
 }
@@ -521,7 +525,6 @@ void Backend_SetTrayDoubleClickHandler_Linux(void* /*data*/,
                                              wef_tray_click_fn /*handler*/,
                                              void* /*user_data*/) {}
 void Backend_SetTrayIconDark_Linux(void* /*data*/, uint32_t /*tray_id*/,
-                                   const void* /*png_bytes*/,
-                                   size_t /*len*/) {}
+                                   const void* /*png_bytes*/, size_t /*len*/) {}
 
 #endif  // WEF_HAVE_APPINDICATOR

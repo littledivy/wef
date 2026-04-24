@@ -64,8 +64,8 @@ underlying engine. This is an interception model, not a consumption model.
 
 ### Winit backend code sharing (`backend-winit-common`)
 
-The `winit/` backend uses winit for windowing; the Servo backend on the
-`servo` branch shares this same code. Shared code lives in
+The `winit/` backend uses winit for windowing; the Servo backend on the `servo`
+branch shares this same code. Shared code lives in
 `backend-winit-common/src/lib.rs`:
 
 - **`BackendAccess` trait**: each backend implements this to provide access to

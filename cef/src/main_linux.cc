@@ -92,8 +92,7 @@ static int ComputeClickCount(Time time, int button, double x, double y) {
   bool close = (dx * dx + dy * dy) <=
                (WEF_MULTI_CLICK_DISTANCE_PX * WEF_MULTI_CLICK_DISTANCE_PX);
   if (button == g_click_tracker.last_button &&
-      time - g_click_tracker.last_time <=
-          (Time)WEF_MULTI_CLICK_TIME_MS &&
+      time - g_click_tracker.last_time <= (Time)WEF_MULTI_CLICK_TIME_MS &&
       close) {
     g_click_tracker.count += 1;
   } else {
@@ -213,8 +212,7 @@ static void ProcessXI2Event(XEvent* xev) {
                                        WEF_WHEEL_DELTA_LINE);
           } else {
             int wef_button = XI2ButtonToWef(detail);
-            int click_count =
-                ComputeClickCount(dev->time, wef_button, x, y);
+            int click_count = ComputeClickCount(dev->time, wef_button, x, y);
             loader->DispatchMouseClickEvent(wid, WEF_MOUSE_PRESSED, wef_button,
                                             x, y, modifiers, click_count);
             // CEF holds an XI2 grab during press/release on its own X
@@ -273,10 +271,9 @@ static void ProcessXI2Event(XEvent* xev) {
     if (detail < 4 || detail > 7) {
       if (g_hover_wid != 0) {
         int wef_button = XI2ButtonToWef(detail);
-        loader->DispatchMouseClickEvent(g_hover_wid, WEF_MOUSE_RELEASED,
-                                        wef_button, g_hover_x, g_hover_y,
-                                        g_hover_modifiers,
-                                        g_click_tracker.count);
+        loader->DispatchMouseClickEvent(
+            g_hover_wid, WEF_MOUSE_RELEASED, wef_button, g_hover_x, g_hover_y,
+            g_hover_modifiers, g_click_tracker.count);
       }
     }
   } else if (evtype == XI_FocusIn || evtype == XI_FocusOut) {

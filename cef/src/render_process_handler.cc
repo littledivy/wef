@@ -227,7 +227,8 @@ bool WefRenderProcessHandler::OnProcessMessageReceived(
     std::string script = args->GetString(1).ToString();
 
     CefRefPtr<CefV8Context> context = frame->GetV8Context();
-    CefRefPtr<CefProcessMessage> reply = CefProcessMessage::Create("wef_eval_result");
+    CefRefPtr<CefProcessMessage> reply =
+        CefProcessMessage::Create("wef_eval_result");
     CefRefPtr<CefListValue> replyArgs = reply->GetArgumentList();
     replyArgs->SetInt(0, static_cast<int>(eval_id));
 

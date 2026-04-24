@@ -601,10 +601,9 @@ static NSMenu* BuildMenuFromValue(wef_value_t* val,
         api->value_free_string(accelStr);
       }
     }
-    NSMenuItem* nsItem =
-        [[NSMenuItem alloc] initWithTitle:label
-                                   action:action
-                            keyEquivalent:keyEquiv];
+    NSMenuItem* nsItem = [[NSMenuItem alloc] initWithTitle:label
+                                                    action:action
+                                             keyEquivalent:keyEquiv];
     [nsItem setKeyEquivalentModifierMask:modMask];
     [nsItem setTarget:target];
     wef_value_t* idVal = api->value_dict_get(itemVal, "id");
@@ -645,9 +644,9 @@ void Backend_ShowContextMenu_Mac(void* data, uint32_t window_id, int x, int y,
 
   void* handle = browser->GetHost()->GetWindowHandle();
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api,
-                                      [WefMenuTarget shared],
-                                      @selector(menuItemClicked:));
+    NSMenu* menu =
+        BuildMenuFromValue(menu_template, api, [WefMenuTarget shared],
+                           @selector(menuItemClicked:));
     if (!menu)
       return;
 
@@ -675,9 +674,9 @@ void Backend_SetApplicationMenu_Mac(void* data, uint32_t window_id,
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   const wef_backend_api_t* api = &loader->GetBackendApi();
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menubar = BuildMenuFromValue(menu_template, api,
-                                         [WefMenuTarget shared],
-                                         @selector(menuItemClicked:));
+    NSMenu* menubar =
+        BuildMenuFromValue(menu_template, api, [WefMenuTarget shared],
+                           @selector(menuItemClicked:));
     if (menubar) {
       // Store per-window
       {
@@ -763,17 +762,17 @@ void Backend_SetDockMenu_Mac(void* data, wef_value_t* menu_template,
   g_dock_click_fn = on_click;
   g_dock_click_data = on_click_data;
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api,
-                                      [WefDockMenuTarget shared],
-                                      @selector(dockMenuItemClicked:));
+    NSMenu* menu =
+        BuildMenuFromValue(menu_template, api, [WefDockMenuTarget shared],
+                           @selector(dockMenuItemClicked:));
     g_dock_menu = menu;
   });
 }
 
 void Backend_SetDockVisible_Mac(void* /*data*/, bool visible) {
-  NSApplicationActivationPolicy policy = visible
-                                             ? NSApplicationActivationPolicyRegular
-                                             : NSApplicationActivationPolicyAccessory;
+  NSApplicationActivationPolicy policy =
+      visible ? NSApplicationActivationPolicyRegular
+              : NSApplicationActivationPolicyAccessory;
   dispatch_async(dispatch_get_main_queue(), ^{
     [NSApp setActivationPolicy:policy];
   });
@@ -923,10 +922,9 @@ void Backend_DestroyTrayIcon_Mac(void* /*data*/, uint32_t tray_id) {
 static bool SystemIsDarkMode() {
   if (@available(macOS 10.14, *)) {
     NSAppearance* appearance = [NSApp effectiveAppearance];
-    NSAppearanceName match = [appearance
-        bestMatchFromAppearancesWithNames:@[
-          NSAppearanceNameAqua, NSAppearanceNameDarkAqua
-        ]];
+    NSAppearanceName match = [appearance bestMatchFromAppearancesWithNames:@[
+      NSAppearanceNameAqua, NSAppearanceNameDarkAqua
+    ]];
     return [match isEqualToString:NSAppearanceNameDarkAqua];
   }
   return false;
@@ -1043,9 +1041,9 @@ void Backend_SetTrayMenu_Mac(void* data, uint32_t tray_id,
     return;
   }
   dispatch_async(dispatch_get_main_queue(), ^{
-    NSMenu* menu = BuildMenuFromValue(menu_template, api,
-                                      [WefTrayTarget shared],
-                                      @selector(trayMenuItemClicked:));
+    NSMenu* menu =
+        BuildMenuFromValue(menu_template, api, [WefTrayTarget shared],
+                           @selector(trayMenuItemClicked:));
     if (!menu)
       return;
     TagTrayMenuItems(menu, tray_id);

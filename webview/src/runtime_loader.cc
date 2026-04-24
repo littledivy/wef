@@ -625,8 +625,7 @@ static void Backend_SetDockVisible(void* data, bool visible) {
   }
 }
 
-static void Backend_SetDockReopenHandler(void* data,
-                                         wef_dock_reopen_fn handler,
+static void Backend_SetDockReopenHandler(void* data, wef_dock_reopen_fn handler,
                                          void* user_data) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
   if (WefBackend* backend = loader->GetBackend()) {

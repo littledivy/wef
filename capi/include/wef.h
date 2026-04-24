@@ -413,8 +413,8 @@ struct wef_backend_api {
   // item; the window_id argument of the callback is 0 (tray menus are
   // app-scoped, not window-scoped). Pass NULL menu_template to clear.
   void (*set_tray_menu)(void* backend_data, uint32_t tray_id,
-                        wef_value_t* menu_template,
-                        wef_menu_click_fn on_click, void* on_click_data);
+                        wef_value_t* menu_template, wef_menu_click_fn on_click,
+                        void* on_click_data);
 
   // Register a handler for left-click on the tray icon.
   void (*set_tray_click_handler)(void* backend_data, uint32_t tray_id,

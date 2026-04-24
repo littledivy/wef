@@ -879,7 +879,8 @@ void WebView2Backend::ExecuteJs(uint32_t window_id, const std::string& script,
   std::lock_guard<std::mutex> lock(windows_mutex_);
   auto* state = GetWindow(window_id);
   if (!state || !state->webview_ready || !state->webview) {
-    if (callback) callback(nullptr, nullptr, callback_data);
+    if (callback)
+      callback(nullptr, nullptr, callback_data);
     return;
   }
   if (!callback) {
@@ -888,7 +889,8 @@ void WebView2Backend::ExecuteJs(uint32_t window_id, const std::string& script,
     state->webview->ExecuteScript(
         wscript.c_str(),
         Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
-            [callback, callback_data](HRESULT hr, LPCWSTR resultJson) -> HRESULT {
+            [callback, callback_data](HRESULT hr,
+                                      LPCWSTR resultJson) -> HRESULT {
               if (FAILED(hr)) {
                 auto errVal = wef::Value::String("ExecuteScript failed");
                 wef_value errWef(errVal);
@@ -906,7 +908,8 @@ void WebView2Backend::ExecuteJs(uint32_t window_id, const std::string& script,
               wef_value wef(val);
               callback(&wef, nullptr, callback_data);
               return S_OK;
-            }).Get());
+            })
+            .Get());
   }
 }
 
@@ -1287,7 +1290,8 @@ static std::map<uint32_t, std::wstring> g_wv_saved_titles;
 static std::wstring Utf8ToWide(const std::string& s) {
   if (s.empty())
     return std::wstring();
-  int len = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+  int len =
+      MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
   std::wstring out(len, L'\0');
   MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), out.data(), len);
   return out;
@@ -1340,7 +1344,10 @@ struct WvWinTrayEntry {
   wef_tray_click_fn dblclick_fn;
   void* dblclick_data;
 };
-std::mutex& WvWinTrayMutex() { static std::mutex m; return m; }
+std::mutex& WvWinTrayMutex() {
+  static std::mutex m;
+  return m;
+}
 std::map<uint32_t, WvWinTrayEntry>& WvWinTrayMap() {
   static std::map<uint32_t, WvWinTrayEntry> m;
   return m;
@@ -1355,23 +1362,26 @@ bool WvWinIsDarkMode() {
   if (RegOpenKeyExW(HKEY_CURRENT_USER,
                     L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\"
                     L"Personalize",
-                    0, KEY_READ, &key) != 0) return false;
-  LONG rc =
-      RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, &kind, (LPBYTE)&data,
-                       &size);
+                    0, KEY_READ, &key) != 0)
+    return false;
+  LONG rc = RegQueryValueExW(key, L"AppsUseLightTheme", nullptr, &kind,
+                             (LPBYTE)&data, &size);
   RegCloseKey(key);
   return (rc == 0 && kind == REG_DWORD && data == 0);
 }
 
 void WvApplyActiveIcon(uint32_t tray_id) {
-  if (!g_wv_tray_hwnd) return;
+  if (!g_wv_tray_hwnd)
+    return;
   std::lock_guard<std::mutex> lock(WvWinTrayMutex());
   auto it = WvWinTrayMap().find(tray_id);
-  if (it == WvWinTrayMap().end()) return;
+  if (it == WvWinTrayMap().end())
+    return;
   HICON chosen = (WvWinIsDarkMode() && it->second.hicon_dark)
                      ? it->second.hicon_dark
                      : it->second.hicon_light;
-  if (!chosen) return;
+  if (!chosen)
+    return;
   NOTIFYICONDATAW nid = {};
   nid.cbSize = sizeof(nid);
   nid.hWnd = g_wv_tray_hwnd;
@@ -1385,9 +1395,11 @@ void WvReapplyAllIcons() {
   std::vector<uint32_t> ids;
   {
     std::lock_guard<std::mutex> lock(WvWinTrayMutex());
-    for (auto& [tid, e] : WvWinTrayMap()) ids.push_back(tid);
+    for (auto& [tid, e] : WvWinTrayMap())
+      ids.push_back(tid);
   }
-  for (uint32_t id : ids) WvApplyActiveIcon(id);
+  for (uint32_t id : ids)
+    WvApplyActiveIcon(id);
 }
 
 LRESULT CALLBACK WvTrayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1411,7 +1423,8 @@ LRESULT CALLBACK WvTrayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
           data = it->second.dblclick_data;
         }
       }
-      if (fn) fn(data, tray_id);
+      if (fn)
+        fn(data, tray_id);
       return 0;
     }
     if (event == WM_LBUTTONUP) {
@@ -1425,20 +1438,23 @@ LRESULT CALLBACK WvTrayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
           data = it->second.click_data;
         }
       }
-      if (fn) fn(data, tray_id);
+      if (fn)
+        fn(data, tray_id);
     } else if (event == WM_RBUTTONUP || event == WM_CONTEXTMENU) {
       HMENU menu = nullptr;
       {
         std::lock_guard<std::mutex> lock(WvWinTrayMutex());
         auto it = WvWinTrayMap().find(tray_id);
-        if (it != WvWinTrayMap().end()) menu = it->second.hmenu;
+        if (it != WvWinTrayMap().end())
+          menu = it->second.hmenu;
       }
       if (menu) {
-        POINT pt; GetCursorPos(&pt);
+        POINT pt;
+        GetCursorPos(&pt);
         SetForegroundWindow(hwnd);
-        UINT cmd = TrackPopupMenu(menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY, pt.x, pt.y, 0,
-            hwnd, nullptr);
+        UINT cmd =
+            TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY,
+                           pt.x, pt.y, 0, hwnd, nullptr);
         if (cmd) {
           wef_menu_click_fn fn = nullptr;
           void* data = nullptr;
@@ -1448,7 +1464,8 @@ LRESULT CALLBACK WvTrayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             auto it = WvWinTrayMap().find(tray_id);
             if (it != WvWinTrayMap().end()) {
               auto cit = it->second.cmd_to_id.find(cmd);
-              if (cit != it->second.cmd_to_id.end()) item_id = cit->second;
+              if (cit != it->second.cmd_to_id.end())
+                item_id = cit->second;
               fn = it->second.menu_click_fn;
               data = it->second.menu_click_data;
             }
@@ -1464,26 +1481,27 @@ LRESULT CALLBACK WvTrayWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 }
 
 HWND EnsureWvTrayWindow() {
-  if (g_wv_tray_hwnd) return g_wv_tray_hwnd;
+  if (g_wv_tray_hwnd)
+    return g_wv_tray_hwnd;
   WNDCLASSEXW wc = {};
   wc.cbSize = sizeof(wc);
   wc.lpfnWndProc = WvTrayWndProc;
   wc.hInstance = GetModuleHandleW(nullptr);
   wc.lpszClassName = L"WefWvTrayMessageWindow";
   RegisterClassExW(&wc);
-  g_wv_tray_hwnd = CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0,
-                                   HWND_MESSAGE, nullptr, wc.hInstance,
-                                   nullptr);
+  g_wv_tray_hwnd =
+      CreateWindowExW(0, wc.lpszClassName, L"", 0, 0, 0, 0, 0, HWND_MESSAGE,
+                      nullptr, wc.hInstance, nullptr);
   return g_wv_tray_hwnd;
 }
 
 HICON WvDecodePngToHicon(const void* bytes, size_t len, int desired) {
-  if (!bytes || len == 0) return nullptr;
+  if (!bytes || len == 0)
+    return nullptr;
   IWICImagingFactory* factory = nullptr;
   CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
   if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr,
-                              CLSCTX_INPROC_SERVER,
-                              IID_PPV_ARGS(&factory)))) {
+                              CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory)))) {
     return nullptr;
   }
   IWICStream* stream = nullptr;
@@ -1493,7 +1511,8 @@ HICON WvDecodePngToHicon(const void* bytes, size_t len, int desired) {
   factory->CreateDecoderFromStream(stream, nullptr,
                                    WICDecodeMetadataCacheOnLoad, &decoder);
   IWICBitmapFrameDecode* frame = nullptr;
-  if (decoder) decoder->GetFrame(0, &frame);
+  if (decoder)
+    decoder->GetFrame(0, &frame);
   IWICFormatConverter* conv = nullptr;
   factory->CreateFormatConverter(&conv);
   if (frame && conv)
@@ -1504,11 +1523,10 @@ HICON WvDecodePngToHicon(const void* bytes, size_t len, int desired) {
   factory->CreateBitmapScaler(&scaler);
   UINT w = desired, h = desired;
   if (conv)
-    scaler->Initialize(conv, w, h,
-                       WICBitmapInterpolationModeHighQualityCubic);
+    scaler->Initialize(conv, w, h, WICBitmapInterpolationModeHighQualityCubic);
   std::vector<BYTE> pixels(w * h * 4);
-  if (scaler) scaler->CopyPixels(nullptr, w * 4, (UINT)pixels.size(),
-                                 pixels.data());
+  if (scaler)
+    scaler->CopyPixels(nullptr, w * 4, (UINT)pixels.size(), pixels.data());
   HICON hicon = nullptr;
   if (scaler) {
     ICONINFO ii = {};
@@ -1526,33 +1544,44 @@ HICON WvDecodePngToHicon(const void* bytes, size_t len, int desired) {
     bi.bV5AlphaMask = 0xFF000000;
     HDC hdc = GetDC(nullptr);
     void* bits = nullptr;
-    ii.hbmColor = CreateDIBSection(hdc, (BITMAPINFO*)&bi, DIB_RGB_COLORS,
-                                   &bits, nullptr, 0);
+    ii.hbmColor = CreateDIBSection(hdc, (BITMAPINFO*)&bi, DIB_RGB_COLORS, &bits,
+                                   nullptr, 0);
     ReleaseDC(nullptr, hdc);
     if (ii.hbmColor && bits)
       memcpy(bits, pixels.data(), pixels.size());
     ii.hbmMask = CreateBitmap(w, h, 1, 1, nullptr);
-    if (ii.hbmColor && ii.hbmMask) hicon = CreateIconIndirect(&ii);
-    if (ii.hbmColor) DeleteObject(ii.hbmColor);
-    if (ii.hbmMask) DeleteObject(ii.hbmMask);
+    if (ii.hbmColor && ii.hbmMask)
+      hicon = CreateIconIndirect(&ii);
+    if (ii.hbmColor)
+      DeleteObject(ii.hbmColor);
+    if (ii.hbmMask)
+      DeleteObject(ii.hbmMask);
   }
-  if (scaler) scaler->Release();
-  if (conv) conv->Release();
-  if (frame) frame->Release();
-  if (decoder) decoder->Release();
-  if (stream) stream->Release();
-  if (factory) factory->Release();
+  if (scaler)
+    scaler->Release();
+  if (conv)
+    conv->Release();
+  if (frame)
+    frame->Release();
+  if (decoder)
+    decoder->Release();
+  if (stream)
+    stream->Release();
+  if (factory)
+    factory->Release();
   return hicon;
 }
 
 HMENU WvBuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api,
                            std::map<UINT, std::string>& cmd_to_id) {
-  if (!val || !api->value_is_list(val)) return nullptr;
+  if (!val || !api->value_is_list(val))
+    return nullptr;
   HMENU menu = CreatePopupMenu();
   size_t count = api->value_list_size(val);
   for (size_t i = 0; i < count; ++i) {
     wef_value_t* itemVal = api->value_list_get(val, i);
-    if (!itemVal || !api->value_is_dict(itemVal)) continue;
+    if (!itemVal || !api->value_is_dict(itemVal))
+      continue;
     wef_value_t* typeVal = api->value_dict_get(itemVal, "type");
     if (typeVal && api->value_is_string(typeVal)) {
       size_t len = 0;
@@ -1562,7 +1591,8 @@ HMENU WvBuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api,
         api->value_free_string(s);
         continue;
       }
-      if (s) api->value_free_string(s);
+      if (s)
+        api->value_free_string(s);
     }
     wef_value_t* labelVal = api->value_dict_get(itemVal, "label");
     std::wstring wlabel;
@@ -1587,15 +1617,20 @@ HMENU WvBuildMenuFromValue(wef_value_t* val, const wef_backend_api_t* api,
     if (idVal && api->value_is_string(idVal)) {
       size_t len = 0;
       char* s = api->value_get_string(idVal, &len);
-      if (s) { item_id = std::string(s, len); api->value_free_string(s); }
+      if (s) {
+        item_id = std::string(s, len);
+        api->value_free_string(s);
+      }
     }
     UINT cmd = g_wv_next_cmd_id.fetch_add(1, std::memory_order_relaxed);
     UINT flags = MF_STRING;
     wef_value_t* enabledVal = api->value_dict_get(itemVal, "enabled");
     if (enabledVal && api->value_is_bool(enabledVal) &&
-        !api->value_get_bool(enabledVal)) flags |= MF_GRAYED;
+        !api->value_get_bool(enabledVal))
+      flags |= MF_GRAYED;
     AppendMenuW(menu, flags, cmd, wlabel.c_str());
-    if (!item_id.empty()) cmd_to_id[cmd] = item_id;
+    if (!item_id.empty())
+      cmd_to_id[cmd] = item_id;
   }
   return menu;
 }
@@ -1605,7 +1640,8 @@ uint32_t WebView2Backend::CreateTrayIcon() {
   uint32_t tray_id =
       g_wv_next_tray_id_win.fetch_add(1, std::memory_order_relaxed);
   HWND hwnd = EnsureWvTrayWindow();
-  if (!hwnd) return 0;
+  if (!hwnd)
+    return 0;
   NOTIFYICONDATAW nid = {};
   nid.cbSize = sizeof(nid);
   nid.hWnd = hwnd;
@@ -1621,7 +1657,8 @@ uint32_t WebView2Backend::CreateTrayIcon() {
 }
 
 void WebView2Backend::DestroyTrayIcon(uint32_t tray_id) {
-  if (!g_wv_tray_hwnd) return;
+  if (!g_wv_tray_hwnd)
+    return;
   NOTIFYICONDATAW nid = {};
   nid.cbSize = sizeof(nid);
   nid.hWnd = g_wv_tray_hwnd;
@@ -1630,32 +1667,42 @@ void WebView2Backend::DestroyTrayIcon(uint32_t tray_id) {
   std::lock_guard<std::mutex> lock(WvWinTrayMutex());
   auto it = WvWinTrayMap().find(tray_id);
   if (it != WvWinTrayMap().end()) {
-    if (it->second.hicon_light) DestroyIcon(it->second.hicon_light);
-    if (it->second.hicon_dark) DestroyIcon(it->second.hicon_dark);
-    if (it->second.hmenu) DestroyMenu(it->second.hmenu);
+    if (it->second.hicon_light)
+      DestroyIcon(it->second.hicon_light);
+    if (it->second.hicon_dark)
+      DestroyIcon(it->second.hicon_dark);
+    if (it->second.hmenu)
+      DestroyMenu(it->second.hmenu);
     WvWinTrayMap().erase(it);
   }
 }
 
 void WebView2Backend::SetTrayIcon(uint32_t tray_id, const void* png_bytes,
-                                   size_t len) {
-  if (!g_wv_tray_hwnd) return;
-  HICON hicon = WvDecodePngToHicon(png_bytes, len,
-                                    GetSystemMetrics(SM_CXSMICON));
-  if (!hicon) return;
+                                  size_t len) {
+  if (!g_wv_tray_hwnd)
+    return;
+  HICON hicon =
+      WvDecodePngToHicon(png_bytes, len, GetSystemMetrics(SM_CXSMICON));
+  if (!hicon)
+    return;
   {
     std::lock_guard<std::mutex> lock(WvWinTrayMutex());
     auto it = WvWinTrayMap().find(tray_id);
-    if (it == WvWinTrayMap().end()) { DestroyIcon(hicon); return; }
-    if (it->second.hicon_light) DestroyIcon(it->second.hicon_light);
+    if (it == WvWinTrayMap().end()) {
+      DestroyIcon(hicon);
+      return;
+    }
+    if (it->second.hicon_light)
+      DestroyIcon(it->second.hicon_light);
     it->second.hicon_light = hicon;
   }
   WvApplyActiveIcon(tray_id);
 }
 
 void WebView2Backend::SetTrayIconDark(uint32_t tray_id, const void* png_bytes,
-                                       size_t len) {
-  if (!g_wv_tray_hwnd) return;
+                                      size_t len) {
+  if (!g_wv_tray_hwnd)
+    return;
   if (!png_bytes || len == 0) {
     {
       std::lock_guard<std::mutex> lock(WvWinTrayMutex());
@@ -1668,14 +1715,19 @@ void WebView2Backend::SetTrayIconDark(uint32_t tray_id, const void* png_bytes,
     WvApplyActiveIcon(tray_id);
     return;
   }
-  HICON hicon = WvDecodePngToHicon(png_bytes, len,
-                                    GetSystemMetrics(SM_CXSMICON));
-  if (!hicon) return;
+  HICON hicon =
+      WvDecodePngToHicon(png_bytes, len, GetSystemMetrics(SM_CXSMICON));
+  if (!hicon)
+    return;
   {
     std::lock_guard<std::mutex> lock(WvWinTrayMutex());
     auto it = WvWinTrayMap().find(tray_id);
-    if (it == WvWinTrayMap().end()) { DestroyIcon(hicon); return; }
-    if (it->second.hicon_dark) DestroyIcon(it->second.hicon_dark);
+    if (it == WvWinTrayMap().end()) {
+      DestroyIcon(hicon);
+      return;
+    }
+    if (it->second.hicon_dark)
+      DestroyIcon(it->second.hicon_dark);
     it->second.hicon_dark = hicon;
   }
   WvApplyActiveIcon(tray_id);
@@ -1694,7 +1746,8 @@ void WebView2Backend::SetTrayDoubleClickHandler(uint32_t tray_id,
 
 void WebView2Backend::SetTrayTooltip(uint32_t tray_id,
                                      const char* tooltip_or_null) {
-  if (!g_wv_tray_hwnd) return;
+  if (!g_wv_tray_hwnd)
+    return;
   NOTIFYICONDATAW nid = {};
   nid.cbSize = sizeof(nid);
   nid.hWnd = g_wv_tray_hwnd;
@@ -1711,21 +1764,24 @@ void WebView2Backend::SetTrayTooltip(uint32_t tray_id,
 }
 
 void WebView2Backend::SetTrayMenu(uint32_t tray_id, wef_value_t* menu_template,
-                                   const wef_backend_api_t* api,
-                                   wef_menu_click_fn on_click,
-                                   void* on_click_data) {
+                                  const wef_backend_api_t* api,
+                                  wef_menu_click_fn on_click,
+                                  void* on_click_data) {
   std::map<UINT, std::string> cmd_to_id;
   HMENU menu = menu_template
                    ? WvBuildMenuFromValue(menu_template, api, cmd_to_id)
                    : nullptr;
-  if (menu_template) api->value_free(menu_template);
+  if (menu_template)
+    api->value_free(menu_template);
   std::lock_guard<std::mutex> lock(WvWinTrayMutex());
   auto it = WvWinTrayMap().find(tray_id);
   if (it == WvWinTrayMap().end()) {
-    if (menu) DestroyMenu(menu);
+    if (menu)
+      DestroyMenu(menu);
     return;
   }
-  if (it->second.hmenu) DestroyMenu(it->second.hmenu);
+  if (it->second.hmenu)
+    DestroyMenu(it->second.hmenu);
   it->second.hmenu = menu;
   it->second.cmd_to_id = std::move(cmd_to_id);
   it->second.menu_click_fn = on_click;
