@@ -206,8 +206,8 @@ typedef void (*laufey_mouse_move_fn)(
 // Callback for wheel (scroll) events.
 typedef void (*laufey_wheel_fn)(
     void* user_data, uint32_t window_id,
-    double delta_x,      // horizontal scroll amount
-    double delta_y,      // vertical scroll amount
+    double delta_x,      // horizontal scroll; positive = right (DOM WheelEvent)
+    double delta_y,      // vertical scroll; positive = down (DOM WheelEvent)
     double x,            // cursor x position in window coordinates
     double y,            // cursor y position in window coordinates
     uint32_t modifiers,  // bitmask of LAUFEY_MOD_* flags

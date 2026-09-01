@@ -6,8 +6,8 @@ use std::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};
 
 use laufey_backend_winit_common::{
-  define_common_backend_fns, fill_common_api, winit, BackendAccess,
-  CommonEvent, CommonState, LaufeyBackendApi, LaufeyJsResultFn,
+  BackendAccess, CommonEvent, CommonState, LaufeyBackendApi, LaufeyJsResultFn,
+  define_common_backend_fns, fill_common_api, winit,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -318,9 +318,23 @@ impl ApplicationHandler<UserEvent> for App {
         );
       }
       WindowEvent::CursorMoved { position, .. } => {
-        state.common.with_window(laufey_id, |ws| {
-          *ws.cursor_position.lock().unwrap() = (position.x, position.y);
-        });
+        let flush_enter = state
+          .common
+          .with_window(laufey_id, |ws| {
+            ws.note_cursor_move(position.x, position.y)
+          })
+          .unwrap_or(false);
+        if flush_enter {
+          state.common.with_window(laufey_id, |ws| {
+            laufey_backend_winit_common::dispatch_cursor_enter_leave_event(
+              &state.common.handlers,
+              ws,
+              laufey_id,
+              true,
+              *modifiers,
+            );
+          });
+        }
         laufey_backend_winit_common::dispatch_mouse_move_event(
           &state.common.handlers,
           laufey_id,
@@ -358,17 +372,20 @@ impl ApplicationHandler<UserEvent> for App {
       }
       WindowEvent::CursorEntered { .. } => {
         state.common.with_window(laufey_id, |ws| {
-          laufey_backend_winit_common::dispatch_cursor_enter_leave_event(
-            &state.common.handlers,
-            ws,
-            laufey_id,
-            true,
-            *modifiers,
-          );
+          if ws.note_cursor_entered() {
+            laufey_backend_winit_common::dispatch_cursor_enter_leave_event(
+              &state.common.handlers,
+              ws,
+              laufey_id,
+              true,
+              *modifiers,
+            );
+          }
         });
       }
       WindowEvent::CursorLeft { .. } => {
         state.common.with_window(laufey_id, |ws| {
+          ws.note_cursor_left();
           laufey_backend_winit_common::dispatch_cursor_enter_leave_event(
             &state.common.handlers,
             ws,

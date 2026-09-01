@@ -10,7 +10,7 @@ pub mod tray;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
-use std::ffi::{c_char, c_int, c_void, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -1745,8 +1745,14 @@ pub struct WindowState {
   pub pending_app_menu: Mutex<Option<PendingMenu>>,
   pub pending_context_menu: Mutex<Option<PendingContextMenu>>,
   pub cursor_position: Mutex<(f64, f64)>,
+  /// False until the first `CursorMoved` (or a later move after `CursorLeft`).
+  /// `CursorEntered` often arrives before any move, so the last position is
+  /// still `(0, 0)` — we wait for a real coordinate before firing enter.
+  pub cursor_seen: Mutex<bool>,
+  pub pending_enter: Mutex<bool>,
   pub last_press_time: Mutex<Option<std::time::Instant>>,
   pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
+  pub last_press_position: Mutex<Option<(f64, f64)>>,
   pub click_count: Mutex<i32>,
 }
 
@@ -1765,8 +1771,11 @@ impl WindowState {
       pending_app_menu: Mutex::new(None),
       pending_context_menu: Mutex::new(None),
       cursor_position: Mutex::new((0.0, 0.0)),
+      cursor_seen: Mutex::new(false),
+      pending_enter: Mutex::new(false),
       last_press_time: Mutex::new(None),
       last_press_button: Mutex::new(None),
+      last_press_position: Mutex::new(None),
       click_count: Mutex::new(0),
     }
   }
@@ -1775,6 +1784,32 @@ impl WindowState {
 impl Default for WindowState {
   fn default() -> Self {
     Self::new()
+  }
+}
+
+impl WindowState {
+  /// Store a cursor position. Returns true if a deferred `mouseenter` should
+  /// fire before the matching `mousemove`.
+  pub fn note_cursor_move(&self, x: f64, y: f64) -> bool {
+    *self.cursor_position.lock().unwrap() = (x, y);
+    *self.cursor_seen.lock().unwrap() = true;
+    std::mem::replace(&mut *self.pending_enter.lock().unwrap(), false)
+  }
+
+  /// Returns true if enter can be dispatched now. Otherwise the next move
+  /// flushes it once a real coordinate exists.
+  pub fn note_cursor_entered(&self) -> bool {
+    if *self.cursor_seen.lock().unwrap() {
+      true
+    } else {
+      *self.pending_enter.lock().unwrap() = true;
+      false
+    }
+  }
+
+  pub fn note_cursor_left(&self) {
+    *self.pending_enter.lock().unwrap() = false;
+    *self.cursor_seen.lock().unwrap() = false;
   }
 }
 
@@ -2467,11 +2502,7 @@ macro_rules! define_common_backend_fns {
           }
         }
       }
-      if confirmed {
-        1
-      } else {
-        0
-      }
+      if confirmed { 1 } else { 0 }
     }
 
     unsafe extern "C" fn backend_string_free(
@@ -3569,9 +3600,39 @@ pub fn winit_button_to_laufey(button: winit::event::MouseButton) -> c_int {
 }
 
 /// Dispatch a mouse click event to the registered handler.
-/// Double-click interval (500ms is the standard across most platforms).
+/// Same rule as CEF's Linux tracker: increment while the same button lands
+/// nearby within 500ms. The previous `count < 2` / reset-to-1 split ignored
+/// pointer travel and collapsed a triple-click back to 1.
 const DOUBLE_CLICK_INTERVAL: std::time::Duration =
   std::time::Duration::from_millis(500);
+const MULTI_CLICK_DISTANCE: f64 = 4.0;
+
+pub fn next_click_count(
+  prev_button: Option<winit::event::MouseButton>,
+  prev_pos: Option<(f64, f64)>,
+  prev_time: Option<std::time::Instant>,
+  prev_count: i32,
+  button: winit::event::MouseButton,
+  x: f64,
+  y: f64,
+  now: std::time::Instant,
+) -> i32 {
+  let close = prev_pos
+    .map(|(px, py)| {
+      let dx = x - px;
+      let dy = y - py;
+      dx * dx + dy * dy <= MULTI_CLICK_DISTANCE * MULTI_CLICK_DISTANCE
+    })
+    .unwrap_or(false);
+  if prev_button == Some(button)
+    && prev_time.is_some_and(|t| now.duration_since(t) < DOUBLE_CLICK_INTERVAL)
+    && close
+  {
+    prev_count + 1
+  } else {
+    1
+  }
+}
 
 pub fn dispatch_mouse_click_event(
   handlers: &EventHandlers,
@@ -3598,19 +3659,14 @@ pub fn dispatch_mouse_click_event(
       let now = std::time::Instant::now();
       let mut last_time = ws.last_press_time.lock().unwrap();
       let mut last_btn = ws.last_press_button.lock().unwrap();
+      let mut last_pos = ws.last_press_position.lock().unwrap();
       let mut count = ws.click_count.lock().unwrap();
-
-      if *last_btn == Some(button)
-        && *count < 2
-        && last_time
-          .is_some_and(|t| now.duration_since(t) < DOUBLE_CLICK_INTERVAL)
-      {
-        *count = 2;
-      } else if *count >= 2 || *last_btn != Some(button) {
-        *count = 1;
-      }
+      *count = next_click_count(
+        *last_btn, *last_pos, *last_time, *count, button, x, y, now,
+      );
       *last_time = Some(now);
       *last_btn = Some(button);
+      *last_pos = Some((x, y));
       *count
     } else {
       *ws.click_count.lock().unwrap()
@@ -3647,6 +3703,24 @@ pub fn dispatch_mouse_move_event(
   }
 }
 
+/// Map a winit scroll delta to DOM `WheelEvent` units.
+///
+/// winit / Cocoa report positive Y for scroll *up*. The Web `WheelEvent`
+/// contract (and GTK's webview backend here) uses positive Y for scroll
+/// *down*. Flip Y only; X already matches (positive = right).
+pub fn winit_scroll_to_dom(
+  delta: winit::event::MouseScrollDelta,
+) -> (f64, f64, i32) {
+  match delta {
+    winit::event::MouseScrollDelta::LineDelta(dx, dy) => {
+      (dx as f64, -(dy as f64), LAUFEY_WHEEL_DELTA_LINE)
+    }
+    winit::event::MouseScrollDelta::PixelDelta(d) => {
+      (d.x, -d.y, LAUFEY_WHEEL_DELTA_PIXEL)
+    }
+  }
+}
+
 pub fn dispatch_wheel_event(
   handlers: &EventHandlers,
   ws: &WindowState,
@@ -3656,14 +3730,7 @@ pub fn dispatch_wheel_event(
 ) {
   let handler = handlers.wheel_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
-    let (delta_x, delta_y, delta_mode) = match delta {
-      winit::event::MouseScrollDelta::LineDelta(dx, dy) => {
-        (dx as f64, dy as f64, LAUFEY_WHEEL_DELTA_LINE)
-      }
-      winit::event::MouseScrollDelta::PixelDelta(d) => {
-        (d.x, d.y, LAUFEY_WHEEL_DELTA_PIXEL)
-      }
-    };
+    let (delta_x, delta_y, delta_mode) = winit_scroll_to_dom(delta);
     let (x, y) = *ws.cursor_position.lock().unwrap();
     let mods = modifiers_to_laufey(modifiers);
     unsafe {
@@ -3893,8 +3960,173 @@ pub fn load_and_start_runtime(api: LaufeyBackendApi) {
       });
     }
     None => {
-      println!("No runtime library found. Set LAUFEY_RUNTIME_PATH or place libruntime in current directory.");
+      println!(
+        "No runtime library found. Set LAUFEY_RUNTIME_PATH or place libruntime in current directory."
+      );
       println!("Starting without runtime integration...");
     }
+  }
+}
+
+#[cfg(test)]
+mod mouse_tests {
+  use super::*;
+  use std::time::{Duration, Instant};
+  use winit::event::MouseButton;
+
+  fn count(
+    prev_button: Option<MouseButton>,
+    prev_pos: Option<(f64, f64)>,
+    prev_count: i32,
+    button: MouseButton,
+    x: f64,
+    y: f64,
+    dt_ms: u64,
+  ) -> i32 {
+    let now = Instant::now();
+    let prev_time = if dt_ms == u64::MAX {
+      None
+    } else {
+      now.checked_sub(Duration::from_millis(dt_ms))
+    };
+    next_click_count(
+      prev_button,
+      prev_pos,
+      prev_time,
+      prev_count,
+      button,
+      x,
+      y,
+      now,
+    )
+  }
+
+  #[test]
+  fn first_press_is_click_count_1() {
+    assert_eq!(
+      count(None, None, 0, MouseButton::Left, 10.0, 10.0, u64::MAX),
+      1
+    );
+  }
+
+  #[test]
+  fn second_press_nearby_is_2() {
+    assert_eq!(
+      count(
+        Some(MouseButton::Left),
+        Some((10.0, 10.0)),
+        1,
+        MouseButton::Left,
+        11.0,
+        10.0,
+        100,
+      ),
+      2
+    );
+  }
+
+  #[test]
+  fn third_press_nearby_is_3() {
+    assert_eq!(
+      count(
+        Some(MouseButton::Left),
+        Some((10.0, 10.0)),
+        2,
+        MouseButton::Left,
+        10.0,
+        12.0,
+        100,
+      ),
+      3
+    );
+  }
+
+  #[test]
+  fn far_press_restarts_at_1() {
+    assert_eq!(
+      count(
+        Some(MouseButton::Left),
+        Some((10.0, 10.0)),
+        1,
+        MouseButton::Left,
+        40.0,
+        10.0,
+        100,
+      ),
+      1
+    );
+  }
+
+  #[test]
+  fn late_press_restarts_at_1() {
+    assert_eq!(
+      count(
+        Some(MouseButton::Left),
+        Some((10.0, 10.0)),
+        1,
+        MouseButton::Left,
+        10.0,
+        10.0,
+        600,
+      ),
+      1
+    );
+  }
+
+  #[test]
+  fn other_button_restarts_at_1() {
+    assert_eq!(
+      count(
+        Some(MouseButton::Left),
+        Some((10.0, 10.0)),
+        1,
+        MouseButton::Right,
+        10.0,
+        10.0,
+        100,
+      ),
+      1
+    );
+  }
+
+  #[test]
+  fn enter_waits_for_the_first_move() {
+    let ws = WindowState::new();
+    assert!(!ws.note_cursor_entered());
+    assert!(ws.note_cursor_move(40.0, 50.0));
+    assert_eq!(*ws.cursor_position.lock().unwrap(), (40.0, 50.0));
+    assert!(!ws.note_cursor_move(41.0, 50.0));
+  }
+
+  #[test]
+  fn leave_forgets_the_last_inside_point() {
+    let ws = WindowState::new();
+    assert!(!ws.note_cursor_move(40.0, 50.0));
+    ws.note_cursor_left();
+    assert!(!ws.note_cursor_entered());
+    assert!(ws.note_cursor_move(80.0, 20.0));
+  }
+
+  #[test]
+  fn line_scroll_maps_winit_up_to_dom_negative() {
+    // winit LineDelta +Y is scroll up; DOM wants +Y for scroll down.
+    let (dx, dy, mode) =
+      winit_scroll_to_dom(winit::event::MouseScrollDelta::LineDelta(0.0, 3.0));
+    assert_eq!(dx, 0.0);
+    assert_eq!(dy, -3.0);
+    assert_eq!(mode, LAUFEY_WHEEL_DELTA_LINE);
+    let (_, down, _) =
+      winit_scroll_to_dom(winit::event::MouseScrollDelta::LineDelta(0.0, -3.0));
+    assert_eq!(down, 3.0);
+  }
+
+  #[test]
+  fn pixel_scroll_flips_y_only() {
+    let (dx, dy, mode) =
+      winit_scroll_to_dom(winit::event::MouseScrollDelta::PixelDelta(
+        winit::dpi::PhysicalPosition { x: 4.0, y: 8.0 },
+      ));
+    assert_eq!((dx, dy), (4.0, -8.0));
+    assert_eq!(mode, LAUFEY_WHEEL_DELTA_PIXEL);
   }
 }
