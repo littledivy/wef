@@ -10,7 +10,7 @@ pub mod tray;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::env;
-use std::ffi::{CStr, CString, c_char, c_int, c_void};
+use std::ffi::{c_char, c_int, c_void, CStr, CString};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Condvar, Mutex};
@@ -23,7 +23,9 @@ use muda::MenuEvent;
 use raw_window_handle::{
   HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
 };
-use winit::dpi::{LogicalPosition, LogicalSize};
+use winit::dpi::{
+  LogicalPosition, LogicalSize, PhysicalPosition, PhysicalSize,
+};
 use winit::event_loop::EventLoopProxy;
 use winit::window::{Window, WindowLevel};
 
@@ -33,7 +35,7 @@ use winit::window::{Window, WindowLevel};
 // Bumping this in lockstep with the capi is mandatory: the capi's `init_api`
 // rejects any backend whose reported `version` differs, and the vtable layout
 // below must match the `laufey_backend_api` struct as of this version.
-pub const LAUFEY_API_VERSION: u32 = 34;
+pub const LAUFEY_API_VERSION: u32 = 35;
 
 /// Creation-time window style flags (mirror `LAUFEY_WINDOW_FLAG_*` in laufey.h).
 pub const LAUFEY_WINDOW_FLAG_FRAMELESS: u32 = 1 << 0;
@@ -564,6 +566,14 @@ pub struct LaufeyBackendApi {
     Option<unsafe extern "C" fn(*mut c_void, u32, bool)>,
   pub is_click_passthrough_forward:
     Option<unsafe extern "C" fn(*mut c_void, u32) -> bool>,
+
+  // --- Device pixel ratio (API >= 35) ---
+  pub get_window_scale_factor:
+    Option<unsafe extern "C" fn(*mut c_void, u32) -> f64>,
+
+  // --- Content-view origin (API >= 35) ---
+  pub get_window_inner_position:
+    Option<unsafe extern "C" fn(*mut c_void, u32, *mut c_int, *mut c_int)>,
 }
 
 unsafe impl Send for LaufeyBackendApi {}
@@ -1206,6 +1216,10 @@ pub fn create_api_base() -> LaufeyBackendApi {
     // observation API.
     set_click_passthrough_forward: None,
     is_click_passthrough_forward: None,
+    // Device pixel ratio (API >= 35): filled by fill_common_api.
+    get_window_scale_factor: None,
+    // Content-view origin (API >= 35): filled by fill_common_api.
+    get_window_inner_position: None,
   }
 }
 
@@ -1728,12 +1742,19 @@ pub fn dispatch_menu_click_by_id(item_id: &str) -> bool {
 pub struct WindowState {
   pub pending_title: Mutex<Option<String>>,
   pub pending_size: Mutex<Option<(i32, i32)>>,
-  /// Authoritative current window size in physical pixels. Unlike
+  /// Authoritative current window size in logical (DIP) pixels. Unlike
   /// `pending_size` (a one-shot *requested* size that's consumed when applied),
   /// this tracks the window's real dimensions: seeded at creation from
-  /// `inner_size()` and refreshed on every resize. Backs `get_window_size` so
-  /// it never reports 0x0 (which produced a 0x0 wgpu surface).
+  /// `inner_size()` converted by `scale_factor`, and refreshed on every resize.
+  /// Backs `get_window_size` so it never reports 0x0 (which produced a 0x0 wgpu
+  /// surface) and matches CEF / WebView / `set_size`.
   pub current_size: Mutex<Option<(i32, i32)>>,
+  /// `window.scale_factor()`, seeded at create and refreshed on
+  /// `ScaleFactorChanged`. Backs `get_window_scale_factor`.
+  pub current_scale: Mutex<f64>,
+  /// Content-view top-left in screen DIP. `getPosition` is the frame;
+  /// this plus `clientX`/`clientY` is `MouseEvent.screenX`/`screenY`.
+  pub current_inner_position: Mutex<Option<(i32, i32)>>,
   pub pending_position: Mutex<Option<(i32, i32)>>,
   pub pending_resizable: Mutex<Option<bool>>,
   pub pending_always_on_top: Mutex<Option<bool>>,
@@ -1762,6 +1783,8 @@ impl WindowState {
       pending_title: Mutex::new(None),
       pending_size: Mutex::new(None),
       current_size: Mutex::new(None),
+      current_scale: Mutex::new(primary_scale_hint()),
+      current_inner_position: Mutex::new(None),
       pending_position: Mutex::new(None),
       pending_resizable: Mutex::new(None),
       pending_always_on_top: Mutex::new(None),
@@ -2097,6 +2120,50 @@ macro_rules! define_common_backend_fns {
         if !height.is_null() {
           *height = 0;
         }
+      }
+    }
+
+    unsafe extern "C" fn backend_get_window_scale_factor(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+    ) -> f64 {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        if let Some(scale) = state
+          .common()
+          .with_window(window_id, |ws| *ws.current_scale.lock().unwrap())
+        {
+          if scale > 0.0 {
+            return scale;
+          }
+        }
+      }
+      1.0
+    }
+
+    unsafe extern "C" fn backend_get_window_inner_position(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      x: *mut ::std::ffi::c_int,
+      y: *mut ::std::ffi::c_int,
+    ) {
+      let mut px = 0;
+      let mut py = 0;
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        let _ = state.common().with_window(window_id, |ws| {
+          if let Some((ix, iy)) = *ws.current_inner_position.lock().unwrap() {
+            px = ix;
+            py = iy;
+          } else if let Some((ox, oy)) = *ws.pending_position.lock().unwrap() {
+            px = ox;
+            py = oy;
+          }
+        });
+      }
+      if !x.is_null() {
+        *x = px;
+      }
+      if !y.is_null() {
+        *y = py;
       }
     }
 
@@ -2502,7 +2569,11 @@ macro_rules! define_common_backend_fns {
           }
         }
       }
-      if confirmed { 1 } else { 0 }
+      if confirmed {
+        1
+      } else {
+        0
+      }
     }
 
     unsafe extern "C" fn backend_string_free(
@@ -2936,6 +3007,8 @@ macro_rules! fill_common_api {
     $api.quit = Some(backend_quit);
     $api.set_window_size = Some(backend_set_window_size);
     $api.get_window_size = Some(backend_get_window_size);
+    $api.get_window_scale_factor = Some(backend_get_window_scale_factor);
+    $api.get_window_inner_position = Some(backend_get_window_inner_position);
     $api.set_window_position = Some(backend_set_window_position);
     $api.get_window_position = Some(backend_get_window_position);
     $api.set_resizable = Some(backend_set_resizable);
@@ -3194,6 +3267,82 @@ pub fn handle_common_event<B: BackendAccess>(
   }
 }
 
+/// Physical → DIP integers. CEF / WebView report points; `set_size` already
+/// takes `LogicalSize`.
+pub fn physical_size_to_logical_i32(
+  width: u32,
+  height: u32,
+  scale_factor: f64,
+) -> (i32, i32) {
+  let scale = if scale_factor > 0.0 {
+    scale_factor
+  } else {
+    1.0
+  };
+  let size = PhysicalSize::new(width, height).to_logical::<f64>(scale);
+  (size.width.round() as i32, size.height.round() as i32)
+}
+
+pub fn physical_pos_to_logical_i32(
+  x: i32,
+  y: i32,
+  scale_factor: f64,
+) -> (i32, i32) {
+  let scale = if scale_factor > 0.0 {
+    scale_factor
+  } else {
+    1.0
+  };
+  let pos = PhysicalPosition::new(x, y).to_logical::<f64>(scale);
+  (pos.x.round() as i32, pos.y.round() as i32)
+}
+
+/// Best-effort scale before the winit `Window` exists. JS may read
+/// `devicePixelRatio` from the constructor, which runs before `CreateWindow`
+/// is processed.
+pub fn primary_scale_hint() -> f64 {
+  #[cfg(target_os = "macos")]
+  {
+    use objc2::msg_send;
+    use objc2::runtime::{AnyClass, AnyObject};
+    let Some(cls) = AnyClass::get(c"NSScreen") else {
+      return 1.0;
+    };
+    let screen: Option<&AnyObject> = unsafe { msg_send![cls, mainScreen] };
+    let Some(screen) = screen else {
+      return 1.0;
+    };
+    let scale: f64 = unsafe { msg_send![screen, backingScaleFactor] };
+    return if scale > 0.0 { scale } else { 1.0 };
+  }
+  #[cfg(target_os = "windows")]
+  {
+    windows_sys::Win32::UI::HiDpi::GetDpiForSystem() as f64 / 96.0
+  }
+  #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
+  {
+    std::env::var("GDK_SCALE")
+      .ok()
+      .and_then(|s| s.parse().ok())
+      .filter(|s: &f64| *s > 0.0)
+      .unwrap_or(1.0)
+  }
+}
+
+pub fn physical_pos_to_logical_f64(
+  x: f64,
+  y: f64,
+  scale_factor: f64,
+) -> (f64, f64) {
+  let scale = if scale_factor > 0.0 {
+    scale_factor
+  } else {
+    1.0
+  };
+  let pos = PhysicalPosition::new(x, y).to_logical::<f64>(scale);
+  (pos.x, pos.y)
+}
+
 /// Apply pending state to window attributes before creation.
 pub fn apply_pending_attrs(
   ws: &WindowState,
@@ -3238,10 +3387,16 @@ pub fn apply_pending_post_create(ws: &WindowState, window: &Window) {
   // to arrive — reliable on X11, racy on Wayland — which left
   // `getNativeWindow()` handing wgpu a 0x0 surface ("surface is not configured
   // for presentation").
+  let scale = window.scale_factor();
   let size = window.inner_size();
   if size.width > 0 && size.height > 0 {
-    *ws.current_size.lock().unwrap() =
-      Some((size.width as i32, size.height as i32));
+    let (w, h) = physical_size_to_logical_i32(size.width, size.height, scale);
+    *ws.current_size.lock().unwrap() = Some((w, h));
+    *ws.current_scale.lock().unwrap() = scale;
+  }
+  if let Ok(inner) = window.inner_position() {
+    *ws.current_inner_position.lock().unwrap() =
+      Some(physical_pos_to_logical_i32(inner.x, inner.y, scale));
   }
 
   if let Some(true) = *ws.pending_always_on_top.lock().unwrap() {
@@ -3710,13 +3865,15 @@ pub fn dispatch_mouse_move_event(
 /// *down*. Flip Y only; X already matches (positive = right).
 pub fn winit_scroll_to_dom(
   delta: winit::event::MouseScrollDelta,
+  scale_factor: f64,
 ) -> (f64, f64, i32) {
   match delta {
     winit::event::MouseScrollDelta::LineDelta(dx, dy) => {
       (dx as f64, -(dy as f64), LAUFEY_WHEEL_DELTA_LINE)
     }
     winit::event::MouseScrollDelta::PixelDelta(d) => {
-      (d.x, -d.y, LAUFEY_WHEEL_DELTA_PIXEL)
+      let (dx, dy) = physical_pos_to_logical_f64(d.x, d.y, scale_factor);
+      (dx, -dy, LAUFEY_WHEEL_DELTA_PIXEL)
     }
   }
 }
@@ -3727,10 +3884,12 @@ pub fn dispatch_wheel_event(
   window_id: u32,
   delta: winit::event::MouseScrollDelta,
   modifiers: winit::keyboard::ModifiersState,
+  scale_factor: f64,
 ) {
   let handler = handlers.wheel_handler.lock().unwrap();
   if let Some((cb, user_data)) = *handler {
-    let (delta_x, delta_y, delta_mode) = winit_scroll_to_dom(delta);
+    let (delta_x, delta_y, delta_mode) =
+      winit_scroll_to_dom(delta, scale_factor);
     let (x, y) = *ws.cursor_position.lock().unwrap();
     let mods = modifiers_to_laufey(modifiers);
     unsafe {
@@ -4110,23 +4269,61 @@ mod mouse_tests {
   #[test]
   fn line_scroll_maps_winit_up_to_dom_negative() {
     // winit LineDelta +Y is scroll up; DOM wants +Y for scroll down.
-    let (dx, dy, mode) =
-      winit_scroll_to_dom(winit::event::MouseScrollDelta::LineDelta(0.0, 3.0));
+    let (dx, dy, mode) = winit_scroll_to_dom(
+      winit::event::MouseScrollDelta::LineDelta(0.0, 3.0),
+      2.0,
+    );
     assert_eq!(dx, 0.0);
     assert_eq!(dy, -3.0);
     assert_eq!(mode, LAUFEY_WHEEL_DELTA_LINE);
-    let (_, down, _) =
-      winit_scroll_to_dom(winit::event::MouseScrollDelta::LineDelta(0.0, -3.0));
+    let (_, down, _) = winit_scroll_to_dom(
+      winit::event::MouseScrollDelta::LineDelta(0.0, -3.0),
+      2.0,
+    );
     assert_eq!(down, 3.0);
   }
 
   #[test]
   fn pixel_scroll_flips_y_only() {
-    let (dx, dy, mode) =
-      winit_scroll_to_dom(winit::event::MouseScrollDelta::PixelDelta(
+    let (dx, dy, mode) = winit_scroll_to_dom(
+      winit::event::MouseScrollDelta::PixelDelta(
         winit::dpi::PhysicalPosition { x: 4.0, y: 8.0 },
-      ));
+      ),
+      1.0,
+    );
     assert_eq!((dx, dy), (4.0, -8.0));
     assert_eq!(mode, LAUFEY_WHEEL_DELTA_PIXEL);
+  }
+
+  #[test]
+  fn pixel_scroll_divides_by_scale() {
+    let (dx, dy, mode) = winit_scroll_to_dom(
+      winit::event::MouseScrollDelta::PixelDelta(
+        winit::dpi::PhysicalPosition { x: 8.0, y: 16.0 },
+      ),
+      2.0,
+    );
+    assert_eq!((dx, dy), (4.0, -8.0));
+    assert_eq!(mode, LAUFEY_WHEEL_DELTA_PIXEL);
+  }
+
+  #[test]
+  fn physical_size_at_2x_is_constructor_logical() {
+    assert_eq!(physical_size_to_logical_i32(960, 640, 2.0), (480, 320));
+    assert_eq!(physical_size_to_logical_i32(960, 720, 1.5), (640, 480));
+    assert_eq!(physical_size_to_logical_i32(480, 320, 1.0), (480, 320));
+  }
+
+  #[test]
+  fn new_window_scale_uses_primary_hint() {
+    let ws = WindowState::new();
+    assert_eq!(*ws.current_scale.lock().unwrap(), primary_scale_hint());
+    assert!(*ws.current_scale.lock().unwrap() > 0.0);
+  }
+
+  #[test]
+  fn physical_cursor_at_2x_is_logical() {
+    assert_eq!(physical_pos_to_logical_f64(40.0, 40.0, 2.0), (20.0, 20.0));
+    assert_eq!(physical_pos_to_logical_i32(100, 200, 2.0), (50, 100));
   }
 }

@@ -31,6 +31,7 @@
 #include "include/cef_registration.h"
 #include "include/cef_task.h"
 #include "include/views/cef_browser_view.h"
+#include "include/views/cef_display.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
@@ -324,6 +325,27 @@ static void Backend_GetWindowPosition(void* data, uint32_t window_id, int* x,
     *y = py;
 }
 
+static void Backend_GetWindowInnerPosition(void* data, uint32_t window_id,
+                                           int* x, int* y) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  int px = 0, py = 0;
+  if (browser) {
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (browser_view) {
+        CefRect bounds = browser_view->GetBoundsInScreen();
+        px = bounds.x;
+        py = bounds.y;
+      }
+    });
+  }
+  if (x)
+    *x = px;
+  if (y)
+    *y = py;
+}
+
 static void Backend_SetResizable(void* data, uint32_t window_id,
                                  bool resizable) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
@@ -501,6 +523,26 @@ static double Backend_GetWindowOpacity(void* data, uint32_t window_id) {
 #elif defined(__linux__)
       result = GetLinuxWindowOpacity(window->GetWindowHandle());
 #endif
+    });
+  }
+  return result;
+}
+
+static double Backend_GetWindowScaleFactor(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  double result = 1.0;
+  if (browser) {
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (!browser_view)
+        return;
+      auto window = browser_view->GetWindow();
+      if (!window)
+        return;
+      auto display = window->GetDisplay();
+      if (display)
+        result = display->GetDeviceScaleFactor();
     });
   }
   return result;
@@ -1775,12 +1817,14 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.get_window_size = Backend_GetWindowSize;
   backend_api_.set_window_position = Backend_SetWindowPosition;
   backend_api_.get_window_position = Backend_GetWindowPosition;
+  backend_api_.get_window_inner_position = Backend_GetWindowInnerPosition;
   backend_api_.set_resizable = Backend_SetResizable;
   backend_api_.is_resizable = Backend_IsResizable;
   backend_api_.set_always_on_top = Backend_SetAlwaysOnTop;
   backend_api_.is_always_on_top = Backend_IsAlwaysOnTop;
   backend_api_.set_window_opacity = Backend_SetWindowOpacity;
   backend_api_.get_window_opacity = Backend_GetWindowOpacity;
+  backend_api_.get_window_scale_factor = Backend_GetWindowScaleFactor;
   backend_api_.set_click_passthrough = Backend_SetClickPassthrough;
   backend_api_.is_click_passthrough = Backend_IsClickPassthrough;
   backend_api_.set_click_passthrough_forward =

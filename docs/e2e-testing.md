@@ -146,7 +146,8 @@ getter. No display-server introspection needed.
 - Window: `set_window_size`/`get_window_size`,
   `set_window_position`/`get_window_position`, `set_resizable`/`is_resizable`,
   `set_always_on_top`/`is_always_on_top`, `show`/`hide`/`is_visible`,
-  `set_window_opacity`/`get_window_opacity`.
+  `set_window_opacity`/`get_window_opacity`,
+  `get_window_scale_factor`.
 - Clipboard: `write_clipboard_text` → `read_clipboard_text` (round-trips through
   the real OS clipboard).
 - Handles: `get_window_handle` / `get_display_handle` / `get_window_handle_type`
