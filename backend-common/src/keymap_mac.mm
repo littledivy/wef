@@ -106,6 +106,7 @@ std::string NSEventKeyToCode(unsigned short keyCode) {
     case 50: return "Backquote";
     case 51: return "Backspace";
     case 53: return "Escape";
+    case 54: return "MetaRight";
     case 55: return "MetaLeft";
     case 56: return "ShiftLeft";
     case 57: return "CapsLock";

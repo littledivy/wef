@@ -3684,13 +3684,19 @@ pub fn modifiers_to_laufey(mods: winit::keyboard::ModifiersState) -> u32 {
   flags
 }
 
-/// Convert a winit logical key to its W3C UI Events `key` string representation.
+/// Convert a winit logical key to its W3C UI Events `key` string.
 pub fn winit_key_to_string(key: &winit::keyboard::Key) -> String {
+  use winit::keyboard::{Key, NamedKey};
   match key {
-    winit::keyboard::Key::Character(c) => c.to_string(),
-    winit::keyboard::Key::Named(named) => format!("{named:?}"),
-    winit::keyboard::Key::Unidentified(_) => "Unidentified".to_string(),
-    winit::keyboard::Key::Dead(c) => {
+    Key::Character(c) => c.to_string(),
+    // Debug is `Super` / `Space`; the Web `key` values are `Meta` and U+0020.
+    Key::Named(NamedKey::Super) | Key::Named(NamedKey::Meta) => {
+      "Meta".to_string()
+    }
+    Key::Named(NamedKey::Space) => " ".to_string(),
+    Key::Named(named) => format!("{named:?}"),
+    Key::Unidentified(_) => "Unidentified".to_string(),
+    Key::Dead(c) => {
       if let Some(ch) = c {
         format!("Dead({ch})")
       } else {
@@ -3700,11 +3706,149 @@ pub fn winit_key_to_string(key: &winit::keyboard::Key) -> String {
   }
 }
 
-/// Convert a winit physical key to its W3C UI Events `code` string representation.
+/// Convert a winit physical key to its W3C UI Events `code` string.
 pub fn winit_code_to_string(physical: &winit::keyboard::PhysicalKey) -> String {
+  use winit::keyboard::{KeyCode, PhysicalKey};
   match physical {
-    winit::keyboard::PhysicalKey::Code(code) => format!("{code:?}"),
-    winit::keyboard::PhysicalKey::Unidentified(_) => "Unidentified".to_string(),
+    PhysicalKey::Code(KeyCode::SuperLeft) => "MetaLeft".to_string(),
+    PhysicalKey::Code(KeyCode::SuperRight) => "MetaRight".to_string(),
+    PhysicalKey::Code(code) => format!("{code:?}"),
+    PhysicalKey::Unidentified(_) => "Unidentified".to_string(),
+  }
+}
+
+pub fn is_modifier_named_key(key: &winit::keyboard::Key) -> bool {
+  use winit::keyboard::{Key, NamedKey};
+  matches!(
+    key,
+    Key::Named(
+      NamedKey::Shift
+        | NamedKey::Control
+        | NamedKey::Alt
+        | NamedKey::AltGraph
+        | NamedKey::Super
+        | NamedKey::Meta
+        | NamedKey::Hyper
+    )
+  )
+}
+
+/// Modifier bits that changed between two `ModifiersChanged` events.
+/// macOS winit often has no `KeyboardInput` for Shift / Control / Alt / Meta;
+/// CEF and WebView still emit `keydown` / `keyup`.
+pub fn modifier_key_edges(
+  prev: &winit::event::Modifiers,
+  next: &winit::event::Modifiers,
+) -> Vec<(bool, &'static str, &'static str)> {
+  use winit::keyboard::ModifiersKeyState::Pressed;
+  let mut out = Vec::new();
+  let push = |out: &mut Vec<_>,
+              was: bool,
+              now: bool,
+              prev_l: winit::keyboard::ModifiersKeyState,
+              prev_r: winit::keyboard::ModifiersKeyState,
+              next_l: winit::keyboard::ModifiersKeyState,
+              next_r: winit::keyboard::ModifiersKeyState,
+              key: &'static str,
+              left: &'static str,
+              right: &'static str| {
+    if was == now {
+      return;
+    }
+    let code = if now {
+      if next_r == Pressed && next_l != Pressed {
+        right
+      } else {
+        left
+      }
+    } else if prev_r == Pressed && prev_l != Pressed {
+      right
+    } else {
+      left
+    };
+    out.push((now, key, code));
+  };
+  push(
+    &mut out,
+    prev.state().shift_key(),
+    next.state().shift_key(),
+    prev.lshift_state(),
+    prev.rshift_state(),
+    next.lshift_state(),
+    next.rshift_state(),
+    "Shift",
+    "ShiftLeft",
+    "ShiftRight",
+  );
+  push(
+    &mut out,
+    prev.state().control_key(),
+    next.state().control_key(),
+    prev.lcontrol_state(),
+    prev.rcontrol_state(),
+    next.lcontrol_state(),
+    next.rcontrol_state(),
+    "Control",
+    "ControlLeft",
+    "ControlRight",
+  );
+  push(
+    &mut out,
+    prev.state().alt_key(),
+    next.state().alt_key(),
+    prev.lalt_state(),
+    prev.ralt_state(),
+    next.lalt_state(),
+    next.ralt_state(),
+    "Alt",
+    "AltLeft",
+    "AltRight",
+  );
+  push(
+    &mut out,
+    prev.state().super_key(),
+    next.state().super_key(),
+    prev.lsuper_state(),
+    prev.rsuper_state(),
+    next.lsuper_state(),
+    next.rsuper_state(),
+    "Meta",
+    "MetaLeft",
+    "MetaRight",
+  );
+  out
+}
+
+pub fn dispatch_raw_keyboard_event(
+  handlers: &EventHandlers,
+  window_id: u32,
+  pressed: bool,
+  key: &str,
+  code: &str,
+  modifiers: winit::keyboard::ModifiersState,
+  repeat: bool,
+) {
+  let handler = handlers.keyboard_handler.lock().unwrap();
+  if let Some((cb, user_data)) = *handler {
+    let state = if pressed {
+      LAUFEY_KEY_PRESSED
+    } else {
+      LAUFEY_KEY_RELEASED
+    };
+    let mods = modifiers_to_laufey(modifiers);
+    let c_key = std::ffi::CString::new(key).unwrap_or_default();
+    let c_code = std::ffi::CString::new(code).unwrap_or_default();
+    unsafe {
+      cb(
+        user_data as *mut c_void,
+        window_id,
+        state,
+        c_key.as_ptr(),
+        c_code.as_ptr(),
+        mods,
+        repeat,
+      );
+    }
   }
 }
 
@@ -3715,31 +3859,17 @@ pub fn dispatch_keyboard_event(
   key_event: &winit::event::KeyEvent,
   modifiers: winit::keyboard::ModifiersState,
 ) {
-  let handler = handlers.keyboard_handler.lock().unwrap();
-  if let Some((cb, user_data)) = *handler {
-    let state = match key_event.state {
-      winit::event::ElementState::Pressed => LAUFEY_KEY_PRESSED,
-      winit::event::ElementState::Released => LAUFEY_KEY_RELEASED,
-    };
-    let key_str = winit_key_to_string(&key_event.logical_key);
-    let code_str = winit_code_to_string(&key_event.physical_key);
-    let mods = modifiers_to_laufey(modifiers);
-
-    let c_key = std::ffi::CString::new(key_str).unwrap_or_default();
-    let c_code = std::ffi::CString::new(code_str).unwrap_or_default();
-
-    unsafe {
-      cb(
-        user_data as *mut c_void,
-        window_id,
-        state,
-        c_key.as_ptr(),
-        c_code.as_ptr(),
-        mods,
-        key_event.repeat,
-      );
-    }
-  }
+  let key_str = winit_key_to_string(&key_event.logical_key);
+  let code_str = winit_code_to_string(&key_event.physical_key);
+  dispatch_raw_keyboard_event(
+    handlers,
+    window_id,
+    key_event.state == winit::event::ElementState::Pressed,
+    &key_str,
+    &code_str,
+    modifiers,
+    key_event.repeat,
+  );
 }
 
 /// Convert a winit mouse button to a LAUFEY mouse button constant.
@@ -4312,6 +4442,42 @@ mod mouse_tests {
     assert_eq!(physical_size_to_logical_i32(960, 640, 2.0), (480, 320));
     assert_eq!(physical_size_to_logical_i32(960, 720, 1.5), (640, 480));
     assert_eq!(physical_size_to_logical_i32(480, 320, 1.0), (480, 320));
+  }
+
+  #[test]
+  fn named_keys_use_w3c_key_values() {
+    use winit::keyboard::{Key, NamedKey};
+    assert_eq!(winit_key_to_string(&Key::Named(NamedKey::Super)), "Meta");
+    assert_eq!(winit_key_to_string(&Key::Named(NamedKey::Space)), " ");
+    assert_eq!(winit_key_to_string(&Key::Named(NamedKey::Shift)), "Shift");
+  }
+
+  #[test]
+  fn super_codes_use_w3c_meta() {
+    use winit::keyboard::{KeyCode, PhysicalKey};
+    assert_eq!(
+      winit_code_to_string(&PhysicalKey::Code(KeyCode::SuperLeft)),
+      "MetaLeft"
+    );
+    assert_eq!(
+      winit_code_to_string(&PhysicalKey::Code(KeyCode::ShiftLeft)),
+      "ShiftLeft"
+    );
+  }
+
+  #[test]
+  fn modifier_edges_emit_shift_down_and_up() {
+    let prev = winit::event::Modifiers::default();
+    let next: winit::event::Modifiers =
+      winit::keyboard::ModifiersState::SHIFT.into();
+    assert_eq!(
+      modifier_key_edges(&prev, &next),
+      vec![(true, "Shift", "ShiftLeft")]
+    );
+    assert_eq!(
+      modifier_key_edges(&next, &prev),
+      vec![(false, "Shift", "ShiftLeft")]
+    );
   }
 
   #[test]

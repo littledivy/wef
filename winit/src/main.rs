@@ -11,9 +11,8 @@ use laufey_backend_winit_common::{
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::event::WindowEvent;
+use winit::event::{Modifiers, WindowEvent};
 use winit::event_loop::{EventLoop, EventLoopProxy};
-use winit::keyboard::ModifiersState;
 use winit::window::Window;
 
 // --- Backend state ---
@@ -93,7 +92,7 @@ enum UserEvent {
 
 struct WindowInfo {
   window: Window,
-  modifiers: ModifiersState,
+  modifiers: Modifiers,
 }
 
 struct App {
@@ -152,7 +151,7 @@ impl App {
       window_id,
       WindowInfo {
         window,
-        modifiers: ModifiersState::default(),
+        modifiers: Modifiers::default(),
       },
     );
   }
@@ -267,7 +266,7 @@ impl ApplicationHandler<UserEvent> for App {
       None => return,
     };
     let modifiers = match self.windows.get(&laufey_id) {
-      Some(info) => info.modifiers,
+      Some(info) => info.modifiers.state(),
       None => return,
     };
 
@@ -351,20 +350,45 @@ impl ApplicationHandler<UserEvent> for App {
         );
       }
       WindowEvent::ModifiersChanged(new_modifiers) => {
+        let prev = self
+          .windows
+          .get(&laufey_id)
+          .map(|info| info.modifiers)
+          .unwrap_or_default();
         if let Some(info) = self.windows.get_mut(&laufey_id) {
-          info.modifiers = new_modifiers.state();
+          info.modifiers = new_modifiers;
+        }
+        // macOS often has no KeyboardInput for modifiers. Emit the same
+        // keydown/keyup CEF / WebView send. Skip KeyboardInput for those
+        // named keys so Windows / Linux do not double-fire.
+        for (pressed, key, code) in
+          laufey_backend_winit_common::modifier_key_edges(&prev, &new_modifiers)
+        {
+          laufey_backend_winit_common::dispatch_raw_keyboard_event(
+            &state.common.handlers,
+            laufey_id,
+            pressed,
+            key,
+            code,
+            new_modifiers.state(),
+            false,
+          );
         }
       }
       WindowEvent::KeyboardInput {
         event: ref key_event,
         ..
       } => {
-        laufey_backend_winit_common::dispatch_keyboard_event(
-          &state.common.handlers,
-          laufey_id,
-          key_event,
-          modifiers,
-        );
+        if !laufey_backend_winit_common::is_modifier_named_key(
+          &key_event.logical_key,
+        ) {
+          laufey_backend_winit_common::dispatch_keyboard_event(
+            &state.common.handlers,
+            laufey_id,
+            key_event,
+            modifiers,
+          );
+        }
       }
       WindowEvent::CursorMoved { position, .. } => {
         let (x, y) = laufey_backend_winit_common::physical_pos_to_logical_f64(
