@@ -63,6 +63,7 @@ elseif(UNIX)
 elseif(WIN32)
   list(APPEND LAUFEY_COMMON_SRCS
     src/strings_win.cc
+    src/ime_win.cc
     src/notifications_win.cc
     src/dialog_win.cc
     src/clipboard_win.cc
@@ -86,6 +87,7 @@ if(WIN32)
     shell32
     gdi32
     user32
+    imm32
   )
 elseif(APPLE)
   find_library(USERNOTIFICATIONS_FRAMEWORK UserNotifications REQUIRED)

@@ -385,6 +385,13 @@ static void Backend_SetKeyboardEventHandler(void* data,
   loader->SetKeyboardEventHandler(handler, user_data);
 }
 
+static void Backend_SetImeEventHandler(void* data,
+                                       laufey_ime_event_fn handler,
+                                       void* user_data) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  loader->SetImeEventHandler(handler, user_data);
+}
+
 static void Backend_SetMouseClickHandler(void* data,
                                          laufey_mouse_click_fn handler,
                                          void* user_data) {
@@ -812,6 +819,7 @@ void RuntimeLoader::InitializeBackendApi() {
   };
 
   backend_api_.set_keyboard_event_handler = Backend_SetKeyboardEventHandler;
+  backend_api_.set_ime_event_handler = Backend_SetImeEventHandler;
   backend_api_.set_mouse_click_handler = Backend_SetMouseClickHandler;
   backend_api_.set_mouse_move_handler = Backend_SetMouseMoveHandler;
   backend_api_.set_wheel_handler = Backend_SetWheelHandler;

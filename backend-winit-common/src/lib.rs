@@ -33,7 +33,7 @@ use winit::window::{Window, WindowLevel};
 // Bumping this in lockstep with the capi is mandatory: the capi's `init_api`
 // rejects any backend whose reported `version` differs, and the vtable layout
 // below must match the `laufey_backend_api` struct as of this version.
-pub const LAUFEY_API_VERSION: u32 = 34;
+pub const LAUFEY_API_VERSION: u32 = 35;
 
 /// Creation-time window style flags (mirror `LAUFEY_WINDOW_FLAG_*` in laufey.h).
 pub const LAUFEY_WINDOW_FLAG_FRAMELESS: u32 = 1 << 0;
@@ -75,6 +75,12 @@ pub type LaufeyKeyboardEventFn = unsafe extern "C" fn(
   *const c_char, // code
   u32,           // modifiers
   bool,          // repeat
+);
+pub type LaufeyImeEventFn = unsafe extern "C" fn(
+  *mut c_void,   // user_data
+  u32,           // window_id
+  c_int,         // type (0=start, 1=update, 2=end)
+  *const c_char, // data
 );
 pub type LaufeyMouseMoveFn = unsafe extern "C" fn(
   *mut c_void, // user_data
@@ -564,6 +570,15 @@ pub struct LaufeyBackendApi {
     Option<unsafe extern "C" fn(*mut c_void, u32, bool)>,
   pub is_click_passthrough_forward:
     Option<unsafe extern "C" fn(*mut c_void, u32) -> bool>,
+
+  // --- IME (API >= 35) ---
+  // Implemented via winit's `Window::set_ime_allowed` / `set_ime_cursor_area`.
+  pub set_ime_allowed: Option<unsafe extern "C" fn(*mut c_void, u32, bool)>,
+  pub set_ime_cursor_area:
+    Option<unsafe extern "C" fn(*mut c_void, u32, f64, f64, f64, f64)>,
+  pub set_ime_event_handler: Option<
+    unsafe extern "C" fn(*mut c_void, Option<LaufeyImeEventFn>, *mut c_void),
+  >,
 }
 
 unsafe impl Send for LaufeyBackendApi {}
@@ -1206,6 +1221,10 @@ pub fn create_api_base() -> LaufeyBackendApi {
     // observation API.
     set_click_passthrough_forward: None,
     is_click_passthrough_forward: None,
+    // IME (API >= 35): filled by fill_common_api.
+    set_ime_allowed: None,
+    set_ime_cursor_area: None,
+    set_ime_event_handler: None,
   }
 }
 
@@ -1748,6 +1767,19 @@ pub struct WindowState {
   pub last_press_time: Mutex<Option<std::time::Instant>>,
   pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
   pub click_count: Mutex<i32>,
+  /// Off by default (winit's default). Call `set_ime_allowed(true)` for CJK.
+  pub ime_allowed: Mutex<bool>,
+  /// Logical client rect last passed to `set_ime_cursor_area`.
+  pub ime_cursor_area: Mutex<Option<(f64, f64, f64, f64)>>,
+  /// True between the first `Preedit`/`Commit` and the matching `Commit` or
+  /// `Disabled`. Used so we emit a single compositionstart and so
+  /// `Disabled` can cancel an in-flight session.
+  pub ime_composing: Mutex<bool>,
+  /// Last keydown used to drop the extra press Japanese IMEs (e.g. Google
+  /// ひらがな) post for the same physical key.
+  /// `code` and time of the key press that has not been released yet, used to
+  /// spot an IME's duplicate keydown. See [`is_ime_key_echo`].
+  pub last_key_echo: Mutex<Option<(String, std::time::Instant)>>,
 }
 
 impl WindowState {
@@ -1768,6 +1800,10 @@ impl WindowState {
       last_press_time: Mutex::new(None),
       last_press_button: Mutex::new(None),
       click_count: Mutex::new(0),
+      ime_allowed: Mutex::new(false),
+      ime_cursor_area: Mutex::new(None),
+      ime_composing: Mutex::new(false),
+      last_key_echo: Mutex::new(None),
     }
   }
 }
@@ -1782,6 +1818,7 @@ impl Default for WindowState {
 
 pub struct EventHandlers {
   pub keyboard_handler: Mutex<Option<(LaufeyKeyboardEventFn, usize)>>,
+  pub ime_handler: Mutex<Option<(LaufeyImeEventFn, usize)>>,
   pub mouse_click_handler: Mutex<Option<(LaufeyMouseClickFn, usize)>>,
   pub mouse_move_handler: Mutex<Option<(LaufeyMouseMoveFn, usize)>>,
   pub wheel_handler: Mutex<Option<(LaufeyWheelFn, usize)>>,
@@ -1797,6 +1834,7 @@ impl EventHandlers {
   pub fn new() -> Self {
     Self {
       keyboard_handler: Mutex::new(None),
+      ime_handler: Mutex::new(None),
       mouse_click_handler: Mutex::new(None),
       mouse_move_handler: Mutex::new(None),
       wheel_handler: Mutex::new(None),
@@ -1896,6 +1934,12 @@ pub enum CommonEvent {
     window_id: u32,
   },
   ShowContextMenu {
+    window_id: u32,
+  },
+  SetImeAllowed {
+    window_id: u32,
+  },
+  SetImeCursorArea {
     window_id: u32,
   },
   Quit,
@@ -2296,6 +2340,17 @@ macro_rules! define_common_backend_fns {
       }
     }
 
+    unsafe extern "C" fn backend_set_ime_event_handler(
+      _data: *mut ::std::ffi::c_void,
+      handler: Option<$crate::LaufeyImeEventFn>,
+      user_data: *mut ::std::ffi::c_void,
+    ) {
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        *state.common().handlers.ime_handler.lock().unwrap() =
+          handler.map(|h| (h, user_data as usize));
+      }
+    }
+
     unsafe extern "C" fn backend_set_mouse_click_handler(
       _data: *mut ::std::ffi::c_void,
       handler: Option<$crate::LaufeyMouseClickFn>,
@@ -2579,6 +2634,27 @@ macro_rules! define_common_backend_fns {
           ),
         );
       }
+    }
+
+    unsafe extern "C" fn backend_set_ime_allowed(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      allowed: bool,
+    ) {
+      let _ = $crate::request_set_ime_allowed::<$B>(window_id, allowed);
+    }
+
+    unsafe extern "C" fn backend_set_ime_cursor_area(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      x: f64,
+      y: f64,
+      width: f64,
+      height: f64,
+    ) {
+      let _ = $crate::request_set_ime_cursor_area::<$B>(
+        window_id, x, y, width, height,
+      );
     }
 
     unsafe extern "C" fn backend_set_dock_badge(
@@ -2922,6 +2998,7 @@ macro_rules! fill_common_api {
     $api.get_display_handle = Some($crate::backend_get_display_handle);
     $api.get_window_handle_type = Some($crate::backend_get_window_handle_type);
     $api.set_keyboard_event_handler = Some(backend_set_keyboard_event_handler);
+    $api.set_ime_event_handler = Some(backend_set_ime_event_handler);
     $api.set_mouse_click_handler = Some(backend_set_mouse_click_handler);
     $api.set_mouse_move_handler = Some(backend_set_mouse_move_handler);
     $api.set_wheel_handler = Some(backend_set_wheel_handler);
@@ -2936,6 +3013,8 @@ macro_rules! fill_common_api {
     $api.string_free = Some(backend_string_free);
     $api.set_application_menu = Some(backend_set_application_menu);
     $api.show_context_menu = Some(backend_show_context_menu);
+    $api.set_ime_allowed = Some(backend_set_ime_allowed);
+    $api.set_ime_cursor_area = Some(backend_set_ime_cursor_area);
     $api.set_dock_badge = Some(backend_set_dock_badge);
     $api.bounce_dock = Some(backend_bounce_dock);
     $api.set_dock_menu = Some(backend_set_dock_menu);
@@ -3154,6 +3233,22 @@ pub fn handle_common_event<B: BackendAccess>(
       }
       true
     }
+    CommonEvent::SetImeAllowed { window_id: eid } if *eid == window_id => {
+      if let Some(state) = B::get() {
+        state.common().with_window(window_id, |ws| {
+          apply_ime_state(window, ws);
+        });
+      }
+      true
+    }
+    CommonEvent::SetImeCursorArea { window_id: eid } if *eid == window_id => {
+      if let Some(state) = B::get() {
+        state.common().with_window(window_id, |ws| {
+          apply_ime_cursor_area(window, ws);
+        });
+      }
+      true
+    }
     CommonEvent::UiTask { task, data } => {
       unsafe { task(*data as *mut c_void) };
       true
@@ -3161,6 +3256,80 @@ pub fn handle_common_event<B: BackendAccess>(
     CommonEvent::Quit => false, // caller handles exit
     _ => false,
   }
+}
+
+pub fn request_set_ime_allowed<B: BackendAccess>(
+  window_id: u32,
+  allowed: bool,
+) -> bool {
+  let Some(state) = B::get() else {
+    return false;
+  };
+  if state
+    .common()
+    .with_window(window_id, |ws| {
+      *ws.ime_allowed.lock().unwrap() = allowed;
+    })
+    .is_none()
+  {
+    return false;
+  }
+  let _ = state
+    .proxy()
+    .send_event(B::common_event(CommonEvent::SetImeAllowed { window_id }));
+  true
+}
+
+pub fn request_set_ime_cursor_area<B: BackendAccess>(
+  window_id: u32,
+  x: f64,
+  y: f64,
+  width: f64,
+  height: f64,
+) -> bool {
+  let Some(state) = B::get() else {
+    return false;
+  };
+  if state
+    .common()
+    .with_window(window_id, |ws| {
+      *ws.ime_cursor_area.lock().unwrap() = Some((x, y, width, height));
+    })
+    .is_none()
+  {
+    return false;
+  }
+  let _ = state
+    .proxy()
+    .send_event(B::common_event(CommonEvent::SetImeCursorArea { window_id }));
+  true
+}
+
+pub fn apply_ime_state(window: &Window, ws: &WindowState) {
+  let allowed = *ws.ime_allowed.lock().unwrap();
+  window.set_ime_allowed(allowed);
+  if allowed {
+    apply_ime_cursor_area(window, ws);
+  }
+}
+
+pub fn apply_ime_cursor_area(window: &Window, ws: &WindowState) {
+  if !*ws.ime_allowed.lock().unwrap() {
+    return;
+  }
+  let (x, y, w, h) = match *ws.ime_cursor_area.lock().unwrap() {
+    Some(rect) => rect,
+    None => {
+      let physical = window.inner_size();
+      let logical = physical.to_logical::<f64>(window.scale_factor());
+      (0.0, 0.0, logical.width, logical.height)
+    }
+  };
+  if w <= 0.0 || h <= 0.0 {
+    return;
+  }
+  window
+    .set_ime_cursor_area(LogicalPosition::new(x, y), LogicalSize::new(w, h));
 }
 
 /// Apply pending state to window attributes before creation.
@@ -3224,6 +3393,7 @@ pub fn apply_pending_post_create(ws: &WindowState, window: &Window) {
   if *ws.pending_flags.lock().unwrap() & LAUFEY_WINDOW_FLAG_NO_ACTIVATE != 0 {
     window.set_window_level(WindowLevel::AlwaysOnTop);
   }
+  apply_ime_state(window, ws);
 }
 
 // --- Native dialog implementation ---
@@ -3471,6 +3641,10 @@ pub const LAUFEY_MOD_META: u32 = 1 << 3;
 pub const LAUFEY_KEY_PRESSED: c_int = 0;
 pub const LAUFEY_KEY_RELEASED: c_int = 1;
 
+pub const LAUFEY_IME_START: c_int = 0;
+pub const LAUFEY_IME_UPDATE: c_int = 1;
+pub const LAUFEY_IME_END: c_int = 2;
+
 pub const LAUFEY_MOUSE_BUTTON_LEFT: c_int = 0;
 pub const LAUFEY_MOUSE_BUTTON_RIGHT: c_int = 1;
 pub const LAUFEY_MOUSE_BUTTON_MIDDLE: c_int = 2;
@@ -3522,9 +3696,124 @@ pub fn winit_code_to_string(physical: &winit::keyboard::PhysicalKey) -> String {
   }
 }
 
+/// Translate a winit `Ime` event into zero or more (type, data) pairs and
+/// the resulting composing flag. `Enabled` is a capability signal, not a
+/// composition session — `compositionstart` fires on the first `Preedit`
+/// or `Commit`.
+pub fn ime_to_events(
+  ime: &winit::event::Ime,
+  composing: bool,
+) -> (Vec<(c_int, String)>, bool) {
+  match ime {
+    winit::event::Ime::Enabled => (vec![], composing),
+    winit::event::Ime::Preedit(text, _) => {
+      let mut events = Vec::new();
+      let mut now = composing;
+      if !now {
+        events.push((LAUFEY_IME_START, String::new()));
+        now = true;
+      }
+      events.push((LAUFEY_IME_UPDATE, text.clone()));
+      (events, now)
+    }
+    winit::event::Ime::Commit(text) => {
+      let mut events = Vec::new();
+      if !composing {
+        events.push((LAUFEY_IME_START, String::new()));
+      }
+      events.push((LAUFEY_IME_END, text.clone()));
+      (events, false)
+    }
+    winit::event::Ime::Disabled => {
+      if composing {
+        (vec![(LAUFEY_IME_END, String::new())], false)
+      } else {
+        (vec![], false)
+      }
+    }
+  }
+}
+
+fn fire_ime_event(
+  handlers: &EventHandlers,
+  window_id: u32,
+  ty: c_int,
+  data: &str,
+) {
+  let handler = handlers.ime_handler.lock().unwrap();
+  if let Some((cb, user_data)) = *handler {
+    let c_data = CString::new(data).unwrap_or_default();
+    unsafe {
+      cb(user_data as *mut c_void, window_id, ty, c_data.as_ptr());
+    }
+  }
+}
+
+/// Dispatch a winit IME event as W3C composition events.
+pub fn dispatch_ime_event(
+  handlers: &EventHandlers,
+  ws: &WindowState,
+  window_id: u32,
+  ime: &winit::event::Ime,
+) {
+  let composing = *ws.ime_composing.lock().unwrap();
+  let (events, now_composing) = ime_to_events(ime, composing);
+  *ws.ime_composing.lock().unwrap() = now_composing;
+  for (ty, data) in events {
+    fire_ime_event(handlers, window_id, ty, &data);
+  }
+}
+
+/// Google 日本語 IME (and similar) posts a second keyDown for the same
+/// physical key a few milliseconds after the first while the menu bar
+/// shows ひらがな. Drop that echo so the runtime sees one `keydown`.
+pub const IME_KEY_ECHO_WINDOW: std::time::Duration =
+  std::time::Duration::from_millis(40);
+
+/// `last` holds the press that has not been released yet, so a press can only
+/// be judged an echo of one still physically down.
+pub fn is_ime_key_echo(
+  last: &mut Option<(String, std::time::Instant)>,
+  pressed: bool,
+  repeat: bool,
+  code: &str,
+  now: std::time::Instant,
+) -> bool {
+  if !pressed {
+    // A release ends that key's press. Whatever comes next for it is a real
+    // second press, not a duplicate of the first — typing "nn" (ん) faster
+    // than the window would otherwise lose the second n.
+    if last.as_ref().is_some_and(|(prev, _)| prev == code) {
+      *last = None;
+    }
+    return false;
+  }
+  // Auto-repeat is a legitimate stream of presses with no release between
+  // them. Windows' fastest repeat rate is ~33ms, inside the window, so
+  // filtering here silently drops half of every held key.
+  if repeat {
+    return false;
+  }
+  // Only the same physical key can be an echo, so match on `code` alone.
+  // Matching the logical `key` collapses distinct keys: every key the IME
+  // consumes reports "Process", which is exactly when this runs.
+  if let Some((prev_code, t)) = last.as_ref() {
+    if now.duration_since(*t) < IME_KEY_ECHO_WINDOW
+      && !code.is_empty()
+      && code != "Unidentified"
+      && code == prev_code
+    {
+      return true;
+    }
+  }
+  *last = Some((code.to_string(), now));
+  false
+}
+
 /// Dispatch a keyboard event to the registered handler.
 pub fn dispatch_keyboard_event(
   handlers: &EventHandlers,
+  ws: &WindowState,
   window_id: u32,
   key_event: &winit::event::KeyEvent,
   modifiers: winit::keyboard::ModifiersState,
@@ -3537,6 +3826,15 @@ pub fn dispatch_keyboard_event(
     };
     let key_str = winit_key_to_string(&key_event.logical_key);
     let code_str = winit_code_to_string(&key_event.physical_key);
+    if is_ime_key_echo(
+      &mut ws.last_key_echo.lock().unwrap(),
+      state == LAUFEY_KEY_PRESSED,
+      key_event.repeat,
+      &code_str,
+      std::time::Instant::now(),
+    ) {
+      return;
+    }
     let mods = modifiers_to_laufey(modifiers);
 
     let c_key = std::ffi::CString::new(key_str).unwrap_or_default();
@@ -3896,5 +4194,183 @@ pub fn load_and_start_runtime(api: LaufeyBackendApi) {
       println!("No runtime library found. Set LAUFEY_RUNTIME_PATH or place libruntime in current directory.");
       println!("Starting without runtime integration...");
     }
+  }
+}
+
+#[cfg(test)]
+mod ime_tests {
+  use super::*;
+  use winit::event::Ime;
+
+  fn types_of(ime: Ime, composing: bool) -> (Vec<c_int>, bool) {
+    let (events, now) = ime_to_events(&ime, composing);
+    (events.into_iter().map(|(ty, _)| ty).collect(), now)
+  }
+
+  #[test]
+  fn enabled_is_not_a_composition_session() {
+    let (types, now) = types_of(Ime::Enabled, false);
+    assert!(types.is_empty());
+    assert!(!now);
+  }
+
+  #[test]
+  fn first_preedit_starts_then_updates() {
+    let (events, now) = ime_to_events(&Ime::Preedit("あ".into(), None), false);
+    assert_eq!(
+      events,
+      vec![
+        (LAUFEY_IME_START, String::new()),
+        (LAUFEY_IME_UPDATE, "あ".into()),
+      ]
+    );
+    assert!(now);
+  }
+
+  #[test]
+  fn subsequent_preedit_is_update_only() {
+    let (events, now) = ime_to_events(&Ime::Preedit("あい".into(), None), true);
+    assert_eq!(events, vec![(LAUFEY_IME_UPDATE, "あい".into())]);
+    assert!(now);
+  }
+
+  #[test]
+  fn commit_while_composing_ends() {
+    let (events, now) = ime_to_events(&Ime::Commit("愛".into()), true);
+    assert_eq!(events, vec![(LAUFEY_IME_END, "愛".into())]);
+    assert!(!now);
+  }
+
+  #[test]
+  fn commit_without_preedit_starts_then_ends() {
+    let (events, now) = ime_to_events(&Ime::Commit("a".into()), false);
+    assert_eq!(
+      events,
+      vec![
+        (LAUFEY_IME_START, String::new()),
+        (LAUFEY_IME_END, "a".into()),
+      ]
+    );
+    assert!(!now);
+  }
+
+  #[test]
+  fn disabled_cancels_an_open_session() {
+    let (events, now) = ime_to_events(&Ime::Disabled, true);
+    assert_eq!(events, vec![(LAUFEY_IME_END, String::new())]);
+    assert!(!now);
+  }
+
+  #[test]
+  fn ime_key_echo_drops_the_second_a() {
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyA", t0));
+    assert!(is_ime_key_echo(
+      &mut last,
+      true,
+      false,
+      "KeyA",
+      t0 + std::time::Duration::from_millis(5),
+    ));
+  }
+
+  #[test]
+  fn ime_key_echo_keeps_a_later_real_press() {
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyA", t0));
+    assert!(!is_ime_key_echo(
+      &mut last,
+      true,
+      false,
+      "KeyA",
+      t0 + std::time::Duration::from_millis(80),
+    ));
+  }
+
+  #[test]
+  fn ime_key_echo_keeps_a_different_key() {
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyA", t0));
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyI", t0));
+  }
+
+  #[test]
+  fn ime_key_echo_keeps_auto_repeat() {
+    // Windows' fastest repeat rate is ~33ms, inside the 40ms window. Measured
+    // on a 150% display box with KeyboardSpeed=31, filtering repeats here
+    // delivered 5 of 10 held-key presses.
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyA", t0));
+    for i in 1..10 {
+      let t = t0 + std::time::Duration::from_millis(33 * i);
+      assert!(
+        !is_ime_key_echo(&mut last, true, true, "KeyA", t),
+        "auto-repeat #{i} was dropped"
+      );
+    }
+  }
+
+  #[test]
+  fn ime_key_echo_keeps_a_press_after_release() {
+    // "nn" (ん) typed faster than the window: the release proves the second
+    // press is real.
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyN", t0));
+    assert!(!is_ime_key_echo(
+      &mut last,
+      false,
+      false,
+      "KeyN",
+      t0 + std::time::Duration::from_millis(5),
+    ));
+    assert!(!is_ime_key_echo(
+      &mut last,
+      true,
+      false,
+      "KeyN",
+      t0 + std::time::Duration::from_millis(10),
+    ));
+  }
+
+  #[test]
+  fn ime_key_echo_keeps_distinct_keys_during_composition() {
+    // Every key the IME consumes reports `key` as "Process", so matching the
+    // logical key collapsed distinct presses. Typing "nihongo" at speed lost
+    // the h and o presses before this matched on `code` alone.
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    let t = |ms| t0 + std::time::Duration::from_millis(ms);
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyN", t(0)));
+    assert!(!is_ime_key_echo(&mut last, false, false, "KeyN", t(5)));
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyI", t(10)));
+    assert!(!is_ime_key_echo(&mut last, false, false, "KeyI", t(15)));
+    assert!(!is_ime_key_echo(&mut last, true, false, "KeyH", t(20)));
+  }
+
+  #[test]
+  fn ime_key_echo_ignores_unidentified_codes() {
+    // Synthetic unicode input reports no usable physical key; never guess.
+    let mut last = None;
+    let t0 = std::time::Instant::now();
+    assert!(!is_ime_key_echo(&mut last, true, false, "Unidentified", t0));
+    assert!(!is_ime_key_echo(
+      &mut last,
+      true,
+      false,
+      "Unidentified",
+      t0 + std::time::Duration::from_millis(5),
+    ));
+  }
+
+  #[test]
+  fn disabled_without_session_is_silent() {
+    let (types, now) = types_of(Ime::Disabled, false);
+    assert!(types.is_empty());
+    assert!(!now);
   }
 }

@@ -7,6 +7,7 @@
 #include "scheme_handler.h"
 
 #include <iostream>
+#include <string>
 
 #ifdef __linux__
 #include <gtk/gtk.h>
@@ -62,6 +63,11 @@ void LaufeyWindowDelegate::OnWindowCreated(CefRefPtr<CefWindow> window) {
     }
     RuntimeLoader::GetInstance()->RegisterNativeHandle((void*)(uintptr_t)handle,
                                                        laufey_id_);
+    laufey_common::InstallWinImeObserver(
+        (void*)(uintptr_t)handle, laufey_id_,
+        [](uint32_t id, bool composing, const std::string& data) {
+          RuntimeLoader::GetInstance()->NoteImeState(id, composing, data);
+        });
 #elif defined(__linux__)
     if (no_activate) {
       ConfigureLinuxWindowAsPanel(handle);
@@ -114,12 +120,17 @@ void LaufeyWindowDelegate::OnWindowDestroyed(CefRefPtr<CefWindow> window) {
   if (handle) {
 #ifdef __APPLE__
     UnregisterNSWindowForCefHandle(handle);
+#elif defined(_WIN32)
+    laufey_common::UninstallWinImeObserver((void*)(uintptr_t)handle);
+    RuntimeLoader::GetInstance()->UnregisterNativeHandle(
+        (void*)(uintptr_t)handle);
 #else
     RuntimeLoader::GetInstance()->UnregisterNativeHandle(
         (void*)(uintptr_t)handle);
 #endif
   }
   if (laufey_id_ > 0) {
+    RuntimeLoader::GetInstance()->ClearImeState(laufey_id_);
     RuntimeLoader::GetInstance()->UnregisterBrowser(laufey_id_);
   }
   RemoveNativeMouseMonitor();
@@ -287,6 +298,19 @@ bool LaufeyHandler::OnKeyEvent(CefRefPtr<CefBrowser> browser,
   uint32_t wid = RuntimeLoader::GetInstance()->GetLaufeyIdForBrowser(browser);
   RuntimeLoader::GetInstance()->DispatchKeyboardEvent(
       wid, state, key.c_str(), code.c_str(), modifiers, false);
+#ifdef _WIN32
+  if (wid != 0) {
+    if (auto host = browser->GetHost()) {
+      if (CefWindowHandle hwnd = host->GetWindowHandle()) {
+        laufey_common::InstallWinImeObserver(
+            (void*)(uintptr_t)hwnd, wid,
+            [](uint32_t id, bool composing, const std::string& data) {
+              RuntimeLoader::GetInstance()->NoteImeState(id, composing, data);
+            });
+      }
+    }
+  }
+#endif
 
   return false;  // Don't consume the event — let CEF handle it too
 }

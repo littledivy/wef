@@ -454,6 +454,68 @@ static WebKitGTKBackend* g_gtk_backend = nullptr;
 static std::map<WebKitUserContentManager*, uint32_t>
     g_content_manager_to_laufey_id;
 
+#if WEBKIT_CHECK_VERSION(2, 28, 0)
+static std::map<WebKitInputMethodContext*, uint32_t> g_im_to_laufey_id;
+
+static void on_im_preedit_started(WebKitInputMethodContext* im, gpointer) {
+  auto it = g_im_to_laufey_id.find(im);
+  if (it == g_im_to_laufey_id.end())
+    return;
+  RuntimeLoader::GetInstance()->NoteImeState(it->second, true, "");
+}
+
+static void on_im_preedit_changed(WebKitInputMethodContext* im, gpointer) {
+  auto it = g_im_to_laufey_id.find(im);
+  if (it == g_im_to_laufey_id.end())
+    return;
+  gchar* text = nullptr;
+  webkit_input_method_context_get_preedit(im, &text, nullptr, nullptr);
+  RuntimeLoader::GetInstance()->NoteImeState(it->second, true,
+                                             text ? text : "");
+  g_free(text);
+}
+
+static void on_im_preedit_finished(WebKitInputMethodContext* im, gpointer) {
+  auto it = g_im_to_laufey_id.find(im);
+  if (it == g_im_to_laufey_id.end())
+    return;
+  RuntimeLoader::GetInstance()->NoteImeState(it->second, false, "");
+}
+
+static void on_im_committed(WebKitInputMethodContext* im, gchar* str,
+                            gpointer) {
+  auto it = g_im_to_laufey_id.find(im);
+  if (it == g_im_to_laufey_id.end())
+    return;
+  RuntimeLoader::GetInstance()->NoteImeState(it->second, false,
+                                             str ? str : "");
+}
+
+static void AttachImeObserver(WebKitWebView* webview, uint32_t window_id) {
+  WebKitInputMethodContext* im =
+      webkit_web_view_get_input_method_context(webview);
+  if (!im)
+    return;
+  if (g_im_to_laufey_id.count(im))
+    return;
+  g_im_to_laufey_id[im] = window_id;
+  g_signal_connect(im, "preedit-started", G_CALLBACK(on_im_preedit_started),
+                   nullptr);
+  g_signal_connect(im, "preedit-changed", G_CALLBACK(on_im_preedit_changed),
+                   nullptr);
+  g_signal_connect(im, "preedit-finished", G_CALLBACK(on_im_preedit_finished),
+                   nullptr);
+  g_signal_connect(im, "committed", G_CALLBACK(on_im_committed), nullptr);
+}
+
+static void DetachImeObserver(WebKitWebView* webview) {
+  WebKitInputMethodContext* im =
+      webkit_web_view_get_input_method_context(webview);
+  if (im)
+    g_im_to_laufey_id.erase(im);
+}
+#endif
+
 static void on_script_message(WebKitUserContentManager* manager,
                               WebKitJavascriptResult* js_result,
                               gpointer user_data) {
@@ -744,6 +806,9 @@ void WebKitGTKBackend::CreateWindowEx(uint32_t window_id, int width, int height,
     g_signal_connect(webview, "load-changed", G_CALLBACK(on_load_changed),
                      GUINT_TO_POINTER(window_id));
     g_signal_connect(webview, "create", G_CALLBACK(on_create), nullptr);
+#if WEBKIT_CHECK_VERSION(2, 28, 0)
+    AttachImeObserver(webview, window_id);
+#endif
 
     WebKitSettings* wk_settings = webkit_web_view_get_settings(webview);
     webkit_settings_set_enable_developer_extras(wk_settings, TRUE);
@@ -804,6 +869,10 @@ void WebKitGTKBackend::CloseWindow(uint32_t window_id) {
     std::lock_guard<std::mutex> lock(windows_mutex_);
     auto* state = GetWindow(window_id);
     if (state) {
+#if WEBKIT_CHECK_VERSION(2, 28, 0)
+      DetachImeObserver(state->webview);
+#endif
+      RuntimeLoader::GetInstance()->ClearImeState(window_id);
       webkit_user_content_manager_unregister_script_message_handler(
           state->content_manager, "laufey");
       g_content_manager_to_laufey_id.erase(state->content_manager);

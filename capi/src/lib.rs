@@ -21,6 +21,9 @@ mod ffi {
 mod keyboard;
 pub use keyboard::*;
 
+mod ime;
+pub use ime::*;
+
 mod mouse;
 pub use mouse::*;
 
@@ -29,7 +32,7 @@ pub use mouse::*;
 /// (`github.com/denoland/laufey/releases/tag/v{VERSION}`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const LAUFEY_API_VERSION: u32 = 34;
+pub const LAUFEY_API_VERSION: u32 = 35;
 
 /// Creation-time window style flags for [`Window::new_with_options`].
 /// Mirror the `LAUFEY_WINDOW_FLAG_*` constants in `laufey.h`.
@@ -1255,6 +1258,18 @@ impl Window {
     self
   }
 
+  /// Register a handler for IME composition events on this window.
+  /// Observed like keyboard events: the engine still owns composition;
+  /// the handler is notified and the event is not consumed. CEF on
+  /// Linux currently has no observer.
+  pub fn on_ime_event<F>(self, handler: F) -> Self
+  where
+    F: Fn(ImeEvent) + Send + Sync + 'static,
+  {
+    on_ime_event(self.id, handler);
+    self
+  }
+
   pub fn on_mouse_click<F>(self, handler: F) -> Self
   where
     F: Fn(MouseClickEvent) + Send + Sync + 'static,
@@ -1467,6 +1482,26 @@ impl Window {
           std::ptr::null_mut(),
         );
       }
+    }
+  }
+
+  /// Allow or deny IME on this window. Off by default (winit's default);
+  /// pass `true` when a text field is focused. Can be toggled at any time.
+  /// No-op on backends where the engine owns composition (WebView / CEF).
+  pub fn set_ime_allowed(&self, allowed: bool) {
+    let api = api();
+    if let Some(f) = api.set_ime_allowed {
+      unsafe { f(api.backend_data, self.id, allowed) };
+    }
+  }
+
+  /// Set the IME candidate rectangle in logical, top-left client pixels —
+  /// the same space as [`Window::show_context_menu`]. No-op on backends
+  /// without a raw IME (WebView / CEF).
+  pub fn set_ime_cursor_area(&self, x: f64, y: f64, width: f64, height: f64) {
+    let api = api();
+    if let Some(f) = api.set_ime_cursor_area {
+      unsafe { f(api.backend_data, self.id, x, y, width, height) };
     }
   }
 
@@ -2688,6 +2723,10 @@ where
 
 pub const LAUFEY_KEY_PRESSED: i32 = 0;
 pub const LAUFEY_KEY_RELEASED: i32 = 1;
+
+pub const LAUFEY_IME_START: i32 = 0;
+pub const LAUFEY_IME_UPDATE: i32 = 1;
+pub const LAUFEY_IME_END: i32 = 2;
 
 pub const LAUFEY_MOD_SHIFT: u32 = 1 << 0;
 pub const LAUFEY_MOD_CONTROL: u32 = 1 << 1;

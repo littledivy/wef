@@ -53,8 +53,9 @@ The pointers group into:
 - **JavaScript interop** — `set_js_call_handler`, `js_call_respond`,
   `invoke_js_callback`, `release_js_callback`, `execute_js`, `set_js_namespace`,
   `poll_js_calls`, `set_js_call_notify`.
-- **Event handlers** — `set_keyboard_event_handler`, `set_mouse_click_handler`,
-  `set_mouse_move_handler`, `set_wheel_handler`,
+- **Event handlers** — `set_keyboard_event_handler`, `set_ime_event_handler`
+  (composition start/update/end, API ≥ 35; observed like keyboard, not consumed),
+  `set_mouse_click_handler`, `set_mouse_move_handler`, `set_wheel_handler`,
   `set_cursor_enter_leave_handler`, `set_focused_handler`, `set_resize_handler`,
   `set_move_handler`, `set_close_requested_handler` (defer-until-close_window
   contract as of API ≥ 31 — see below).

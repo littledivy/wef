@@ -76,6 +76,35 @@ void LaufeyOpenExternalURL(const std::string& url) {
   }
   CefScopedSendingEvent sendingEventScoper;
   [super sendEvent:event];
+  if (event.type == NSEventTypeKeyDown || event.type == NSEventTypeKeyUp ||
+      event.type == NSEventTypeLeftMouseUp) {
+    uint32_t wid = RuntimeLoader::GetInstance()->GetLaufeyIdForNSWindow(
+        (__bridge void*)event.window);
+    if (wid != 0 && event.window) {
+      dispatch_async(dispatch_get_main_queue(), ^{
+        id fr = [event.window firstResponder];
+        BOOL composing = NO;
+        std::string data;
+        if ([fr conformsToProtocol:@protocol(NSTextInputClient)]) {
+          id<NSTextInputClient> client = fr;
+          composing = [client hasMarkedText];
+          if (composing) {
+            NSRange range = [client markedRange];
+            if (range.location != NSNotFound && range.length > 0) {
+              NSAttributedString* marked =
+                  [client attributedSubstringForProposedRange:range
+                                                  actualRange:NULL];
+              if (NSString* str = [marked string]) {
+                if (const char* utf8 = [str UTF8String])
+                  data = utf8;
+              }
+            }
+          }
+        }
+        RuntimeLoader::GetInstance()->NoteImeState(wid, composing, data);
+      });
+    }
+  }
 }
 
 - (void)terminate:(id)sender {

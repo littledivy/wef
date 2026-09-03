@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define LAUFEY_API_VERSION 34
+#define LAUFEY_API_VERSION 35
 
 // Window handle types for get_window_handle_type
 #define LAUFEY_WINDOW_HANDLE_UNKNOWN 0
@@ -98,6 +98,12 @@ typedef void (*laufey_menu_click_fn)(void* user_data, uint32_t window_id,
 // Keyboard event state
 #define LAUFEY_KEY_PRESSED 0
 #define LAUFEY_KEY_RELEASED 1
+
+// IME composition event type (API >= 35). Maps onto the W3C composition
+// event sequence: start → one or more updates → end.
+#define LAUFEY_IME_START 0
+#define LAUFEY_IME_UPDATE 1
+#define LAUFEY_IME_END 2
 
 // Keyboard modifier flags (bitmask)
 #define LAUFEY_MOD_SHIFT (1 << 0)
@@ -251,6 +257,14 @@ typedef void (*laufey_keyboard_event_fn)(
         code,  // physical key code (W3C UI Events code, e.g. "KeyA", "Enter")
     uint32_t modifiers,  // bitmask of LAUFEY_MOD_* flags
     bool repeat);
+
+// Callback for IME composition events (API >= 35). `type` is
+// LAUFEY_IME_START / UPDATE / END. `data` is the current composition
+// string (empty on start, and empty on end when the session is
+// cancelled). Raw/winit only; WebView and CEF leave the setter NULL
+// because the engine owns composition.
+typedef void (*laufey_ime_event_fn)(void* user_data, uint32_t window_id,
+                                    int type, const char* data);
 
 // Callback for window close requested events. Registering this handler
 // (API >= 31) makes the backend WAIT: the window does not close on its own
@@ -841,6 +855,34 @@ struct laufey_backend_api {
   // false if the id is unknown or the backend doesn't support forwarding.
   // NULL on backends older than API version 34.
   bool (*is_click_passthrough_forward)(void* backend_data, uint32_t window_id);
+
+  // --- IME (API >= 35) -------------------------------------------------------
+  //
+  // Allow or deny IME on the window. Off by default (matches winit); pass
+  // true when a text field is focused so CJK composition can start. A live
+  // setter that can be toggled at any time. Raw/winit only. WebView and CEF
+  // leave this NULL — the engine owns composition. NULL on backends older
+  // than API version 35; callers must null-check.
+  void (*set_ime_allowed)(void* backend_data, uint32_t window_id,
+                          bool allowed);
+
+  // Logical, top-left client rectangle the IME candidate window should sit
+  // next to and not obscure (typically the caret or an in-window field; it
+  // need not stay inside the window). Raw/winit only. WebView and CEF leave
+  // this NULL. NULL on backends older than API version 35; callers must
+  // null-check.
+  void (*set_ime_cursor_area)(void* backend_data, uint32_t window_id, double x,
+                              double y, double width, double height);
+
+  // Register a handler for IME composition events (global, receives
+  // window_id in the callback). Observed the same way as keyboard events:
+  // the engine still owns composition; the handler is notified, the event
+  // is not consumed. Raw/winit implements this via winit IME. WebView and
+  // CEF observe the platform IM (NSTextInputClient / WM_IME_* /
+  // WebKitInputMethodContext). CEF on Linux currently has no observer.
+  // NULL on backends older than API version 35; callers must null-check.
+  void (*set_ime_event_handler)(void* backend_data,
+                                laufey_ime_event_fn handler, void* user_data);
 };
 
 #ifdef __cplusplus

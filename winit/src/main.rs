@@ -219,7 +219,9 @@ impl ApplicationHandler<UserEvent> for App {
             | CommonEvent::Hide { window_id }
             | CommonEvent::Focus { window_id }
             | CommonEvent::SetApplicationMenu { window_id }
-            | CommonEvent::ShowContextMenu { window_id } => *window_id,
+            | CommonEvent::ShowContextMenu { window_id }
+            | CommonEvent::SetImeAllowed { window_id }
+            | CommonEvent::SetImeCursorArea { window_id } => *window_id,
             _ => return,
           };
           if let Some(info) = self.windows.get(&wid) {
@@ -310,12 +312,15 @@ impl ApplicationHandler<UserEvent> for App {
         event: ref key_event,
         ..
       } => {
-        laufey_backend_winit_common::dispatch_keyboard_event(
-          &state.common.handlers,
-          laufey_id,
-          key_event,
-          *modifiers,
-        );
+        state.common.with_window(laufey_id, |ws| {
+          laufey_backend_winit_common::dispatch_keyboard_event(
+            &state.common.handlers,
+            ws,
+            laufey_id,
+            key_event,
+            *modifiers,
+          );
+        });
       }
       WindowEvent::CursorMoved { position, .. } => {
         state.common.with_window(laufey_id, |ws| {
@@ -396,7 +401,16 @@ impl ApplicationHandler<UserEvent> for App {
       WindowEvent::DroppedFile(_) => {}
       WindowEvent::HoveredFile(_) => {}
       WindowEvent::HoveredFileCancelled => {}
-      WindowEvent::Ime(_) => {}
+      WindowEvent::Ime(ref ime) => {
+        state.common.with_window(laufey_id, |ws| {
+          laufey_backend_winit_common::dispatch_ime_event(
+            &state.common.handlers,
+            ws,
+            laufey_id,
+            ime,
+          );
+        });
+      }
 
       WindowEvent::Touch(_)
       | WindowEvent::PinchGesture { .. }

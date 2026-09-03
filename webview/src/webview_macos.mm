@@ -12,6 +12,7 @@
 #include <atomic>
 #include <map>
 #include <mutex>
+#include <string>
 
 @class LaufeyScriptMessageHandler;
 @class LaufeyWindowDelegate;
@@ -205,6 +206,36 @@ static uint32_t LaufeyIdForNSWindow(NSWindow* win) {
   std::lock_guard<std::mutex> lock(g_nswindow_mutex);
   auto it = g_nswindow_to_laufey_id.find((__bridge void*)win);
   return it != g_nswindow_to_laufey_id.end() ? it->second : 0;
+}
+
+// Query NSTextInputClient after the webview has handled the event so
+// marked text reflects the current composition. Matches keyboard
+// observation: we do not consume the event.
+static void ObserveImeForWindow(NSWindow* win, uint32_t wid) {
+  if (!win || wid == 0)
+    return;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    id fr = [win firstResponder];
+    BOOL composing = NO;
+    std::string data;
+    if ([fr conformsToProtocol:@protocol(NSTextInputClient)]) {
+      id<NSTextInputClient> client = fr;
+      composing = [client hasMarkedText];
+      if (composing) {
+        NSRange range = [client markedRange];
+        if (range.location != NSNotFound && range.length > 0) {
+          NSAttributedString* marked =
+              [client attributedSubstringForProposedRange:range
+                                              actualRange:NULL];
+          if (NSString* str = [marked string]) {
+            if (const char* utf8 = [str UTF8String])
+              data = utf8;
+          }
+        }
+      }
+    }
+    RuntimeLoader::GetInstance()->NoteImeState(wid, composing, data);
+  });
 }
 
 static void RegisterNSWindow(NSWindow* win, uint32_t window_id) {
@@ -704,6 +735,7 @@ void WKWebViewBackend::RemoveWindowState(uint32_t window_id) {
 void WKWebViewBackend::OnWindowClosedByUser(uint32_t window_id) {
   // Main thread (AppKit delivers windowWillClose: there); safe to take the
   // lock and tear down state while the window finishes closing.
+  RuntimeLoader::GetInstance()->ClearImeState(window_id);
   std::lock_guard<std::mutex> lock(windows_mutex_);
   RemoveWindowState(window_id);
 }
@@ -739,6 +771,7 @@ void WKWebViewBackend::InstallGlobalMonitors() {
                                          ->DispatchKeyboardEvent(
                                              wid, state, key.c_str(),
                                              code.c_str(), modifiers, repeat);
+                                     ObserveImeForWindow(win, wid);
 
                                      return event;
                                    }];
@@ -788,6 +821,7 @@ void WKWebViewBackend::InstallGlobalMonitors() {
                                          ->DispatchMouseClickEvent(
                                              wid, state, button, x, y,
                                              modifiers, click_count);
+                                     ObserveImeForWindow(win, wid);
 
                                      return event;
                                    }];

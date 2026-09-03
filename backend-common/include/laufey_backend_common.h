@@ -33,6 +33,18 @@ namespace laufey_common {
 
 std::wstring Utf8ToWide(const std::string& s);
 std::string WideToUtf8(const std::wstring& w);
+
+// Observe IME on a Win32 HWND the same way keyboard events are observed:
+// the engine still owns composition; we forward start/update/end.
+// `hwnd` is the top-level window; Chromium/WebView2 child HWNDs that
+// actually receive WM_IME_* are found and subclassed.
+using ImeNoteFn = void (*)(uint32_t window_id, bool composing,
+                           const std::string& data);
+void InstallWinImeObserver(void* hwnd, uint32_t window_id, ImeNoteFn note);
+void UninstallWinImeObserver(void* hwnd);
+// Handle an IME message already delivered to `hwnd` (parent WndProc).
+void HandleWinImeMessage(void* hwnd, unsigned msg, unsigned long long wparam,
+                         long long lparam, uint32_t window_id, ImeNoteFn note);
 #endif
 
 // ---------------------------------------------------------------------------

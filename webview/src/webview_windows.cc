@@ -547,6 +547,18 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
           false);
       break;
     }
+    case WM_IME_STARTCOMPOSITION:
+    case WM_IME_COMPOSITION:
+    case WM_IME_ENDCOMPOSITION: {
+      if (wid == 0)
+        break;
+      laufey_common::HandleWinImeMessage(
+          hwnd, msg, wParam, lParam, wid,
+          [](uint32_t id, bool composing, const std::string& data) {
+            RuntimeLoader::GetInstance()->NoteImeState(id, composing, data);
+          });
+      break;
+    }
     case WM_CLOSE: {
       bool proceed = true;
       if (wid > 0) {
@@ -573,6 +585,10 @@ LRESULT CALLBACK WebView2Backend::WindowProc(HWND hwnd, UINT msg, WPARAM wParam,
       // closes and for CloseWindow()'s direct DestroyWindow alike, so a
       // deferred close resolved via close_window still quits the message
       // loop when the last window goes away.
+      if (wid > 0) {
+        RuntimeLoader::GetInstance()->ClearImeState(wid);
+      }
+      laufey_common::UninstallWinImeObserver(hwnd);
       std::lock_guard<std::recursive_mutex> lock(g_hwnd_mutex);
       if (g_hwnd_to_laufey_id.erase(hwnd) > 0 && g_hwnd_to_laufey_id.empty()) {
         PostQuitMessage(0);
@@ -823,6 +839,12 @@ void WebView2Backend::OnEnvironmentReady(uint32_t window_id, HWND hwnd,
 
             state->controller = controller;
             controller->get_CoreWebView2(&state->webview);
+            laufey_common::InstallWinImeObserver(
+                hwnd, window_id,
+                [](uint32_t id, bool composing, const std::string& data) {
+                  RuntimeLoader::GetInstance()->NoteImeState(id, composing,
+                                                             data);
+                });
 
             RECT bounds;
             GetClientRect(hwnd, &bounds);
