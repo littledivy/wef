@@ -574,7 +574,41 @@ pub struct LaufeyBackendApi {
   // --- Content-view origin (API >= 35) ---
   pub get_window_inner_position:
     Option<unsafe extern "C" fn(*mut c_void, u32, *mut c_int, *mut c_int)>,
+
+  // --- Outer window size (API >= 35) ---
+  pub get_window_outer_size:
+    Option<unsafe extern "C" fn(*mut c_void, u32, *mut c_int, *mut c_int)>,
+
+  // --- Test input injection (API >= 35) ---
+  pub test_inject_input: Option<
+    unsafe extern "C" fn(*mut c_void, u32, *const LaufeyTestInput) -> bool,
+  >,
 }
+
+/// Mirrors `laufey_test_input_t` in laufey.h.
+#[repr(C)]
+pub struct LaufeyTestInput {
+  pub kind: c_int,
+  pub modifiers: u32,
+  pub key: *const c_char,
+  pub code: *const c_char,
+  pub pressed: bool,
+  pub repeat: bool,
+  pub button: c_int,
+  pub x: f64,
+  pub y: f64,
+  pub delta_x: f64,
+  pub delta_y: f64,
+  pub delta_mode: c_int,
+}
+
+pub const LAUFEY_TEST_INPUT_KEY: c_int = 0;
+pub const LAUFEY_TEST_INPUT_MOUSE_MOVE: c_int = 1;
+pub const LAUFEY_TEST_INPUT_MOUSE_BUTTON: c_int = 2;
+pub const LAUFEY_TEST_INPUT_WHEEL: c_int = 3;
+pub const LAUFEY_TEST_INPUT_CURSOR_ENTER: c_int = 4;
+pub const LAUFEY_TEST_INPUT_CURSOR_LEAVE: c_int = 5;
+pub const LAUFEY_TEST_INPUT_MODIFIERS: c_int = 6;
 
 unsafe impl Send for LaufeyBackendApi {}
 
@@ -1220,6 +1254,10 @@ pub fn create_api_base() -> LaufeyBackendApi {
     get_window_scale_factor: None,
     // Content-view origin (API >= 35): filled by fill_common_api.
     get_window_inner_position: None,
+    // Outer window size (API >= 35): filled by fill_common_api.
+    get_window_outer_size: None,
+    // Test input injection (API >= 35): filled by fill_common_api.
+    test_inject_input: None,
   }
 }
 
@@ -1749,12 +1787,23 @@ pub struct WindowState {
   /// Backs `get_window_size` so it never reports 0x0 (which produced a 0x0 wgpu
   /// surface) and matches CEF / WebView / `set_size`.
   pub current_size: Mutex<Option<(i32, i32)>>,
+  /// Chrome-inclusive size in the same DIP space, seeded from `outer_size()`
+  /// and refreshed on resize. Backs `get_window_outer_size`.
+  pub current_outer_size: Mutex<Option<(i32, i32)>>,
   /// `window.scale_factor()`, seeded at create and refreshed on
   /// `ScaleFactorChanged`. Backs `get_window_scale_factor`.
   pub current_scale: Mutex<f64>,
   /// Content-view top-left in screen DIP. `getPosition` is the frame;
   /// this plus `clientX`/`clientY` is `MouseEvent.screenX`/`screenY`.
   pub current_inner_position: Mutex<Option<(i32, i32)>>,
+  /// Authoritative frame top-left in screen DIP, seeded at create and
+  /// refreshed on `Moved`. Backs `get_window_position`.
+  ///
+  /// Distinct from `pending_position`, which is a one-shot *requested*
+  /// position consumed when applied — reading that back reported (0, 0) once
+  /// the request had been handled, and reported the request rather than the
+  /// real origin where the OS placed the window somewhere else.
+  pub current_position: Mutex<Option<(i32, i32)>>,
   pub pending_position: Mutex<Option<(i32, i32)>>,
   pub pending_resizable: Mutex<Option<bool>>,
   pub pending_always_on_top: Mutex<Option<bool>>,
@@ -1775,6 +1824,20 @@ pub struct WindowState {
   pub last_press_button: Mutex<Option<winit::event::MouseButton>>,
   pub last_press_position: Mutex<Option<(f64, f64)>>,
   pub click_count: Mutex<i32>,
+  /// Last modifiers applied by `test_inject_input`. Real
+  /// `ModifiersChanged` lives on the winit window map; the hook keeps its
+  /// own so a MODIFIERS event can emit the same edges.
+  pub inject_modifiers: Mutex<winit::event::Modifiers>,
+  /// False until the creation-time `Resized` burst has been drained.
+  ///
+  /// Creating a window makes the OS emit several `Resized` events describing
+  /// intermediate sizes (on Windows: a default size, then the DIP-adjusted
+  /// one, then the requested one). They are all *different*, so the
+  /// same-size check cannot collapse them and the app would see `resize` fire
+  /// for sizes it never asked for. Nothing is dispatched while this is false;
+  /// `settle_creation_geometry` re-syncs from the real window and arms it
+  /// once the event loop first goes idle.
+  pub resize_reporting_armed: Mutex<bool>,
 }
 
 impl WindowState {
@@ -1783,8 +1846,10 @@ impl WindowState {
       pending_title: Mutex::new(None),
       pending_size: Mutex::new(None),
       current_size: Mutex::new(None),
+      current_outer_size: Mutex::new(None),
       current_scale: Mutex::new(primary_scale_hint()),
       current_inner_position: Mutex::new(None),
+      current_position: Mutex::new(None),
       pending_position: Mutex::new(None),
       pending_resizable: Mutex::new(None),
       pending_always_on_top: Mutex::new(None),
@@ -1800,6 +1865,8 @@ impl WindowState {
       last_press_button: Mutex::new(None),
       last_press_position: Mutex::new(None),
       click_count: Mutex::new(0),
+      inject_modifiers: Mutex::new(winit::event::Modifiers::default()),
+      resize_reporting_armed: Mutex::new(false),
     }
   }
 }
@@ -2123,6 +2190,44 @@ macro_rules! define_common_backend_fns {
       }
     }
 
+    unsafe extern "C" fn backend_get_window_outer_size(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      width: *mut ::std::ffi::c_int,
+      height: *mut ::std::ffi::c_int,
+    ) {
+      let mut found = false;
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        if let Some(()) = state.common().with_window(window_id, |ws| {
+          let size = (*ws.current_outer_size.lock().unwrap()).or_else(|| {
+            let inner = (*ws.current_size.lock().unwrap())
+              .or(*ws.pending_size.lock().unwrap())?;
+            let (dw, dh) =
+              $crate::frame_extent_hint(*ws.pending_flags.lock().unwrap());
+            Some((inner.0 + dw, inner.1 + dh))
+          });
+          if let Some((w, h)) = size {
+            if !width.is_null() {
+              *width = w;
+            }
+            if !height.is_null() {
+              *height = h;
+            }
+          }
+        }) {
+          found = true;
+        }
+      }
+      if !found {
+        if !width.is_null() {
+          *width = 0;
+        }
+        if !height.is_null() {
+          *height = 0;
+        }
+      }
+    }
+
     unsafe extern "C" fn backend_get_window_scale_factor(
       _data: *mut ::std::ffi::c_void,
       window_id: u32,
@@ -2153,9 +2258,22 @@ macro_rules! define_common_backend_fns {
           if let Some((ix, iy)) = *ws.current_inner_position.lock().unwrap() {
             px = ix;
             py = iy;
-          } else if let Some((ox, oy)) = *ws.pending_position.lock().unwrap() {
-            px = ox;
-            py = oy;
+          } else if let Some((ox, oy)) = (*ws.current_position.lock().unwrap())
+            .or(*ws.pending_position.lock().unwrap())
+          {
+            // No content origin to read: either the window does not exist
+            // yet, or the platform doesn't report one — winit answers
+            // `NotSupportedError` on Wayland and on X11 under some
+            // compositors. Offset the frame origin by what the chrome
+            // measures rather than reporting a point on the title bar.
+            //
+            // `current_position` has to come first: `pending_position` is a
+            // request consumed once applied, so on those platforms this fell
+            // through to nothing and reported (0, 0) after the first move.
+            let (dx, dy) =
+              $crate::frame_offset_hint(*ws.pending_flags.lock().unwrap());
+            px = ox + dx;
+            py = oy + dy;
           }
         });
       }
@@ -2194,7 +2312,11 @@ macro_rules! define_common_backend_fns {
       let mut found = false;
       if let Some(state) = <$B as $crate::BackendAccess>::get() {
         if let Some(()) = state.common().with_window(window_id, |ws| {
-          if let Some((px, py)) = *ws.pending_position.lock().unwrap() {
+          // Prefer the real origin; fall back to a request that has not been
+          // applied yet, which is all there is before the window exists.
+          let pos = (*ws.current_position.lock().unwrap())
+            .or(*ws.pending_position.lock().unwrap());
+          if let Some((px, py)) = pos {
             if !x.is_null() {
               *x = px;
             }
@@ -2628,6 +2750,32 @@ macro_rules! define_common_backend_fns {
       $crate::dispatch_menu_click_by_id(&id)
     }
 
+    unsafe extern "C" fn backend_test_inject_input(
+      _data: *mut ::std::ffi::c_void,
+      window_id: u32,
+      event: *const $crate::LaufeyTestInput,
+    ) -> bool {
+      if event.is_null() {
+        return false;
+      }
+      let event = unsafe { &*event };
+      if let Some(state) = <$B as $crate::BackendAccess>::get() {
+        state
+          .common()
+          .with_window(window_id, |ws| {
+            $crate::inject_test_input(
+              &state.common().handlers,
+              ws,
+              window_id,
+              event,
+            )
+          })
+          .unwrap_or(false)
+      } else {
+        false
+      }
+    }
+
     unsafe extern "C" fn backend_set_application_menu(
       _data: *mut ::std::ffi::c_void,
       window_id: u32,
@@ -3007,6 +3155,7 @@ macro_rules! fill_common_api {
     $api.quit = Some(backend_quit);
     $api.set_window_size = Some(backend_set_window_size);
     $api.get_window_size = Some(backend_get_window_size);
+    $api.get_window_outer_size = Some(backend_get_window_outer_size);
     $api.get_window_scale_factor = Some(backend_get_window_scale_factor);
     $api.get_window_inner_position = Some(backend_get_window_inner_position);
     $api.set_window_position = Some(backend_set_window_position);
@@ -3064,6 +3213,7 @@ macro_rules! fill_common_api {
     $api.test_click_menu_item = Some(backend_test_click_menu_item);
     $api.test_trigger_close_requested =
       Some(backend_test_trigger_close_requested);
+    $api.test_inject_input = Some(backend_test_inject_input);
   };
 }
 
@@ -3103,6 +3253,10 @@ pub fn handle_common_event<B: BackendAccess>(
         state.common().with_window(window_id, |ws| {
           if let Some((x, y)) = ws.pending_position.lock().unwrap().take() {
             window.set_outer_position(LogicalPosition::new(x, y));
+            // Reflect the move now rather than waiting for `Moved`, so a read
+            // straight after `set_position` doesn't report the old origin.
+            // `Moved` corrects this if the OS placed it elsewhere.
+            *ws.current_position.lock().unwrap() = Some((x, y));
           }
         });
       }
@@ -3300,33 +3454,190 @@ pub fn physical_pos_to_logical_i32(
 /// Best-effort scale before the winit `Window` exists. JS may read
 /// `devicePixelRatio` from the constructor, which runs before `CreateWindow`
 /// is processed.
+#[cfg(target_os = "macos")]
 pub fn primary_scale_hint() -> f64 {
-  #[cfg(target_os = "macos")]
-  {
-    use objc2::msg_send;
-    use objc2::runtime::{AnyClass, AnyObject};
-    let Some(cls) = AnyClass::get(c"NSScreen") else {
-      return 1.0;
-    };
-    let screen: Option<&AnyObject> = unsafe { msg_send![cls, mainScreen] };
-    let Some(screen) = screen else {
-      return 1.0;
-    };
-    let scale: f64 = unsafe { msg_send![screen, backingScaleFactor] };
-    return if scale > 0.0 { scale } else { 1.0 };
+  use objc2::msg_send;
+  use objc2::runtime::{AnyClass, AnyObject};
+  let Some(cls) = AnyClass::get(c"NSScreen") else {
+    return 1.0;
+  };
+  let screen: Option<&AnyObject> = unsafe { msg_send![cls, mainScreen] };
+  let Some(screen) = screen else {
+    return 1.0;
+  };
+  let scale: f64 = unsafe { msg_send![screen, backingScaleFactor] };
+  if scale > 0.0 {
+    scale
+  } else {
+    1.0
   }
-  #[cfg(target_os = "windows")]
-  {
-    windows_sys::Win32::UI::HiDpi::GetDpiForSystem() as f64 / 96.0
+}
+
+#[cfg(target_os = "windows")]
+pub fn primary_scale_hint() -> f64 {
+  let dpi = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() };
+  if dpi > 0 {
+    dpi as f64 / 96.0
+  } else {
+    1.0
   }
-  #[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
-  {
-    std::env::var("GDK_SCALE")
-      .ok()
-      .and_then(|s| s.parse().ok())
-      .filter(|s: &f64| *s > 0.0)
-      .unwrap_or(1.0)
+}
+
+#[cfg(target_os = "linux")]
+pub fn primary_scale_hint() -> f64 {
+  std::env::var("GDK_SCALE")
+    .ok()
+    .and_then(|s| s.parse().ok())
+    .filter(|s: &f64| *s > 0.0)
+    .unwrap_or(1.0)
+}
+
+#[cfg(not(any(
+  target_os = "macos",
+  target_os = "windows",
+  target_os = "linux"
+)))]
+pub fn primary_scale_hint() -> f64 {
+  1.0
+}
+
+/// Best-effort title-bar / border offset before the winit `Window` exists, in
+/// logical pixels.
+///
+/// `getInnerPosition()` is the content-view origin, but the window is created
+/// asynchronously and JS can read it straight after the constructor. Falling
+/// back to the frame origin reported a point on the title bar; ask the OS what
+/// the chrome will measure instead. `flags` are the creation-time
+/// `LAUFEY_WINDOW_FLAG_*` bits — a frameless window has no chrome to offset.
+#[cfg(target_os = "macos")]
+pub fn frame_offset_hint(flags: u32) -> (i32, i32) {
+  if flags & LAUFEY_WINDOW_FLAG_FRAMELESS != 0 {
+    return (0, 0);
   }
+  use objc2_app_kit::{NSWindow, NSWindowStyleMask};
+  use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
+  let mtm = unsafe { MainThreadMarker::new_unchecked() };
+  let style = NSWindowStyleMask::Titled
+    | NSWindowStyleMask::Closable
+    | NSWindowStyleMask::Miniaturizable
+    | NSWindowStyleMask::Resizable;
+  let frame = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, 100.0));
+  let content = NSWindow::contentRectForFrameRect_styleMask(frame, style, mtm);
+  let dx = (content.origin.x - frame.origin.x).round() as i32;
+  let dy = (frame.size.height - content.size.height).round() as i32;
+  (dx.max(0), dy.max(0))
+}
+
+#[cfg(target_os = "windows")]
+pub fn frame_offset_hint(flags: u32) -> (i32, i32) {
+  if flags & LAUFEY_WINDOW_FLAG_FRAMELESS != 0 {
+    return (0, 0);
+  }
+  use windows_sys::Win32::Foundation::RECT;
+  use windows_sys::Win32::UI::HiDpi::{
+    AdjustWindowRectExForDpi, GetDpiForSystem,
+  };
+  use windows_sys::Win32::UI::WindowsAndMessaging::{
+    WS_EX_WINDOWEDGE, WS_OVERLAPPEDWINDOW,
+  };
+  let dpi = unsafe { GetDpiForSystem() };
+  if dpi == 0 {
+    return (0, 0);
+  }
+  // Adjusting an empty client rect leaves the chrome thickness in the
+  // (now negative) left/top corner.
+  let mut rect = RECT {
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+  };
+  let ok = unsafe {
+    AdjustWindowRectExForDpi(
+      &mut rect,
+      WS_OVERLAPPEDWINDOW,
+      0,
+      WS_EX_WINDOWEDGE,
+      dpi,
+    )
+  };
+  if ok == 0 {
+    return (0, 0);
+  }
+  let scale = dpi as f64 / 96.0;
+  physical_pos_to_logical_i32(-rect.left, -rect.top, scale)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn frame_offset_hint(_flags: u32) -> (i32, i32) {
+  // The frame offset is the compositor's business.
+  (0, 0)
+}
+
+/// Extra DIP to add to the content size to get the chrome-inclusive size
+/// before the winit `Window` exists.
+#[cfg(target_os = "macos")]
+pub fn frame_extent_hint(flags: u32) -> (i32, i32) {
+  if flags & LAUFEY_WINDOW_FLAG_FRAMELESS != 0 {
+    return (0, 0);
+  }
+  use objc2_app_kit::{NSWindow, NSWindowStyleMask};
+  use objc2_foundation::{MainThreadMarker, NSPoint, NSRect, NSSize};
+  let mtm = unsafe { MainThreadMarker::new_unchecked() };
+  let style = NSWindowStyleMask::Titled
+    | NSWindowStyleMask::Closable
+    | NSWindowStyleMask::Miniaturizable
+    | NSWindowStyleMask::Resizable;
+  let content = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(100.0, 100.0));
+  let frame = NSWindow::frameRectForContentRect_styleMask(content, style, mtm);
+  let dw = (frame.size.width - content.size.width).round() as i32;
+  let dh = (frame.size.height - content.size.height).round() as i32;
+  (dw.max(0), dh.max(0))
+}
+
+#[cfg(target_os = "windows")]
+pub fn frame_extent_hint(flags: u32) -> (i32, i32) {
+  if flags & LAUFEY_WINDOW_FLAG_FRAMELESS != 0 {
+    return (0, 0);
+  }
+  use windows_sys::Win32::Foundation::RECT;
+  use windows_sys::Win32::UI::HiDpi::{
+    AdjustWindowRectExForDpi, GetDpiForSystem,
+  };
+  use windows_sys::Win32::UI::WindowsAndMessaging::{
+    WS_EX_WINDOWEDGE, WS_OVERLAPPEDWINDOW,
+  };
+  let dpi = unsafe { GetDpiForSystem() };
+  if dpi == 0 {
+    return (0, 0);
+  }
+  let mut rect = RECT {
+    left: 0,
+    top: 0,
+    right: 0,
+    bottom: 0,
+  };
+  let ok = unsafe {
+    AdjustWindowRectExForDpi(
+      &mut rect,
+      WS_OVERLAPPEDWINDOW,
+      0,
+      WS_EX_WINDOWEDGE,
+      dpi,
+    )
+  };
+  if ok == 0 {
+    return (0, 0);
+  }
+  let scale = dpi as f64 / 96.0;
+  let extra_w = (rect.right - rect.left).max(0) as u32;
+  let extra_h = (rect.bottom - rect.top).max(0) as u32;
+  physical_size_to_logical_i32(extra_w, extra_h, scale)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn frame_extent_hint(_flags: u32) -> (i32, i32) {
+  (0, 0)
 }
 
 pub fn physical_pos_to_logical_f64(
@@ -3398,6 +3709,23 @@ pub fn apply_pending_post_create(ws: &WindowState, window: &Window) {
     *ws.current_inner_position.lock().unwrap() =
       Some(physical_pos_to_logical_i32(inner.x, inner.y, scale));
   }
+  // Same for the frame origin. `get_window_position` reads `pending_position`,
+  // which is only ever a *requested* position, so a window the OS placed
+  // itself reported (0, 0) until the first `Moved` arrived; and where the OS
+  // adjusted a requested position, it reported the request rather than where
+  // the window actually is.
+  // Same for the frame origin, so `get_window_position` has an authoritative
+  // value that does not depend on a request having been made.
+  if let Ok(outer) = window.outer_position() {
+    *ws.current_position.lock().unwrap() =
+      Some(physical_pos_to_logical_i32(outer.x, outer.y, scale));
+  }
+  let outer_size = window.outer_size();
+  if outer_size.width > 0 && outer_size.height > 0 {
+    *ws.current_outer_size.lock().unwrap() = Some(
+      physical_size_to_logical_i32(outer_size.width, outer_size.height, scale),
+    );
+  }
 
   if let Some(true) = *ws.pending_always_on_top.lock().unwrap() {
     window.set_window_level(WindowLevel::AlwaysOnTop);
@@ -3410,6 +3738,62 @@ pub fn apply_pending_post_create(ws: &WindowState, window: &Window) {
   if *ws.pending_flags.lock().unwrap() & LAUFEY_WINDOW_FLAG_NO_ACTIVATE != 0 {
     window.set_window_level(WindowLevel::AlwaysOnTop);
   }
+}
+
+/// Close out the creation-time `Resized` burst, called once the event loop
+/// first goes idle after the window was built.
+///
+/// Re-syncs the cached geometry from the real window and arms resize
+/// reporting. Re-syncing matters as much as arming: a stale `Resized` that
+/// slips past the first idle then carries a size equal to the one already
+/// cached, so the same-size check in the `Resized` handler drops it instead of
+/// reporting a size the window no longer has.
+///
+/// Returns true the first time it arms (so callers can skip repeat work).
+pub fn settle_creation_geometry(ws: &WindowState, window: &Window) -> bool {
+  let scale = window.scale_factor();
+  let size = window.inner_size();
+  let size = (size.width > 0 && size.height > 0)
+    .then(|| physical_size_to_logical_i32(size.width, size.height, scale));
+  let inner = window
+    .inner_position()
+    .ok()
+    .map(|p| physical_pos_to_logical_i32(p.x, p.y, scale));
+  let armed = arm_resize_reporting(ws, size, scale, inner);
+  let outer = window.outer_size();
+  if outer.width > 0 && outer.height > 0 {
+    *ws.current_outer_size.lock().unwrap() = Some(
+      physical_size_to_logical_i32(outer.width, outer.height, scale),
+    );
+  }
+  armed
+}
+
+/// The state machine behind [`settle_creation_geometry`], split out so the
+/// arm-once semantics are testable without a real `Window` (creating one
+/// needs a display server).
+///
+/// `size` and `inner` are already in logical pixels, and are skipped when the
+/// platform could not supply them.
+pub fn arm_resize_reporting(
+  ws: &WindowState,
+  size: Option<(i32, i32)>,
+  scale: f64,
+  inner: Option<(i32, i32)>,
+) -> bool {
+  let mut armed = ws.resize_reporting_armed.lock().unwrap();
+  if *armed {
+    return false;
+  }
+  if let Some(size) = size {
+    *ws.current_size.lock().unwrap() = Some(size);
+    *ws.current_scale.lock().unwrap() = scale;
+  }
+  if let Some(inner) = inner {
+    *ws.current_inner_position.lock().unwrap() = Some(inner);
+  }
+  *armed = true;
+  true
 }
 
 // --- Native dialog implementation ---
@@ -3666,6 +4050,26 @@ pub const LAUFEY_MOUSE_BUTTON_FORWARD: c_int = 4;
 pub const LAUFEY_MOUSE_PRESSED: c_int = 0;
 pub const LAUFEY_MOUSE_RELEASED: c_int = 1;
 
+/// Convert a LAUFEY modifier bitmask to winit's `ModifiersState`.
+pub fn laufey_to_modifiers_state(
+  flags: u32,
+) -> winit::keyboard::ModifiersState {
+  let mut s = winit::keyboard::ModifiersState::empty();
+  if flags & LAUFEY_MOD_SHIFT != 0 {
+    s |= winit::keyboard::ModifiersState::SHIFT;
+  }
+  if flags & LAUFEY_MOD_CONTROL != 0 {
+    s |= winit::keyboard::ModifiersState::CONTROL;
+  }
+  if flags & LAUFEY_MOD_ALT != 0 {
+    s |= winit::keyboard::ModifiersState::ALT;
+  }
+  if flags & LAUFEY_MOD_META != 0 {
+    s |= winit::keyboard::ModifiersState::SUPER;
+  }
+  s
+}
+
 /// Convert winit modifier state to LAUFEY modifier bitmask.
 pub fn modifiers_to_laufey(mods: winit::keyboard::ModifiersState) -> u32 {
   let mut flags = 0u32;
@@ -3919,6 +4323,65 @@ pub fn next_click_count(
   }
 }
 
+/// Re-read the pointer from the OS into `cursor_position`, in logical pixels.
+///
+/// winit's `MouseInput` carries no coordinates, so button events are reported
+/// at the last position `CursorMoved` cached. On Windows that is not
+/// reliable: `WM_*BUTTONDOWN` is a genuine queued message while `WM_MOUSEMOVE`
+/// is synthesized from the current pointer only when the queue holds nothing
+/// else, so a press can be dequeued *before* the move that preceded it and
+/// gets reported one position stale. Win32 button messages carry their own
+/// coordinates and browsers use those; the closest equivalent here is to ask
+/// the OS where the pointer is before dispatching.
+///
+/// No-op off Windows, where `CursorMoved` already arrives in order.
+#[cfg(target_os = "macos")]
+pub fn refresh_cursor_position(
+  _ws: &WindowState,
+  _window: &Window,
+  _scale_factor: f64,
+) {
+}
+
+#[cfg(target_os = "windows")]
+pub fn refresh_cursor_position(
+  ws: &WindowState,
+  window: &Window,
+  scale_factor: f64,
+) {
+  use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+  use windows_sys::Win32::Foundation::POINT;
+  use windows_sys::Win32::Graphics::Gdi::ScreenToClient;
+  use windows_sys::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+  let Ok(handle) = window.window_handle() else {
+    return;
+  };
+  let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+    return;
+  };
+  let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
+  let mut pt = POINT { x: 0, y: 0 };
+  unsafe {
+    if GetCursorPos(&mut pt) == 0 || ScreenToClient(hwnd, &mut pt) == 0 {
+      return;
+    }
+  }
+  // Client coordinates, so this is already relative to the content view;
+  // a drag past the edge legitimately reports negatives.
+  *ws.cursor_position.lock().unwrap() =
+    physical_pos_to_logical_f64(pt.x as f64, pt.y as f64, scale_factor);
+  *ws.cursor_seen.lock().unwrap() = true;
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+pub fn refresh_cursor_position(
+  _ws: &WindowState,
+  _window: &Window,
+  _scale_factor: f64,
+) {
+}
+
 pub fn dispatch_mouse_click_event(
   handlers: &EventHandlers,
   ws: &WindowState,
@@ -4034,6 +4497,136 @@ pub fn dispatch_wheel_event(
         delta_mode,
       );
     }
+  }
+}
+
+fn c_str_or_empty(p: *const c_char) -> String {
+  if p.is_null() {
+    String::new()
+  } else {
+    unsafe { CStr::from_ptr(p) }.to_string_lossy().into_owned()
+  }
+}
+
+fn is_modifier_key_name(key: &str) -> bool {
+  matches!(key, "Shift" | "Control" | "Alt" | "AltGraph" | "Meta")
+}
+
+fn laufey_button_to_winit(button: c_int) -> Option<winit::event::MouseButton> {
+  match button {
+    LAUFEY_MOUSE_BUTTON_LEFT => Some(winit::event::MouseButton::Left),
+    LAUFEY_MOUSE_BUTTON_RIGHT => Some(winit::event::MouseButton::Right),
+    LAUFEY_MOUSE_BUTTON_MIDDLE => Some(winit::event::MouseButton::Middle),
+    LAUFEY_MOUSE_BUTTON_BACK => Some(winit::event::MouseButton::Back),
+    LAUFEY_MOUSE_BUTTON_FORWARD => Some(winit::event::MouseButton::Forward),
+    _ => None,
+  }
+}
+
+/// Drive the same dispatch a real `WindowEvent` uses. Wheel deltas in
+/// `event` are DOM-signed; they are inverted into winit's incoming space
+/// so `winit_scroll_to_dom` is actually exercised.
+pub fn inject_test_input(
+  handlers: &EventHandlers,
+  ws: &WindowState,
+  window_id: u32,
+  event: &LaufeyTestInput,
+) -> bool {
+  let mods = laufey_to_modifiers_state(event.modifiers);
+  match event.kind {
+    LAUFEY_TEST_INPUT_KEY => {
+      let key = c_str_or_empty(event.key);
+      if is_modifier_key_name(&key) {
+        // Real KeyboardInput for these is skipped; use MODIFIERS.
+        return false;
+      }
+      let code = c_str_or_empty(event.code);
+      dispatch_raw_keyboard_event(
+        handlers,
+        window_id,
+        event.pressed,
+        &key,
+        &code,
+        mods,
+        event.repeat,
+      );
+      true
+    }
+    LAUFEY_TEST_INPUT_MOUSE_MOVE => {
+      let flush_enter = ws.note_cursor_move(event.x, event.y);
+      if flush_enter {
+        dispatch_cursor_enter_leave_event(handlers, ws, window_id, true, mods);
+      }
+      dispatch_mouse_move_event(handlers, window_id, event.x, event.y, mods);
+      true
+    }
+    LAUFEY_TEST_INPUT_MOUSE_BUTTON => {
+      let Some(button) = laufey_button_to_winit(event.button) else {
+        return false;
+      };
+      let state = if event.pressed {
+        winit::event::ElementState::Pressed
+      } else {
+        winit::event::ElementState::Released
+      };
+      dispatch_mouse_click_event(handlers, ws, window_id, state, button, mods);
+      true
+    }
+    LAUFEY_TEST_INPUT_WHEEL => {
+      let scale = {
+        let s = *ws.current_scale.lock().unwrap();
+        if s > 0.0 {
+          s
+        } else {
+          1.0
+        }
+      };
+      // Invert the DOM sign so the real mapping brings it back.
+      let delta = if event.delta_mode == LAUFEY_WHEEL_DELTA_PIXEL {
+        winit::event::MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+          event.delta_x * scale,
+          -event.delta_y * scale,
+        ))
+      } else {
+        winit::event::MouseScrollDelta::LineDelta(
+          event.delta_x as f32,
+          -event.delta_y as f32,
+        )
+      };
+      dispatch_wheel_event(handlers, ws, window_id, delta, mods, scale);
+      true
+    }
+    LAUFEY_TEST_INPUT_CURSOR_ENTER => {
+      if ws.note_cursor_entered() {
+        dispatch_cursor_enter_leave_event(handlers, ws, window_id, true, mods);
+      }
+      true
+    }
+    LAUFEY_TEST_INPUT_CURSOR_LEAVE => {
+      ws.note_cursor_left();
+      dispatch_cursor_enter_leave_event(handlers, ws, window_id, false, mods);
+      true
+    }
+    LAUFEY_TEST_INPUT_MODIFIERS => {
+      let next = winit::event::Modifiers::from(mods);
+      let prev = {
+        let mut slot = ws.inject_modifiers.lock().unwrap();
+        std::mem::replace(&mut *slot, next)
+      };
+      for (pressed, key, code) in modifier_key_edges(&prev, &next) {
+        dispatch_raw_keyboard_event(
+          handlers,
+          window_id,
+          pressed,
+          key,
+          code,
+          next.state(),
+          false,
+        );
+      }
+      true
+    }
+    _ => false,
   }
 }
 
@@ -4379,6 +4972,14 @@ mod mouse_tests {
   }
 
   #[test]
+  fn laufey_mod_bits_round_trip_to_winit() {
+    let s = laufey_to_modifiers_state(LAUFEY_MOD_SHIFT | LAUFEY_MOD_META);
+    assert!(s.shift_key() && s.super_key());
+    assert!(!s.control_key() && !s.alt_key());
+    assert_eq!(modifiers_to_laufey(s), LAUFEY_MOD_SHIFT | LAUFEY_MOD_META);
+  }
+
+  #[test]
   fn enter_waits_for_the_first_move() {
     let ws = WindowState::new();
     assert!(!ws.note_cursor_entered());
@@ -4485,6 +5086,83 @@ mod mouse_tests {
     let ws = WindowState::new();
     assert_eq!(*ws.current_scale.lock().unwrap(), primary_scale_hint());
     assert!(*ws.current_scale.lock().unwrap() > 0.0);
+  }
+
+  #[test]
+  fn frameless_window_has_no_frame_offset() {
+    assert_eq!(frame_offset_hint(LAUFEY_WINDOW_FLAG_FRAMELESS), (0, 0));
+  }
+
+  #[cfg(any(target_os = "windows", target_os = "macos"))]
+  #[test]
+  fn decorated_window_offsets_by_the_title_bar() {
+    // A decorated window's content starts below the caption, so the hint has
+    // to be further down than the frame origin. Both the caption height and
+    // the border width vary by DPI and theme, so only the sign is asserted.
+    let (dx, dy) = frame_offset_hint(0);
+    assert!(dy > 0, "expected a caption offset, got {dy}");
+    assert!(dx >= 0, "expected a non-negative border offset, got {dx}");
+    assert!(dy > dx, "caption should exceed the side border");
+  }
+
+  #[test]
+  fn frameless_window_has_no_frame_extent() {
+    assert_eq!(frame_extent_hint(LAUFEY_WINDOW_FLAG_FRAMELESS), (0, 0));
+  }
+
+  #[cfg(any(target_os = "windows", target_os = "macos"))]
+  #[test]
+  fn decorated_window_extent_includes_the_title_bar() {
+    let (dw, dh) = frame_extent_hint(0);
+    assert!(dh > 0, "expected a caption height, got {dh}");
+    assert!(dw >= 0, "expected a non-negative border width, got {dw}");
+    assert!(dh > dw, "caption should exceed the side borders");
+  }
+
+  #[test]
+  fn new_window_starts_with_resize_reporting_disarmed() {
+    // Otherwise the creation-time `Resized` burst reaches the app.
+    let ws = WindowState::new();
+    assert!(!*ws.resize_reporting_armed.lock().unwrap());
+  }
+
+  #[test]
+  fn arming_resyncs_geometry_and_happens_once() {
+    let ws = WindowState::new();
+    assert!(arm_resize_reporting(
+      &ws,
+      Some((600, 400)),
+      1.5,
+      Some((7, 30))
+    ));
+    assert!(*ws.resize_reporting_armed.lock().unwrap());
+    assert_eq!(*ws.current_size.lock().unwrap(), Some((600, 400)));
+    assert_eq!(*ws.current_scale.lock().unwrap(), 1.5);
+    assert_eq!(*ws.current_inner_position.lock().unwrap(), Some((7, 30)));
+
+    // `about_to_wait` runs on every loop iteration, so this is called
+    // constantly; only the first call may touch the cache. Re-syncing later
+    // would clobber a real resize with a stale value.
+    assert!(!arm_resize_reporting(
+      &ws,
+      Some((999, 999)),
+      3.0,
+      Some((9, 9))
+    ));
+    assert_eq!(*ws.current_size.lock().unwrap(), Some((600, 400)));
+    assert_eq!(*ws.current_scale.lock().unwrap(), 1.5);
+    assert_eq!(*ws.current_inner_position.lock().unwrap(), Some((7, 30)));
+  }
+
+  #[test]
+  fn arming_without_geometry_still_arms() {
+    // A platform that cannot report size or position yet (Wayland gives no
+    // window position at all) must not leave reporting disarmed forever.
+    let ws = WindowState::new();
+    assert!(arm_resize_reporting(&ws, None, 1.0, None));
+    assert!(*ws.resize_reporting_armed.lock().unwrap());
+    assert_eq!(*ws.current_size.lock().unwrap(), None);
+    assert_eq!(*ws.current_inner_position.lock().unwrap(), None);
   }
 
   #[test]

@@ -511,6 +511,7 @@ bool IsNSWindowResizable(void* cef_handle);
 // Overall window opacity in [0.0, 1.0] via NSWindow.alphaValue.
 void SetNSWindowOpacity(void* cef_handle, double opacity);
 double GetNSWindowOpacity(void* cef_handle);
+bool GetNSWindowOuterSize(void* cef_handle, int* width, int* height);
 // Click passthrough via NSWindow.ignoresMouseEvents: while enabled all mouse
 // input falls through to whatever is beneath the window.
 void SetNSWindowClickPassthrough(void* cef_handle, bool enabled);

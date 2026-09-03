@@ -404,14 +404,25 @@ but ride the pre-existing `native-e2e` CI exclusions for those combos (`§`
 status note above) — not gated by this change, but not covered by CI for it
 either.
 
+**Implemented (API 35, same version as scale / inner-position — unreleased):**
+
+```c
+// Post a synthetic input event through the same dispatch a real OS event
+// uses. Wheel deltas are DOM-signed (positive Y is scroll down).
+bool (*test_inject_input)(void* backend_data, uint32_t window_id,
+                          const laufey_test_input_t* event);
+```
+
+Winit runs the `WindowEvent` path (`modifier_key_edges`, `next_click_count`,
+`winit_scroll_to_dom`, enter-waits-for-move). CEF / WebView call `Dispatch*`
+with already-DOM values (click_count 1). The capi exposes
+`laufey::test_inject_input`. `native_e2e` capability-probes the hook.
+
 **Not yet added** (future hooks, same append-and-`N/A` pattern):
 
 ```c
 // Serialize the menu the backend ACTUALLY built, for template->native readback.
 laufey_value_t* (*test_dump_menu)(void* backend_data, int surface, uint32_t id);
-// Post a synthetic input event for the mouse/keyboard/wheel/cursor handlers.
-bool (*test_inject_input)(void* backend_data, uint32_t window_id,
-                          const laufey_test_input_t* event);
 ```
 
 Note the contrast with macOS self-AX (`§7.2`): reading the OS's view of a widget

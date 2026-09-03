@@ -156,6 +156,15 @@ static void Backend_GetWindowSize(void* data, uint32_t window_id, int* width,
   }
 }
 
+static void Backend_GetWindowOuterSize(void* data, uint32_t window_id,
+                                       int* width, int* height) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  LaufeyBackend* backend = loader->GetBackend();
+  if (backend) {
+    backend->GetWindowOuterSize(window_id, width, height);
+  }
+}
+
 static void Backend_SetWindowPosition(void* data, uint32_t window_id, int x,
                                       int y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
@@ -698,6 +707,42 @@ static bool Backend_TestClickMenuItem(void* /*data*/, const char* item_id) {
   return laufey_common::TestClickMenuItem(item_id);
 }
 
+static void InjectKey(void* ctx, uint32_t window_id, int state, const char* key,
+                      const char* code, uint32_t modifiers, bool repeat) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchKeyboardEvent(
+      window_id, state, key, code, modifiers, repeat);
+}
+static void InjectClick(void* ctx, uint32_t window_id, int state, int button,
+                        double x, double y, uint32_t modifiers,
+                        int32_t click_count) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchMouseClickEvent(
+      window_id, state, button, x, y, modifiers, click_count);
+}
+static void InjectMove(void* ctx, uint32_t window_id, double x, double y,
+                       uint32_t modifiers) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchMouseMoveEvent(window_id, x, y,
+                                                           modifiers);
+}
+static void InjectWheel(void* ctx, uint32_t window_id, double delta_x,
+                        double delta_y, double x, double y, uint32_t modifiers,
+                        int32_t delta_mode) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchWheelEvent(
+      window_id, delta_x, delta_y, x, y, modifiers, delta_mode);
+}
+static void InjectEnterLeave(void* ctx, uint32_t window_id, int entered,
+                             double x, double y, uint32_t modifiers) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchCursorEnterLeaveEvent(
+      window_id, entered, x, y, modifiers);
+}
+
+static bool Backend_TestInjectInput(void* data, uint32_t window_id,
+                                    const laufey_test_input_t* event) {
+  laufey_common::TestInjectSink sink = {
+      InjectKey, InjectClick, InjectMove, InjectWheel, InjectEnterLeave, data,
+  };
+  return laufey_common::TestInjectInput(window_id, event, sink);
+}
+
 static void Backend_SetTrayMenu(void* data, uint32_t tray_id,
                                 laufey_value_t* menu_template,
                                 laufey_menu_click_fn on_click,
@@ -786,6 +831,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.quit = Backend_Quit;
   backend_api_.set_window_size = Backend_SetWindowSize;
   backend_api_.get_window_size = Backend_GetWindowSize;
+  backend_api_.get_window_outer_size = Backend_GetWindowOuterSize;
   backend_api_.set_window_position = Backend_SetWindowPosition;
   backend_api_.get_window_position = Backend_GetWindowPosition;
   backend_api_.get_window_inner_position = Backend_GetWindowInnerPosition;
@@ -852,6 +898,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.close_window = Backend_CloseWindow;
   backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;
   backend_api_.test_trigger_close_requested = Backend_TestTriggerCloseRequested;
+  backend_api_.test_inject_input = Backend_TestInjectInput;
   backend_api_.set_page_load_handler = Backend_SetPageLoadHandler;
   backend_api_.show_dialog = Backend_ShowDialog;
   backend_api_.string_free = Backend_StringFree;

@@ -50,6 +50,8 @@ The pointers group into:
   `set_window_opacity`/`get_window_opacity` (whole-window alpha, API ≥ 28),
   `get_window_scale_factor` (`window.devicePixelRatio`, API ≥ 35),
   `get_window_inner_position` (content-view origin, API ≥ 35),
+  `get_window_outer_size` (`window.outerWidth` / `outerHeight`, API ≥ 35),
+  `test_inject_input` (synthetic pointer / key / wheel, API ≥ 35),
   `show`/`hide`/`is_visible`, `focus`, `quit`, `post_ui_task`.
 - **Value marshalling** — the `value_*` family (below).
 - **JavaScript interop** — `set_js_call_handler`, `js_call_respond`,

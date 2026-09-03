@@ -308,6 +308,7 @@ class WebView2Backend : public LaufeyBackend {
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void GetWindowOuterSize(uint32_t window_id, int* width, int* height) override;
   double GetWindowScaleFactor(uint32_t window_id) override;
   void SetWindowPosition(uint32_t window_id, int x, int y) override;
   void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
@@ -1170,6 +1171,11 @@ void WebView2Backend::GetWindowSize(uint32_t window_id, int* width,
         *height = rect.bottom - rect.top;
     }
   }
+}
+
+void WebView2Backend::GetWindowOuterSize(uint32_t window_id, int* width,
+                                         int* height) {
+  GetWindowSize(window_id, width, height);
 }
 
 void WebView2Backend::SetWindowPosition(uint32_t window_id, int x, int y) {

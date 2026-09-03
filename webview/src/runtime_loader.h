@@ -389,8 +389,15 @@ class LaufeyBackend {
                          laufey_js_result_fn callback, void* callback_data) = 0;
   virtual void SetWindowSize(uint32_t window_id, int width, int height) = 0;
   virtual void GetWindowSize(uint32_t window_id, int* width, int* height) = 0;
+  // Chrome-inclusive size in the same space as GetWindowSize. Default is
+  // the content size (no client chrome).
+  virtual void GetWindowOuterSize(uint32_t window_id, int* width, int* height) {
+    GetWindowSize(window_id, width, height);
+  }
   // Physical pixels per DIP (`window.devicePixelRatio`). Default 1.0.
-  virtual double GetWindowScaleFactor(uint32_t /*window_id*/) { return 1.0; }
+  virtual double GetWindowScaleFactor(uint32_t /*window_id*/) {
+    return 1.0;
+  }
   virtual void SetWindowPosition(uint32_t window_id, int x, int y) = 0;
   virtual void GetWindowPosition(uint32_t window_id, int* x, int* y) = 0;
   // Content-view origin in the same space as GetWindowPosition. Default is

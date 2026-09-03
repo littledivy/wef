@@ -62,6 +62,7 @@ class WKWebViewBackend : public LaufeyBackend {
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void GetWindowOuterSize(uint32_t window_id, int* width, int* height) override;
   double GetWindowScaleFactor(uint32_t window_id) override;
   void SetWindowPosition(uint32_t window_id, int x, int y) override;
   void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
@@ -1506,6 +1507,24 @@ void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width,
           [state->window contentRectForFrameRect:[state->window frame]];
       w = static_cast<int>(content.size.width);
       h = static_cast<int>(content.size.height);
+    }
+  });
+  if (width)
+    *width = w;
+  if (height)
+    *height = h;
+}
+
+void WKWebViewBackend::GetWindowOuterSize(uint32_t window_id, int* width,
+                                          int* height) {
+  __block int w = 0, h = 0;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      NSRect frame = [state->window frame];
+      w = static_cast<int>(frame.size.width);
+      h = static_cast<int>(frame.size.height);
     }
   });
   if (width)

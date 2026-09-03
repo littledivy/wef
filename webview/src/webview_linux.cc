@@ -354,6 +354,7 @@ class WebKitGTKBackend : public LaufeyBackend {
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void GetWindowOuterSize(uint32_t window_id, int* width, int* height) override;
   double GetWindowScaleFactor(uint32_t window_id) override;
   void SetWindowPosition(uint32_t window_id, int x, int y) override;
   void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
@@ -967,6 +968,30 @@ void WebKitGTKBackend::GetWindowSize(uint32_t window_id, int* width,
     auto* state = GetWindow(window_id);
     if (state) {
       gtk_window_get_size(GTK_WINDOW(state->window), &w, &h);
+    }
+  });
+  if (width)
+    *width = w;
+  if (height)
+    *height = h;
+}
+
+void WebKitGTKBackend::GetWindowOuterSize(uint32_t window_id, int* width,
+                                          int* height) {
+  int w = 0, h = 0;
+  gtk_invoke_sync([&] {
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      GdkWindow* gw = gtk_widget_get_window(GTK_WIDGET(state->window));
+      if (gw) {
+        GdkRectangle ext = {0, 0, 0, 0};
+        gdk_window_get_frame_extents(gw, &ext);
+        w = ext.width;
+        h = ext.height;
+      } else {
+        gtk_window_get_size(GTK_WINDOW(state->window), &w, &h);
+      }
     }
   });
   if (width)
