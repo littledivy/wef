@@ -31,6 +31,7 @@
 #include "include/cef_registration.h"
 #include "include/cef_task.h"
 #include "include/views/cef_browser_view.h"
+#include "include/views/cef_display.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/wrapper/cef_helpers.h"
@@ -280,6 +281,42 @@ static void Backend_GetWindowSize(void* data, uint32_t window_id, int* width,
     *height = h;
 }
 
+static void Backend_GetWindowOuterSize(void* data, uint32_t window_id,
+                                       int* width, int* height) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  int w = 0, h = 0;
+  if (browser) {
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (!browser_view)
+        return;
+      auto window = browser_view->GetWindow();
+      if (!window)
+        return;
+#ifdef _WIN32
+      HWND hwnd = window->GetWindowHandle();
+      RECT rect;
+      if (hwnd && GetWindowRect(hwnd, &rect)) {
+        w = rect.right - rect.left;
+        h = rect.bottom - rect.top;
+        return;
+      }
+#elif defined(__APPLE__)
+      if (GetNSWindowOuterSize(window->GetWindowHandle(), &w, &h))
+        return;
+#endif
+      CefSize size = window->GetSize();
+      w = size.width;
+      h = size.height;
+    });
+  }
+  if (width)
+    *width = w;
+  if (height)
+    *height = h;
+}
+
 static void Backend_SetWindowPosition(void* data, uint32_t window_id, int x,
                                       int y) {
   RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
@@ -315,6 +352,27 @@ static void Backend_GetWindowPosition(void* data, uint32_t window_id, int* x,
           px = pos.x;
           py = pos.y;
         }
+      }
+    });
+  }
+  if (x)
+    *x = px;
+  if (y)
+    *y = py;
+}
+
+static void Backend_GetWindowInnerPosition(void* data, uint32_t window_id,
+                                           int* x, int* y) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  int px = 0, py = 0;
+  if (browser) {
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (browser_view) {
+        CefRect bounds = browser_view->GetBoundsInScreen();
+        px = bounds.x;
+        py = bounds.y;
       }
     });
   }
@@ -501,6 +559,26 @@ static double Backend_GetWindowOpacity(void* data, uint32_t window_id) {
 #elif defined(__linux__)
       result = GetLinuxWindowOpacity(window->GetWindowHandle());
 #endif
+    });
+  }
+  return result;
+}
+
+static double Backend_GetWindowScaleFactor(void* data, uint32_t window_id) {
+  RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);
+  CefRefPtr<CefBrowser> browser = loader->GetBrowserForWindow(window_id);
+  double result = 1.0;
+  if (browser) {
+    cef_invoke_sync([&] {
+      auto browser_view = CefBrowserView::GetForBrowser(browser);
+      if (!browser_view)
+        return;
+      auto window = browser_view->GetWindow();
+      if (!window)
+        return;
+      auto display = window->GetDisplay();
+      if (display)
+        result = display->GetDeviceScaleFactor();
     });
   }
   return result;
@@ -1757,6 +1835,42 @@ static bool Backend_TestClickMenuItem(void* /*data*/, const char* item_id) {
   return laufey_common::TestClickMenuItem(item_id);
 }
 
+static void InjectKey(void* ctx, uint32_t window_id, int state, const char* key,
+                      const char* code, uint32_t modifiers, bool repeat) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchKeyboardEvent(
+      window_id, state, key, code, modifiers, repeat);
+}
+static void InjectClick(void* ctx, uint32_t window_id, int state, int button,
+                        double x, double y, uint32_t modifiers,
+                        int32_t click_count) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchMouseClickEvent(
+      window_id, state, button, x, y, modifiers, click_count);
+}
+static void InjectMove(void* ctx, uint32_t window_id, double x, double y,
+                       uint32_t modifiers) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchMouseMoveEvent(window_id, x, y,
+                                                           modifiers);
+}
+static void InjectWheel(void* ctx, uint32_t window_id, double delta_x,
+                        double delta_y, double x, double y, uint32_t modifiers,
+                        int32_t delta_mode) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchWheelEvent(
+      window_id, delta_x, delta_y, x, y, modifiers, delta_mode);
+}
+static void InjectEnterLeave(void* ctx, uint32_t window_id, int entered,
+                             double x, double y, uint32_t modifiers) {
+  static_cast<RuntimeLoader*>(ctx)->DispatchCursorEnterLeaveEvent(
+      window_id, entered, x, y, modifiers);
+}
+
+static bool Backend_TestInjectInput(void* data, uint32_t window_id,
+                                    const laufey_test_input_t* event) {
+  laufey_common::TestInjectSink sink = {
+      InjectKey, InjectClick, InjectMove, InjectWheel, InjectEnterLeave, data,
+  };
+  return laufey_common::TestInjectInput(window_id, event, sink);
+}
+
 void RuntimeLoader::InitializeBackendApi() {
   memset(&backend_api_, 0, sizeof(backend_api_));
   backend_api_.version = LAUFEY_API_VERSION;
@@ -1773,14 +1887,17 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.quit = Backend_Quit;
   backend_api_.set_window_size = Backend_SetWindowSize;
   backend_api_.get_window_size = Backend_GetWindowSize;
+  backend_api_.get_window_outer_size = Backend_GetWindowOuterSize;
   backend_api_.set_window_position = Backend_SetWindowPosition;
   backend_api_.get_window_position = Backend_GetWindowPosition;
+  backend_api_.get_window_inner_position = Backend_GetWindowInnerPosition;
   backend_api_.set_resizable = Backend_SetResizable;
   backend_api_.is_resizable = Backend_IsResizable;
   backend_api_.set_always_on_top = Backend_SetAlwaysOnTop;
   backend_api_.is_always_on_top = Backend_IsAlwaysOnTop;
   backend_api_.set_window_opacity = Backend_SetWindowOpacity;
   backend_api_.get_window_opacity = Backend_GetWindowOpacity;
+  backend_api_.get_window_scale_factor = Backend_GetWindowScaleFactor;
   backend_api_.set_click_passthrough = Backend_SetClickPassthrough;
   backend_api_.is_click_passthrough = Backend_IsClickPassthrough;
   backend_api_.set_click_passthrough_forward =
@@ -1831,6 +1948,7 @@ void RuntimeLoader::InitializeBackendApi() {
   backend_api_.set_move_handler = Backend_SetMoveHandler;
   backend_api_.set_close_requested_handler = Backend_SetCloseRequestedHandler;
   backend_api_.test_trigger_close_requested = Backend_TestTriggerCloseRequested;
+  backend_api_.test_inject_input = Backend_TestInjectInput;
 
   backend_api_.poll_js_calls = [](void* data) {
     RuntimeLoader* loader = static_cast<RuntimeLoader*>(data);

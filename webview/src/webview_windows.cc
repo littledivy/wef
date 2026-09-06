@@ -308,8 +308,11 @@ class WebView2Backend : public LaufeyBackend {
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void GetWindowOuterSize(uint32_t window_id, int* width, int* height) override;
+  double GetWindowScaleFactor(uint32_t window_id) override;
   void SetWindowPosition(uint32_t window_id, int x, int y) override;
   void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
+  void GetWindowInnerPosition(uint32_t window_id, int* x, int* y) override;
   void SetResizable(uint32_t window_id, bool resizable) override;
   bool IsResizable(uint32_t window_id) override;
   void SetAlwaysOnTop(uint32_t window_id, bool always_on_top) override;
@@ -1146,6 +1149,15 @@ void WebView2Backend::SetWindowSize(uint32_t window_id, int width, int height) {
   }
 }
 
+double WebView2Backend::GetWindowScaleFactor(uint32_t window_id) {
+  std::lock_guard<std::recursive_mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (!state)
+    return 1.0;
+  UINT dpi = GetDpiForWindow(state->hwnd);
+  return dpi > 0 ? dpi / 96.0 : 1.0;
+}
+
 void WebView2Backend::GetWindowSize(uint32_t window_id, int* width,
                                     int* height) {
   std::lock_guard<std::recursive_mutex> lock(windows_mutex_);
@@ -1161,6 +1173,11 @@ void WebView2Backend::GetWindowSize(uint32_t window_id, int* width,
   }
 }
 
+void WebView2Backend::GetWindowOuterSize(uint32_t window_id, int* width,
+                                         int* height) {
+  GetWindowSize(window_id, width, height);
+}
+
 void WebView2Backend::SetWindowPosition(uint32_t window_id, int x, int y) {
   if (GetCurrentThreadId() != ui_thread_id_) {
     RunOnUiThread(
@@ -1171,6 +1188,21 @@ void WebView2Backend::SetWindowPosition(uint32_t window_id, int x, int y) {
   auto* state = GetWindow(window_id);
   if (state) {
     SetWindowPos(state->hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+  }
+}
+
+void WebView2Backend::GetWindowInnerPosition(uint32_t window_id, int* x,
+                                             int* y) {
+  std::lock_guard<std::recursive_mutex> lock(windows_mutex_);
+  auto* state = GetWindow(window_id);
+  if (!state)
+    return;
+  POINT pt = {0, 0};
+  if (ClientToScreen(state->hwnd, &pt)) {
+    if (x)
+      *x = pt.x;
+    if (y)
+      *y = pt.y;
   }
 }
 

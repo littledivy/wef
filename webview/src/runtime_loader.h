@@ -389,8 +389,22 @@ class LaufeyBackend {
                          laufey_js_result_fn callback, void* callback_data) = 0;
   virtual void SetWindowSize(uint32_t window_id, int width, int height) = 0;
   virtual void GetWindowSize(uint32_t window_id, int* width, int* height) = 0;
+  // Chrome-inclusive size in the same space as GetWindowSize. Default is
+  // the content size (no client chrome).
+  virtual void GetWindowOuterSize(uint32_t window_id, int* width, int* height) {
+    GetWindowSize(window_id, width, height);
+  }
+  // Physical pixels per DIP (`window.devicePixelRatio`). Default 1.0.
+  virtual double GetWindowScaleFactor(uint32_t /*window_id*/) {
+    return 1.0;
+  }
   virtual void SetWindowPosition(uint32_t window_id, int x, int y) = 0;
   virtual void GetWindowPosition(uint32_t window_id, int* x, int* y) = 0;
+  // Content-view origin in the same space as GetWindowPosition. Default is
+  // the frame origin (no chrome offset).
+  virtual void GetWindowInnerPosition(uint32_t window_id, int* x, int* y) {
+    GetWindowPosition(window_id, x, y);
+  }
   virtual void SetResizable(uint32_t window_id, bool resizable) = 0;
   virtual bool IsResizable(uint32_t window_id) = 0;
   virtual void SetAlwaysOnTop(uint32_t window_id, bool always_on_top) = 0;

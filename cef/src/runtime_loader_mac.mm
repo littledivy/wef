@@ -61,6 +61,19 @@ double GetNSWindowOpacity(void* cef_handle) {
   return 1.0;
 }
 
+bool GetNSWindowOuterSize(void* cef_handle, int* width, int* height) {
+  NSView* view = (__bridge NSView*)cef_handle;
+  NSWindow* nswindow = [view window];
+  if (!nswindow)
+    return false;
+  NSRect frame = [nswindow frame];
+  if (width)
+    *width = (int)frame.size.width;
+  if (height)
+    *height = (int)frame.size.height;
+  return true;
+}
+
 void SetNSWindowClickPassthrough(void* cef_handle, bool enabled) {
   NSView* view = (__bridge NSView*)cef_handle;
   NSWindow* nswindow = [view window];

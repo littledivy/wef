@@ -18,6 +18,7 @@ let win = Window::new(800, 600)
 
 win.set_size(1024, 768);
 let (width, height) = win.get_size();
+let scale = win.get_scale_factor(); // window.devicePixelRatio
 win.focus();
 win.hide();
 ```
@@ -28,7 +29,11 @@ operating-system chrome), whether it is a non-activating panel that does not
 steal keyboard focus, and whether it has a transparent background. You set those
 through `Window::new_with_options`. Everything else is a live setter. All
 positions and sizes are expressed in density-independent pixels with the origin
-at the top-left of the screen. The Winit backend can create and manage windows,
+at the top-left of the screen. `Window::get_scale_factor` is the physical-to-DIP
+ratio for that window (`window.devicePixelRatio`); it updates when the window
+moves to another display. `get_inner_position` is the content-view origin
+(`get_position` plus title-bar chrome), so `inner + client` is
+`MouseEvent.screenX` / `screenY`. The Winit backend can create and manage windows,
 but because it has no web engine it cannot navigate to a URL or execute
 JavaScript.
 

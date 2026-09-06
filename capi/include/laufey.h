@@ -11,7 +11,7 @@
 extern "C" {
 #endif
 
-#define LAUFEY_API_VERSION 34
+#define LAUFEY_API_VERSION 35
 
 // Window handle types for get_window_handle_type
 #define LAUFEY_WINDOW_HANDLE_UNKNOWN 0
@@ -116,6 +116,33 @@ typedef void (*laufey_menu_click_fn)(void* user_data, uint32_t window_id,
 #define LAUFEY_MOUSE_PRESSED 0
 #define LAUFEY_MOUSE_RELEASED 1
 
+// Synthetic input kinds for test_inject_input (API >= 35).
+#define LAUFEY_TEST_INPUT_KEY 0
+#define LAUFEY_TEST_INPUT_MOUSE_MOVE 1
+#define LAUFEY_TEST_INPUT_MOUSE_BUTTON 2
+#define LAUFEY_TEST_INPUT_WHEEL 3
+#define LAUFEY_TEST_INPUT_CURSOR_ENTER 4
+#define LAUFEY_TEST_INPUT_CURSOR_LEAVE 5
+#define LAUFEY_TEST_INPUT_MODIFIERS 6
+
+// Test-only input record. Unused fields are ignored per `kind`. Wheel
+// deltas are DOM-signed (positive Y is scroll down); the winit backend
+// converts them through the same mapping a real OS event uses.
+typedef struct laufey_test_input {
+  int kind;            // LAUFEY_TEST_INPUT_*
+  uint32_t modifiers;  // bitmask of LAUFEY_MOD_*
+  const char* key;     // KEY
+  const char* code;    // KEY
+  bool pressed;        // KEY / MOUSE_BUTTON
+  bool repeat;         // KEY
+  int button;          // MOUSE_BUTTON: LAUFEY_MOUSE_BUTTON_*
+  double x;            // MOVE / BUTTON / WHEEL / ENTER / LEAVE
+  double y;
+  double delta_x;  // WHEEL
+  double delta_y;
+  int delta_mode;  // WHEEL: LAUFEY_WHEEL_DELTA_*
+} laufey_test_input_t;
+
 // Dialog types
 #define LAUFEY_DIALOG_ALERT 0
 #define LAUFEY_DIALOG_CONFIRM 1
@@ -206,8 +233,8 @@ typedef void (*laufey_mouse_move_fn)(
 // Callback for wheel (scroll) events.
 typedef void (*laufey_wheel_fn)(
     void* user_data, uint32_t window_id,
-    double delta_x,      // horizontal scroll amount
-    double delta_y,      // vertical scroll amount
+    double delta_x,      // horizontal scroll; positive = right (DOM WheelEvent)
+    double delta_y,      // vertical scroll; positive = down (DOM WheelEvent)
     double x,            // cursor x position in window coordinates
     double y,            // cursor y position in window coordinates
     uint32_t modifiers,  // bitmask of LAUFEY_MOD_* flags
@@ -841,6 +868,46 @@ struct laufey_backend_api {
   // false if the id is unknown or the backend doesn't support forwarding.
   // NULL on backends older than API version 34.
   bool (*is_click_passthrough_forward)(void* backend_data, uint32_t window_id);
+
+  // --- Device pixel ratio (API >= 35) ----------------------------------------
+  //
+  // Physical pixels per density-independent pixel for this window, the same
+  // ratio as the Web `window.devicePixelRatio`. Live: a window that moves to
+  // another monitor reports the new scale on the next call. Returns 1.0 if
+  // the id is unknown. NULL on backends older than API version 35; callers
+  // must null-check and treat NULL as 1.0.
+  double (*get_window_scale_factor)(void* backend_data, uint32_t window_id);
+
+  // --- Content-view origin (API >= 35) ---------------------------------------
+  //
+  // Top-left of the content view in the same DIP, top-left-origin screen
+  // space as get_window_position. Differs from get_window_position by the
+  // title-bar / frame chrome, so `inner + clientX/Y` is MouseEvent.screenX/Y.
+  // Writes 0,0 if the id is unknown. NULL on backends older than API 35;
+  // callers must null-check and fall back to get_window_position.
+  void (*get_window_inner_position)(void* backend_data, uint32_t window_id,
+                                    int* x, int* y);
+
+  // --- Outer window size (API >= 35) -----------------------------------------
+  //
+  // Chrome-inclusive size in the same DIP space as get_window_size
+  // (`window.outerWidth` / `outerHeight`). A frameless window matches
+  // get_window_size. Writes 0,0 if the id is unknown. NULL on backends
+  // older than this field; callers must null-check and fall back to
+  // get_window_size.
+  void (*get_window_outer_size)(void* backend_data, uint32_t window_id,
+                                int* width, int* height);
+
+  // --- Test input injection (API >= 35) --------------------------------------
+  //
+  // Test-only. Posts a synthetic input event through the same dispatch a
+  // real OS event uses for this backend (winit: WindowEvent handlers;
+  // CEF / WebView: Dispatch* after native translation). Returns true if
+  // the event was accepted (known kind; winit also requires a live
+  // window). NULL on backends that do not implement it; callers should
+  // treat NULL like the other test hooks.
+  bool (*test_inject_input)(void* backend_data, uint32_t window_id,
+                            const laufey_test_input_t* event);
 };
 
 #ifdef __cplusplus

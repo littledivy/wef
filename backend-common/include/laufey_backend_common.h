@@ -442,6 +442,27 @@ void RegisterMenuClick(const std::string& id, laufey_menu_click_fn fn,
 // `test_click_menu_item` hook used by automated e2e tests.
 bool TestClickMenuItem(const char* item_id);
 
+// Dispatch table so CEF and WebView share the inject implementation
+// without depending on each other's RuntimeLoader type.
+struct TestInjectSink {
+  void (*key)(void* ctx, uint32_t window_id, int state, const char* key,
+              const char* code, uint32_t modifiers, bool repeat);
+  void (*click)(void* ctx, uint32_t window_id, int state, int button, double x,
+                double y, uint32_t modifiers, int32_t click_count);
+  void (*move)(void* ctx, uint32_t window_id, double x, double y,
+               uint32_t modifiers);
+  void (*wheel)(void* ctx, uint32_t window_id, double delta_x, double delta_y,
+                double x, double y, uint32_t modifiers, int32_t delta_mode);
+  void (*enter_leave)(void* ctx, uint32_t window_id, int entered, double x,
+                      double y, uint32_t modifiers);
+  void* ctx;
+};
+
+// Test-only. Posts `event` through `sink`. Thin path: already-DOM values,
+// click_count 1. Returns false on a null event or unknown kind.
+bool TestInjectInput(uint32_t window_id, const laufey_test_input_t* event,
+                     const TestInjectSink& sink);
+
 }  // namespace laufey_common
 
 #endif  // LAUFEY_BACKEND_COMMON_H_

@@ -29,7 +29,7 @@ pub use mouse::*;
 /// (`github.com/denoland/laufey/releases/tag/v{VERSION}`).
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-pub const LAUFEY_API_VERSION: u32 = 34;
+pub const LAUFEY_API_VERSION: u32 = 35;
 
 /// Creation-time window style flags for [`Window::new_with_options`].
 /// Mirror the `LAUFEY_WINDOW_FLAG_*` constants in `laufey.h`.
@@ -830,6 +830,31 @@ impl Window {
     (width, height)
   }
 
+  /// Chrome-inclusive size (`window.outerWidth` / `outerHeight`).
+  /// Falls back to [`Window::get_size`] when the backend does not report it.
+  pub fn get_outer_size(&self) -> (i32, i32) {
+    let api = api();
+    if let Some(f) = api.get_window_outer_size {
+      let mut width: c_int = 0;
+      let mut height: c_int = 0;
+      unsafe { f(api.backend_data, self.id, &mut width, &mut height) };
+      (width, height)
+    } else {
+      self.get_size()
+    }
+  }
+
+  /// Physical pixels per DIP for this window (`window.devicePixelRatio`).
+  /// Returns `1.0` when the backend does not report a scale.
+  pub fn get_scale_factor(&self) -> f64 {
+    let api = api();
+    if let Some(f) = api.get_window_scale_factor {
+      unsafe { f(api.backend_data, self.id) }
+    } else {
+      1.0
+    }
+  }
+
   pub fn position(self, x: i32, y: i32) -> Self {
     self.set_position(x, y);
     self
@@ -850,6 +875,20 @@ impl Window {
       unsafe { f(api.backend_data, self.id, &mut x, &mut y) };
     }
     (x, y)
+  }
+
+  /// Top-left of the content view in screen DIP. Falls back to
+  /// [`Window::get_position`] when the backend does not report it.
+  pub fn get_inner_position(&self) -> (i32, i32) {
+    let api = api();
+    if let Some(f) = api.get_window_inner_position {
+      let mut x: c_int = 0;
+      let mut y: c_int = 0;
+      unsafe { f(api.backend_data, self.id, &mut x, &mut y) };
+      (x, y)
+    } else {
+      self.get_position()
+    }
   }
 
   pub fn resizable(self, resizable: bool) -> Self {
@@ -1650,6 +1689,162 @@ pub fn test_trigger_close_requested(window_id: u32) -> bool {
     return false;
   };
   unsafe { f(api.backend_data, window_id) }
+}
+
+pub const LAUFEY_TEST_INPUT_KEY: i32 = 0;
+pub const LAUFEY_TEST_INPUT_MOUSE_MOVE: i32 = 1;
+pub const LAUFEY_TEST_INPUT_MOUSE_BUTTON: i32 = 2;
+pub const LAUFEY_TEST_INPUT_WHEEL: i32 = 3;
+pub const LAUFEY_TEST_INPUT_CURSOR_ENTER: i32 = 4;
+pub const LAUFEY_TEST_INPUT_CURSOR_LEAVE: i32 = 5;
+pub const LAUFEY_TEST_INPUT_MODIFIERS: i32 = 6;
+
+/// A synthetic input event for [`test_inject_input`].
+#[derive(Clone, Debug)]
+pub enum TestInput {
+  Key {
+    key: String,
+    code: String,
+    pressed: bool,
+    repeat: bool,
+    modifiers: u32,
+  },
+  MouseMove {
+    x: f64,
+    y: f64,
+    modifiers: u32,
+  },
+  MouseButton {
+    button: i32,
+    pressed: bool,
+    x: f64,
+    y: f64,
+    modifiers: u32,
+  },
+  Wheel {
+    delta_x: f64,
+    delta_y: f64,
+    delta_mode: i32,
+    x: f64,
+    y: f64,
+    modifiers: u32,
+  },
+  CursorEnter {
+    x: f64,
+    y: f64,
+    modifiers: u32,
+  },
+  CursorLeave {
+    x: f64,
+    y: f64,
+    modifiers: u32,
+  },
+  Modifiers {
+    modifiers: u32,
+  },
+}
+
+/// Test-only. Posts `event` through the same dispatch a real OS event uses.
+/// Returns `false` if the backend has no hook, the window is unknown (winit),
+/// or the event was rejected (unknown kind / modifier sent as `Key`).
+///
+/// Wheel deltas are DOM-signed (positive Y is scroll down).
+pub fn test_inject_input(window_id: u32, event: &TestInput) -> bool {
+  let api = api();
+  let Some(f) = api.test_inject_input else {
+    return false;
+  };
+  let mut key = None;
+  let mut code = None;
+  let mut raw = ffi::laufey_test_input {
+    kind: 0,
+    modifiers: 0,
+    key: std::ptr::null(),
+    code: std::ptr::null(),
+    pressed: false,
+    repeat: false,
+    button: 0,
+    x: 0.0,
+    y: 0.0,
+    delta_x: 0.0,
+    delta_y: 0.0,
+    delta_mode: 0,
+  };
+  match event {
+    TestInput::Key {
+      key: k,
+      code: c,
+      pressed,
+      repeat,
+      modifiers,
+    } => {
+      raw.kind = LAUFEY_TEST_INPUT_KEY;
+      raw.modifiers = *modifiers;
+      raw.pressed = *pressed;
+      raw.repeat = *repeat;
+      key = CString::new(k.as_str()).ok();
+      code = CString::new(c.as_str()).ok();
+      raw.key = key.as_ref().map(|s| s.as_ptr()).unwrap_or(std::ptr::null());
+      raw.code = code
+        .as_ref()
+        .map(|s| s.as_ptr())
+        .unwrap_or(std::ptr::null());
+    }
+    TestInput::MouseMove { x, y, modifiers } => {
+      raw.kind = LAUFEY_TEST_INPUT_MOUSE_MOVE;
+      raw.modifiers = *modifiers;
+      raw.x = *x;
+      raw.y = *y;
+    }
+    TestInput::MouseButton {
+      button,
+      pressed,
+      x,
+      y,
+      modifiers,
+    } => {
+      raw.kind = LAUFEY_TEST_INPUT_MOUSE_BUTTON;
+      raw.modifiers = *modifiers;
+      raw.pressed = *pressed;
+      raw.button = *button;
+      raw.x = *x;
+      raw.y = *y;
+    }
+    TestInput::Wheel {
+      delta_x,
+      delta_y,
+      delta_mode,
+      x,
+      y,
+      modifiers,
+    } => {
+      raw.kind = LAUFEY_TEST_INPUT_WHEEL;
+      raw.modifiers = *modifiers;
+      raw.delta_x = *delta_x;
+      raw.delta_y = *delta_y;
+      raw.delta_mode = *delta_mode;
+      raw.x = *x;
+      raw.y = *y;
+    }
+    TestInput::CursorEnter { x, y, modifiers } => {
+      raw.kind = LAUFEY_TEST_INPUT_CURSOR_ENTER;
+      raw.modifiers = *modifiers;
+      raw.x = *x;
+      raw.y = *y;
+    }
+    TestInput::CursorLeave { x, y, modifiers } => {
+      raw.kind = LAUFEY_TEST_INPUT_CURSOR_LEAVE;
+      raw.modifiers = *modifiers;
+      raw.x = *x;
+      raw.y = *y;
+    }
+    TestInput::Modifiers { modifiers } => {
+      raw.kind = LAUFEY_TEST_INPUT_MODIFIERS;
+      raw.modifiers = *modifiers;
+    }
+  }
+  let _ = (&key, &code);
+  unsafe { f(api.backend_data, window_id, &raw) }
 }
 
 /// A menu item in an application menu template.

@@ -62,8 +62,11 @@ class WKWebViewBackend : public LaufeyBackend {
   void Quit() override;
   void SetWindowSize(uint32_t window_id, int width, int height) override;
   void GetWindowSize(uint32_t window_id, int* width, int* height) override;
+  void GetWindowOuterSize(uint32_t window_id, int* width, int* height) override;
+  double GetWindowScaleFactor(uint32_t window_id) override;
   void SetWindowPosition(uint32_t window_id, int x, int y) override;
   void GetWindowPosition(uint32_t window_id, int* x, int* y) override;
+  void GetWindowInnerPosition(uint32_t window_id, int* x, int* y) override;
   void SetResizable(uint32_t window_id, bool resizable) override;
   bool IsResizable(uint32_t window_id) override;
   void SetAlwaysOnTop(uint32_t window_id, bool always_on_top) override;
@@ -599,6 +602,58 @@ inline std::string NSEventKeyCodeToCode(unsigned short keyCode) {
   return laufey_common::NSEventKeyToCode(keyCode);
 }
 
+// FlagsChanged has no `characters`. Map the hardware key to the Web `key`.
+std::string ModifierKeyFromKeyCode(unsigned short keyCode) {
+  switch (keyCode) {
+    case 56:
+    case 60:
+      return "Shift";
+    case 59:
+    case 62:
+      return "Control";
+    case 58:
+    case 61:
+      return "Alt";
+    case 54:
+    case 55:
+      return "Meta";
+    default:
+      return "";
+  }
+}
+
+bool ModifierFlagIsDown(unsigned short keyCode, NSEventModifierFlags flags) {
+  switch (keyCode) {
+    case 56:
+    case 60:
+      return (flags & NSEventModifierFlagShift) != 0;
+    case 59:
+    case 62:
+      return (flags & NSEventModifierFlagControl) != 0;
+    case 58:
+    case 61:
+      return (flags & NSEventModifierFlagOption) != 0;
+    case 54:
+    case 55:
+      return (flags & NSEventModifierFlagCommand) != 0;
+    default:
+      return false;
+  }
+}
+
+// NSEvent.clickCount is 0 on some mouse-up deliveries. Keep the press count
+// so `click.detail` matches a browser (1 for a single click).
+int32_t ResolveClickCount(int state, int32_t click_count) {
+  static int32_t last_click_count = 1;
+  if (state == LAUFEY_MOUSE_PRESSED) {
+    if (click_count < 1)
+      click_count = 1;
+    last_click_count = click_count;
+    return click_count;
+  }
+  return click_count >= 1 ? click_count : last_click_count;
+}
+
 uint32_t NSModifierFlagsToLaufey(NSEventModifierFlags flags) {
   uint32_t modifiers = 0;
   if (flags & NSEventModifierFlagShift)
@@ -715,12 +770,37 @@ void WKWebViewBackend::InstallGlobalMonitors() {
 
   keyboard_monitor_ = [NSEvent
       addLocalMonitorForEventsMatchingMask:(NSEventMaskKeyDown |
-                                            NSEventMaskKeyUp)
+                                            NSEventMaskKeyUp |
+                                            NSEventMaskFlagsChanged)
                                    handler:^NSEvent*(NSEvent* event) {
                                      NSWindow* win = [event window];
                                      uint32_t wid = LaufeyIdForNSWindow(win);
                                      if (wid == 0)
                                        return event;
+
+                                     uint32_t modifiers =
+                                         NSModifierFlagsToLaufey(
+                                             [event modifierFlags]);
+                                     if ([event type] ==
+                                         NSEventTypeFlagsChanged) {
+                                       unsigned short kc = [event keyCode];
+                                       std::string key =
+                                           ModifierKeyFromKeyCode(kc);
+                                       if (key.empty())
+                                         return event;
+                                       int state =
+                                           ModifierFlagIsDown(
+                                               kc, [event modifierFlags])
+                                               ? LAUFEY_KEY_PRESSED
+                                               : LAUFEY_KEY_RELEASED;
+                                       std::string code =
+                                           NSEventKeyCodeToCode(kc);
+                                       RuntimeLoader::GetInstance()
+                                           ->DispatchKeyboardEvent(
+                                               wid, state, key.c_str(),
+                                               code.c_str(), modifiers, false);
+                                       return event;
+                                     }
 
                                      int state =
                                          ([event type] == NSEventTypeKeyDown)
@@ -730,9 +810,6 @@ void WKWebViewBackend::InstallGlobalMonitors() {
                                          NSEventKeyToString(event);
                                      std::string code =
                                          NSEventKeyCodeToCode([event keyCode]);
-                                     uint32_t modifiers =
-                                         NSModifierFlagsToLaufey(
-                                             [event modifierFlags]);
                                      bool repeat = [event isARepeat];
 
                                      RuntimeLoader::GetInstance()
@@ -773,8 +850,8 @@ void WKWebViewBackend::InstallGlobalMonitors() {
                                      uint32_t modifiers =
                                          NSModifierFlagsToLaufey(
                                              [event modifierFlags]);
-                                     int32_t click_count =
-                                         (int32_t)[event clickCount];
+                                     int32_t click_count = ResolveClickCount(
+                                         state, (int32_t)[event clickCount]);
 
                                      NSPoint loc = [event locationInWindow];
                                      double x = loc.x;
@@ -1405,6 +1482,18 @@ void WKWebViewBackend::SetWindowSize(uint32_t window_id, int width,
   });
 }
 
+double WKWebViewBackend::GetWindowScaleFactor(uint32_t window_id) {
+  __block double result = 1.0;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      result = (double)[state->window backingScaleFactor];
+    }
+  });
+  return result;
+}
+
 void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width,
                                      int* height) {
   __block int w = 0, h = 0;
@@ -1426,6 +1515,24 @@ void WKWebViewBackend::GetWindowSize(uint32_t window_id, int* width,
     *height = h;
 }
 
+void WKWebViewBackend::GetWindowOuterSize(uint32_t window_id, int* width,
+                                          int* height) {
+  __block int w = 0, h = 0;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      NSRect frame = [state->window frame];
+      w = static_cast<int>(frame.size.width);
+      h = static_cast<int>(frame.size.height);
+    }
+  });
+  if (width)
+    *width = w;
+  if (height)
+    *height = h;
+}
+
 void WKWebViewBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
   dispatch_async(dispatch_get_main_queue(), ^{
     @autoreleasepool {
@@ -1438,6 +1545,26 @@ void WKWebViewBackend::SetWindowPosition(uint32_t window_id, int x, int y) {
       }
     }
   });
+}
+
+void WKWebViewBackend::GetWindowInnerPosition(uint32_t window_id, int* x,
+                                              int* y) {
+  __block int px = 0, py = 0;
+  dispatch_sync(dispatch_get_main_queue(), ^{
+    std::lock_guard<std::mutex> lock(windows_mutex_);
+    auto* state = GetWindow(window_id);
+    if (state) {
+      NSRect content =
+          [state->window contentRectForFrameRect:[state->window frame]];
+      px = static_cast<int>(content.origin.x);
+      py = static_cast<int>(PrimaryScreenHeight() - content.origin.y -
+                            content.size.height);
+    }
+  });
+  if (x)
+    *x = px;
+  if (y)
+    *y = py;
 }
 
 void WKWebViewBackend::GetWindowPosition(uint32_t window_id, int* x, int* y) {
@@ -1692,8 +1819,8 @@ void WKWebViewBackend::UpdateForwardMonitors() {
                                       uint32_t modifiers =
                                           NSModifierFlagsToLaufey(
                                               [event modifierFlags]);
-                                      int32_t click_count =
-                                          (int32_t)[event clickCount];
+                                      int32_t click_count = ResolveClickCount(
+                                          state, (int32_t)[event clickCount]);
 
                                       NSPoint local = [win
                                           convertPointFromScreen:screen_point];

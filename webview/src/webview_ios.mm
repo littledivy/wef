@@ -62,6 +62,9 @@ class WKWebViewIOSBackend : public LaufeyBackend {
     if (h)
       *h = (int)b.size.height;
   }
+  double GetWindowScaleFactor(uint32_t) override {
+    return (double)UIScreen.mainScreen.scale;
+  }
   void SetWindowPosition(uint32_t, int, int) override {}
   void GetWindowPosition(uint32_t, int* x, int* y) override {
     if (x)
