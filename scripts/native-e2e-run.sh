@@ -52,9 +52,23 @@ if [ "$mode" = "--layer1" ]; then
   exec xvfb-run -a dbus-run-session -- "$driver" "$bin"
 fi
 
-# Layer 0: run the backend directly. On Linux, headless via Xvfb + a private
-# session bus (some tray impls need a session bus to even initialize).
+# Layer 0: capture output so an unexpected native termination cannot masquerade
+# as success merely because macOS reports an exit code of 0. On Linux, run
+# headless via Xvfb + a private session bus (some tray implementations need it).
 if is_linux; then
-  exec xvfb-run -a dbus-run-session -- "$bin"
+  set +e
+  output="$(xvfb-run -a dbus-run-session -- "$bin" 2>&1)"
+  status=$?
+  set -e
+else
+  set +e
+  output="$("$bin" 2>&1)"
+  status=$?
+  set -e
 fi
-exec "$bin"
+printf '%s\n' "$output"
+if ! grep -q '^\[e2e\] OVERALL ' <<<"$output"; then
+  echo "native e2e exited before reporting an overall result" >&2
+  exit 1
+fi
+exit "$status"
