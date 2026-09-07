@@ -532,6 +532,20 @@ fn e2e_main() {
       tokio::time::sleep(std::time::Duration::from_secs(8)).await;
     }
 
+    // A menu-bar-only macOS app uses the Accessory activation policy. Closing
+    // its last transient window must not terminate the process: it still owns
+    // the status item and needs to be able to show a window later. This check
+    // deliberately closes `win`, the final remaining window, then proves this
+    // runtime is still alive on the next turn of the async executor.
+    #[cfg(target_os = "macos")]
+    {
+      laufey::set_dock_visible(false);
+      tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+      win.close();
+      tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+      check("accessory app survives closing its last window", true);
+    }
+
     // ---- shutdown --------------------------------------------------------
     // Decide the result and terminate immediately with a deterministic exit
     // code. We deliberately skip close()/quit(): tearing the window/webview
