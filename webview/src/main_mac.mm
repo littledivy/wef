@@ -134,7 +134,10 @@ void EnsureEditMenu(NSMenu* menubar) {
 }
 
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)sender {
-  return YES;
+  // A menu-bar-only app uses the Accessory activation policy. Its windows can
+  // be transient (for example, a tray popover), so closing the last one must
+  // not terminate the process and remove its status item.
+  return [sender activationPolicy] != NSApplicationActivationPolicyAccessory;
 }
 
 - (BOOL)applicationShouldHandleReopen:(NSApplication*)sender
